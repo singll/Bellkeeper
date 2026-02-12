@@ -1,6 +1,7 @@
 /* @refresh reload */
 import { render } from 'solid-js/web'
 import { Router, Route } from '@solidjs/router'
+import { ToastProvider } from './components/Toast'
 import Layout from './components/Layout'
 import Dashboard from './pages/Dashboard'
 import Tags from './pages/Tags'
@@ -16,15 +17,17 @@ import './index.css'
 const root = document.getElementById('root')
 
 render(() => (
-  <Router root={Layout}>
-    <Route path="/" component={Dashboard} />
-    <Route path="/tags" component={Tags} />
-    <Route path="/datasources" component={DataSources} />
-    <Route path="/rss" component={RSSFeeds} />
-    <Route path="/datasets" component={Datasets} />
-    <Route path="/documents" component={Documents} />
-    <Route path="/webhooks" component={Webhooks} />
-    <Route path="/workflows" component={Workflows} />
-    <Route path="/settings" component={Settings} />
-  </Router>
+  <ToastProvider>
+    <Router root={Layout}>
+      <Route path="/" component={Dashboard} />
+      <Route path="/tags" component={Tags} />
+      <Route path="/datasources" component={DataSources} />
+      <Route path="/rss" component={RSSFeeds} />
+      <Route path="/datasets" component={Datasets} />
+      <Route path="/documents" component={Documents} />
+      <Route path="/webhooks" component={Webhooks} />
+      <Route path="/workflows" component={Workflows} />
+      <Route path="/settings" component={Settings} />
+    </Router>
+  </ToastProvider>
 ), root!)
