@@ -201,3 +201,62 @@ export const workflowsApi = {
       body: JSON.stringify(payload || {}),
     }),
 }
+
+// RagFlow API
+export interface UploadRequest {
+  content: string
+  filename: string
+  title?: string
+  url?: string
+  tags?: string[]
+  category?: string
+  dataset_id?: string
+  auto_create_tags?: boolean
+}
+
+export interface UploadResponse {
+  code: number
+  message: string
+  data: Record<string, unknown>
+}
+
+export interface RagFlowDocument {
+  id: string
+  name: string
+  status: string
+  created_at: string
+  chunk_count?: number
+}
+
+export const ragflowApi = {
+  // Upload document to specific dataset
+  upload: (data: UploadRequest) =>
+    request<{ data: UploadResponse }>('/ragflow/upload', {
+      method: 'POST',
+      body: JSON.stringify(data),
+    }),
+
+  // Upload with intelligent routing based on tags/category
+  uploadWithRouting: (data: UploadRequest) =>
+    request<{ data: UploadResponse; dataset_id: string }>('/ragflow/upload/with-routing', {
+      method: 'POST',
+      body: JSON.stringify(data),
+    }),
+
+  // Check if URL already exists
+  checkUrl: (url: string) =>
+    request<{ exists: boolean }>(`/ragflow/check-url?url=${encodeURIComponent(url)}`),
+
+  // List documents in a dataset
+  listDocuments: (datasetId: string, page = 1, limit = 20) =>
+    request<{ code: number; data: { docs: RagFlowDocument[]; total: number } }>(
+      `/ragflow/documents?dataset_id=${encodeURIComponent(datasetId)}&page=${page}&limit=${limit}`
+    ),
+
+  // Delete a document
+  deleteDocument: (documentId: string, datasetId: string) =>
+    request<{ message: string }>(
+      `/ragflow/documents/${encodeURIComponent(documentId)}?dataset_id=${encodeURIComponent(datasetId)}`,
+      { method: 'DELETE' }
+    ),
+}
