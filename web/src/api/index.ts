@@ -8,6 +8,8 @@ import type {
   Setting,
   PaginatedResponse,
   HealthStatus,
+  Workflow,
+  WorkflowExecution,
 } from '@/types'
 
 const API_BASE = '/api'
@@ -194,7 +196,26 @@ export const healthApi = {
 
 // Workflows API
 export const workflowsApi = {
-  status: () => request<{ data: { name: string; active: boolean }[] }>('/workflows/status'),
+  list: () => request<{ data: Workflow[] }>('/workflows/status'),
+
+  get: (id: string) => request<{ data: Workflow }>(`/workflows/${encodeURIComponent(id)}`),
+
+  activate: (id: string) =>
+    request<{ message: string }>(`/workflows/${encodeURIComponent(id)}/activate`, {
+      method: 'POST',
+    }),
+
+  deactivate: (id: string) =>
+    request<{ message: string }>(`/workflows/${encodeURIComponent(id)}/deactivate`, {
+      method: 'POST',
+    }),
+
+  executions: (workflowId?: string, limit = 20) => {
+    const params = new URLSearchParams({ limit: String(limit) })
+    if (workflowId) params.set('workflow_id', workflowId)
+    return request<{ data: WorkflowExecution[] }>(`/workflows/executions?${params}`)
+  },
+
   trigger: (name: string, payload?: Record<string, unknown>) =>
     request<{ data: unknown }>(`/workflows/trigger/${encodeURIComponent(name)}`, {
       method: 'POST',

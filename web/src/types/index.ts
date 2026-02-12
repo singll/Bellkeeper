@@ -108,3 +108,27 @@ export interface ServiceStatus {
   latency_ms?: number
   error?: string
 }
+
+export interface Workflow {
+  id: string
+  name: string
+  active: boolean
+  created_at?: string
+  updated_at?: string
+  tags?: WorkflowTag[]
+  meta?: Record<string, unknown>
+}
+
+export interface WorkflowTag {
+  id: string
+  name: string
+}
+
+export interface WorkflowExecution {
+  id: string
+  workflow_id: string
+  finished: boolean
+  status: string
+  started_at: string
+  stopped_at?: string
+}

@@ -150,6 +150,10 @@ func runServer(cmd *cobra.Command, args []string) {
 
 		// Workflows (n8n integration)
 		api.GET("/workflows/status", handlers.Workflow.Status)
+		api.GET("/workflows/:id", handlers.Workflow.Get)
+		api.POST("/workflows/:id/activate", handlers.Workflow.Activate)
+		api.POST("/workflows/:id/deactivate", handlers.Workflow.Deactivate)
+		api.GET("/workflows/executions", handlers.Workflow.Executions)
 		api.POST("/workflows/trigger/:name", handlers.Workflow.Trigger)
 	}
 

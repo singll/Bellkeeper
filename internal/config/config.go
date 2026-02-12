@@ -45,6 +45,8 @@ type RagFlowConfig struct {
 
 type N8NConfig struct {
 	WebhookBaseURL string `mapstructure:"webhook_base_url"`
+	APIBaseURL     string `mapstructure:"api_base_url"`
+	APIKey         string `mapstructure:"api_key"`
 }
 
 type LoggingConfig struct {
@@ -118,6 +120,8 @@ func setDefaults(v *viper.Viper) {
 
 	// N8N
 	v.SetDefault("n8n.webhook_base_url", "http://n8n:5678")
+	v.SetDefault("n8n.api_base_url", "http://n8n:5678/api/v1")
+	v.SetDefault("n8n.api_key", "")
 
 	// Logging
 	v.SetDefault("logging.level", "info")
