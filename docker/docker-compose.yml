@@ -1,0 +1,57 @@
+version: '3.8'
+
+services:
+  bellkeeper:
+    build:
+      context: ..
+      dockerfile: docker/Dockerfile
+    container_name: bellkeeper
+    restart: unless-stopped
+    ports:
+      - "8080:8080"
+    environment:
+      - BELLKEEPER_SERVER_MODE=release
+      - BELLKEEPER_DATABASE_HOST=postgres
+      - BELLKEEPER_DATABASE_PORT=5432
+      - BELLKEEPER_DATABASE_NAME=bellkeeper
+      - BELLKEEPER_DATABASE_USER=bellkeeper
+      - BELLKEEPER_DATABASE_PASSWORD=${DB_PASSWORD}
+      - BELLKEEPER_RAGFLOW_BASE_URL=http://ragflow:9380
+      - BELLKEEPER_RAGFLOW_API_KEY=${RAGFLOW_API_KEY}
+      - BELLKEEPER_N8N_WEBHOOK_BASE_URL=http://n8n:5678
+    depends_on:
+      postgres:
+        condition: service_healthy
+    networks:
+      - bellkeeper-network
+    healthcheck:
+      test: ["CMD", "wget", "--no-verbose", "--tries=1", "--spider", "http://localhost:8080/api/health"]
+      interval: 30s
+      timeout: 10s
+      retries: 3
+
+  postgres:
+    image: postgres:16-alpine
+    container_name: bellkeeper-postgres
+    restart: unless-stopped
+    environment:
+      - POSTGRES_DB=bellkeeper
+      - POSTGRES_USER=bellkeeper
+      - POSTGRES_PASSWORD=${DB_PASSWORD}
+    volumes:
+      - postgres_data:/var/lib/postgresql/data
+      - ../migrations:/docker-entrypoint-initdb.d:ro
+    networks:
+      - bellkeeper-network
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U bellkeeper"]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+
+networks:
+  bellkeeper-network:
+    driver: bridge
+
+volumes:
+  postgres_data:

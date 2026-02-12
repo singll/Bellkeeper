@@ -1,0 +1,31 @@
+server:
+  host: 0.0.0.0
+  port: 8080
+  mode: release  # debug, release
+
+database:
+  driver: postgres
+  host: localhost
+  port: 5432
+  name: bellkeeper
+  user: bellkeeper
+  password: ${DB_PASSWORD}
+  sslmode: disable
+
+ragflow:
+  base_url: http://ragflow:9380
+  api_key: ${RAGFLOW_API_KEY}
+  timeout: 30
+
+n8n:
+  webhook_base_url: http://n8n:5678
+
+logging:
+  level: info
+  format: json
+  output: stdout
+
+features:
+  auto_parse: true
+  url_dedup: true
+  ai_summary: false
