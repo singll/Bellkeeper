@@ -1,8 +1,11 @@
 import { Component, createSignal, createEffect, For, Show } from 'solid-js'
 import { datasetsApi, ragflowApi, type RagFlowDocument } from '@/api'
+import { useToast } from '@/components/Toast'
+import Modal from '@/components/Modal'
 import type { DatasetMapping } from '@/types'
 
 const Documents: Component = () => {
+  const toast = useToast()
   const [datasets, setDatasets] = createSignal<DatasetMapping[]>([])
   const [selectedDataset, setSelectedDataset] = createSignal<string>('')
   const [documents, setDocuments] = createSignal<RagFlowDocument[]>([])
@@ -11,7 +14,6 @@ const Documents: Component = () => {
   const [loading, setLoading] = createSignal(false)
   const [error, setError] = createSignal('')
 
-  // Upload modal state
   const [showUploadModal, setShowUploadModal] = createSignal(false)
   const [uploadForm, setUploadForm] = createSignal({
     content: '',
@@ -23,11 +25,8 @@ const Documents: Component = () => {
     useRouting: true,
   })
   const [uploading, setUploading] = createSignal(false)
-
-  // URL check state
   const [urlCheckResult, setUrlCheckResult] = createSignal<{ checked: boolean; exists: boolean } | null>(null)
 
-  // Load datasets on mount
   createEffect(async () => {
     try {
       const res = await datasetsApi.list(1, 100)
@@ -37,11 +36,10 @@ const Documents: Component = () => {
         setSelectedDataset(defaultDs.dataset_id)
       }
     } catch (err) {
-      setError('Failed to load datasets')
+      setError('加载知识库列表失败')
     }
   })
 
-  // Load documents when dataset changes
   createEffect(async () => {
     const dsId = selectedDataset()
     if (!dsId) return
@@ -64,21 +62,22 @@ const Documents: Component = () => {
         setTotal(0)
       }
     } catch (err) {
-      setError('Failed to load documents')
+      setError('加载文档列表失败')
       setDocuments([])
     } finally {
       setLoading(false)
     }
   }
 
-  const handleDelete = async (docId: string) => {
-    if (!confirm('Are you sure you want to delete this document?')) return
+  const handleDelete = async (docId: string, name: string) => {
+    if (!confirm(`确定要删除文档"${name}"吗？`)) return
 
     try {
       await ragflowApi.deleteDocument(docId, selectedDataset())
+      toast.success('文档删除成功')
       await loadDocuments()
     } catch (err) {
-      setError('Failed to delete document')
+      toast.error('删除失败: ' + (err as Error).message)
     }
   }
 
@@ -97,7 +96,7 @@ const Documents: Component = () => {
   const handleUpload = async () => {
     const form = uploadForm()
     if (!form.content || !form.filename) {
-      alert('Content and filename are required')
+      toast.error('请填写内容和文件名')
       return
     }
 
@@ -125,6 +124,7 @@ const Documents: Component = () => {
         })
       }
 
+      toast.success('文档上传成功')
       setShowUploadModal(false)
       setUploadForm({
         content: '',
@@ -138,278 +138,345 @@ const Documents: Component = () => {
       setUrlCheckResult(null)
       await loadDocuments()
     } catch (err) {
-      alert('Upload failed: ' + (err as Error).message)
+      toast.error('上传失败: ' + (err as Error).message)
     } finally {
       setUploading(false)
     }
   }
 
-  const getStatusColor = (status: string) => {
+  const getStatusBadge = (status: string) => {
     switch (status) {
       case 'done':
-        return 'text-green-400'
+        return 'badge-success'
       case 'parsing':
-        return 'text-yellow-400'
+        return 'badge-warning'
       case 'failed':
-        return 'text-red-400'
+        return 'badge-danger'
       default:
-        return 'text-dark-muted'
+        return 'badge-gray'
+    }
+  }
+
+  const getStatusText = (status: string) => {
+    switch (status) {
+      case 'done':
+        return '已完成'
+      case 'parsing':
+        return '解析中'
+      case 'failed':
+        return '失败'
+      default:
+        return status
     }
   }
 
   return (
-    <div>
-      <div class="flex justify-between items-center mb-6">
-        <h1 class="text-2xl font-bold">RagFlow Documents</h1>
-        <button
-          class="bg-primary-600 hover:bg-primary-700 text-white px-4 py-2 rounded-lg transition-colors"
-          onClick={() => setShowUploadModal(true)}
-        >
-          + Upload Document
+    <div class="animate-fade-in">
+      {/* Header */}
+      <div class="flex flex-col sm:flex-row sm:items-center justify-between gap-4 mb-6">
+        <div>
+          <h1 class="text-2xl font-bold text-white">文档管理</h1>
+          <p class="text-sm text-dark-400 mt-1">管理 RagFlow 知识库中的文档</p>
+        </div>
+        <button class="btn btn-primary" onClick={() => setShowUploadModal(true)}>
+          <svg class="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+            <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M4 16v1a3 3 0 003 3h10a3 3 0 003-3v-1m-4-8l-4-4m0 0L8 8m4-4v12" />
+          </svg>
+          上传文档
         </button>
       </div>
 
-      {/* Dataset selector */}
-      <div class="mb-6">
-        <label class="block text-sm text-dark-muted mb-2">Select Dataset</label>
-        <select
-          class="bg-dark-card border border-dark-border rounded-lg px-4 py-2 w-full max-w-md"
-          value={selectedDataset()}
-          onChange={(e) => {
-            setSelectedDataset(e.currentTarget.value)
-            setPage(1)
-          }}
-        >
-          <For each={datasets()}>
-            {(ds) => (
-              <option value={ds.dataset_id}>
-                {ds.display_name || ds.name} {ds.is_default ? '(default)' : ''}
-              </option>
-            )}
-          </For>
-        </select>
+      {/* Dataset Selector */}
+      <div class="card mb-6">
+        <div class="flex items-center gap-4">
+          <label class="text-sm font-medium text-dark-300">选择知识库</label>
+          <select
+            class="input max-w-md"
+            value={selectedDataset()}
+            onChange={(e) => {
+              setSelectedDataset(e.currentTarget.value)
+              setPage(1)
+            }}
+          >
+            <For each={datasets()}>
+              {(ds) => (
+                <option value={ds.dataset_id}>
+                  {ds.display_name || ds.name} {ds.is_default ? '(默认)' : ''}
+                </option>
+              )}
+            </For>
+          </select>
+          <button class="btn btn-ghost btn-sm" onClick={loadDocuments}>
+            <svg class="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+              <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M4 4v5h.582m15.356 2A8.001 8.001 0 004.582 9m0 0H9m11 11v-5h-.581m0 0a8.003 8.003 0 01-15.357-2m15.357 2H15" />
+            </svg>
+            刷新
+          </button>
+        </div>
       </div>
 
-      {/* Error message */}
+      {/* Error */}
       <Show when={error()}>
-        <div class="bg-red-900/20 border border-red-500 text-red-400 px-4 py-3 rounded-lg mb-6">
-          {error()}
+        <div class="card mb-6 bg-red-500/10 border-red-500/30">
+          <div class="flex items-center gap-2 text-red-400">
+            <svg class="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+              <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M12 8v4m0 4h.01M21 12a9 9 0 11-18 0 9 9 0 0118 0z" />
+            </svg>
+            {error()}
+          </div>
         </div>
       </Show>
 
-      {/* Documents table */}
-      <div class="bg-dark-card rounded-lg border border-dark-border overflow-hidden">
-        <table class="w-full">
-          <thead class="bg-dark-bg">
-            <tr>
-              <th class="text-left px-6 py-3 text-sm font-medium text-dark-muted">Name</th>
-              <th class="text-left px-6 py-3 text-sm font-medium text-dark-muted">Status</th>
-              <th class="text-left px-6 py-3 text-sm font-medium text-dark-muted">Chunks</th>
-              <th class="text-left px-6 py-3 text-sm font-medium text-dark-muted">Created</th>
-              <th class="text-right px-6 py-3 text-sm font-medium text-dark-muted">Actions</th>
-            </tr>
-          </thead>
-          <tbody class="divide-y divide-dark-border">
-            <Show when={loading()}>
+      {/* Table */}
+      <div class="card overflow-hidden p-0">
+        <div class="overflow-x-auto">
+          <table class="table">
+            <thead>
               <tr>
-                <td colspan="5" class="px-6 py-8 text-center text-dark-muted">
-                  Loading...
-                </td>
+                <th>文件名</th>
+                <th>状态</th>
+                <th>分块数</th>
+                <th>创建时间</th>
+                <th class="text-right">操作</th>
               </tr>
-            </Show>
-            <Show when={!loading() && documents().length === 0}>
-              <tr>
-                <td colspan="5" class="px-6 py-8 text-center text-dark-muted">
-                  No documents found
-                </td>
-              </tr>
-            </Show>
-            <For each={documents()}>
-              {(doc) => (
-                <tr class="hover:bg-dark-border/30">
-                  <td class="px-6 py-4">
-                    <span class="font-medium">{doc.name}</span>
-                  </td>
-                  <td class="px-6 py-4">
-                    <span class={getStatusColor(doc.status)}>{doc.status}</span>
-                  </td>
-                  <td class="px-6 py-4 text-dark-muted">
-                    {doc.chunk_count ?? '-'}
-                  </td>
-                  <td class="px-6 py-4 text-dark-muted">
-                    {new Date(doc.created_at).toLocaleDateString()}
-                  </td>
-                  <td class="px-6 py-4 text-right">
-                    <button
-                      class="text-red-400 hover:text-red-300"
-                      onClick={() => handleDelete(doc.id)}
-                    >
-                      Delete
-                    </button>
-                  </td>
-                </tr>
-              )}
-            </For>
-          </tbody>
-        </table>
+            </thead>
+            <tbody>
+              <Show
+                when={!loading()}
+                fallback={
+                  <tr>
+                    <td colspan="5" class="text-center py-12">
+                      <div class="loading-spinner mx-auto" />
+                      <p class="mt-3 text-dark-400">加载中...</p>
+                    </td>
+                  </tr>
+                }
+              >
+                <Show
+                  when={documents().length > 0}
+                  fallback={
+                    <tr>
+                      <td colspan="5">
+                        <div class="empty-state">
+                          <svg class="empty-state-icon" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                            <path stroke-linecap="round" stroke-linejoin="round" stroke-width="1.5" d="M9 12h6m-6 4h6m2 5H7a2 2 0 01-2-2V5a2 2 0 012-2h5.586a1 1 0 01.707.293l5.414 5.414a1 1 0 01.293.707V19a2 2 0 01-2 2z" />
+                          </svg>
+                          <p class="empty-state-title">暂无文档</p>
+                          <p class="empty-state-description">点击"上传文档"添加第一个文档</p>
+                        </div>
+                      </td>
+                    </tr>
+                  }
+                >
+                  <For each={documents()}>
+                    {(doc) => (
+                      <tr class="group">
+                        <td>
+                          <div class="flex items-center gap-2">
+                            <svg class="w-5 h-5 text-dark-500" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                              <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M9 12h6m-6 4h6m2 5H7a2 2 0 01-2-2V5a2 2 0 012-2h5.586a1 1 0 01.707.293l5.414 5.414a1 1 0 01.293.707V19a2 2 0 01-2 2z" />
+                            </svg>
+                            <span class="font-medium text-white">{doc.name}</span>
+                          </div>
+                        </td>
+                        <td>
+                          <span class={`badge ${getStatusBadge(doc.status)}`}>
+                            {getStatusText(doc.status)}
+                          </span>
+                        </td>
+                        <td>
+                          <span class="text-dark-400">{doc.chunk_count ?? '-'}</span>
+                        </td>
+                        <td>
+                          <span class="text-dark-400 text-sm">
+                            {new Date(doc.created_at).toLocaleDateString('zh-CN')}
+                          </span>
+                        </td>
+                        <td class="text-right">
+                          <div class="flex items-center justify-end gap-1 opacity-0 group-hover:opacity-100 transition-opacity">
+                            <button
+                              class="btn btn-ghost btn-sm text-red-400 hover:text-red-300 hover:bg-red-500/10"
+                              onClick={() => handleDelete(doc.id, doc.name)}
+                            >
+                              <svg class="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                                <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M19 7l-.867 12.142A2 2 0 0116.138 21H7.862a2 2 0 01-1.995-1.858L5 7m5 4v6m4-6v6m1-10V4a1 1 0 00-1-1h-4a1 1 0 00-1 1v3M4 7h16" />
+                              </svg>
+                            </button>
+                          </div>
+                        </td>
+                      </tr>
+                    )}
+                  </For>
+                </Show>
+              </Show>
+            </tbody>
+          </table>
+        </div>
       </div>
 
       {/* Pagination */}
       <Show when={total() > 20}>
-        <div class="flex justify-center gap-2 mt-6">
-          <button
-            class="px-3 py-1 rounded bg-dark-card border border-dark-border disabled:opacity-50"
-            disabled={page() === 1}
-            onClick={() => setPage(p => p - 1)}
-          >
-            Previous
-          </button>
-          <span class="px-3 py-1 text-dark-muted">
-            Page {page()} of {Math.ceil(total() / 20)}
-          </span>
-          <button
-            class="px-3 py-1 rounded bg-dark-card border border-dark-border disabled:opacity-50"
-            disabled={page() >= Math.ceil(total() / 20)}
-            onClick={() => setPage(p => p + 1)}
-          >
-            Next
-          </button>
+        <div class="flex items-center justify-between mt-4">
+          <div class="text-sm text-dark-400">
+            共 <span class="text-dark-200 font-medium">{total()}</span> 条记录
+          </div>
+          <div class="flex gap-2">
+            <button
+              class="btn btn-secondary btn-sm"
+              disabled={page() === 1}
+              onClick={() => setPage((p) => p - 1)}
+            >
+              上一页
+            </button>
+            <span class="btn btn-ghost btn-sm cursor-default">
+              {page()} / {Math.ceil(total() / 20)}
+            </span>
+            <button
+              class="btn btn-secondary btn-sm"
+              disabled={page() >= Math.ceil(total() / 20)}
+              onClick={() => setPage((p) => p + 1)}
+            >
+              下一页
+            </button>
+          </div>
         </div>
       </Show>
 
       {/* Upload Modal */}
-      <Show when={showUploadModal()}>
-        <div class="fixed inset-0 bg-black/50 flex items-center justify-center z-50">
-          <div class="bg-dark-card rounded-lg border border-dark-border w-full max-w-2xl max-h-[90vh] overflow-y-auto">
-            <div class="px-6 py-4 border-b border-dark-border flex justify-between items-center">
-              <h2 class="text-lg font-semibold">Upload Document</h2>
-              <button
-                class="text-dark-muted hover:text-dark-text"
-                onClick={() => setShowUploadModal(false)}
-              >
-                X
-              </button>
-            </div>
-            <div class="px-6 py-4 space-y-4">
-              {/* Routing option */}
-              <div class="flex items-center gap-2">
-                <input
-                  type="checkbox"
-                  id="useRouting"
-                  checked={uploadForm().useRouting}
-                  onChange={(e) => setUploadForm(f => ({ ...f, useRouting: e.currentTarget.checked }))}
-                />
-                <label for="useRouting" class="text-sm">
-                  Use intelligent routing (auto-select dataset based on tags/category)
-                </label>
-              </div>
-
-              {/* Filename */}
-              <div>
-                <label class="block text-sm text-dark-muted mb-1">Filename *</label>
-                <input
-                  type="text"
-                  class="w-full bg-dark-bg border border-dark-border rounded-lg px-4 py-2"
-                  placeholder="document.md"
-                  value={uploadForm().filename}
-                  onInput={(e) => setUploadForm(f => ({ ...f, filename: e.currentTarget.value }))}
-                />
-              </div>
-
-              {/* Title */}
-              <div>
-                <label class="block text-sm text-dark-muted mb-1">Title</label>
-                <input
-                  type="text"
-                  class="w-full bg-dark-bg border border-dark-border rounded-lg px-4 py-2"
-                  placeholder="Document title"
-                  value={uploadForm().title}
-                  onInput={(e) => setUploadForm(f => ({ ...f, title: e.currentTarget.value }))}
-                />
-              </div>
-
-              {/* URL */}
-              <div>
-                <label class="block text-sm text-dark-muted mb-1">Source URL</label>
-                <div class="flex gap-2">
-                  <input
-                    type="text"
-                    class="flex-1 bg-dark-bg border border-dark-border rounded-lg px-4 py-2"
-                    placeholder="https://example.com/article"
-                    value={uploadForm().url}
-                    onInput={(e) => {
-                      setUploadForm(f => ({ ...f, url: e.currentTarget.value }))
-                      setUrlCheckResult(null)
-                    }}
-                  />
-                  <button
-                    class="px-4 py-2 bg-dark-border hover:bg-dark-muted/30 rounded-lg"
-                    onClick={handleCheckUrl}
-                  >
-                    Check
-                  </button>
-                </div>
-                <Show when={urlCheckResult()}>
-                  <p class={urlCheckResult()!.exists ? 'text-yellow-400 text-sm mt-1' : 'text-green-400 text-sm mt-1'}>
-                    {urlCheckResult()!.exists ? 'URL already exists in database' : 'URL is new'}
-                  </p>
-                </Show>
-              </div>
-
-              {/* Tags (for routing) */}
-              <Show when={uploadForm().useRouting}>
-                <div>
-                  <label class="block text-sm text-dark-muted mb-1">Tags (comma-separated)</label>
-                  <input
-                    type="text"
-                    class="w-full bg-dark-bg border border-dark-border rounded-lg px-4 py-2"
-                    placeholder="security, web, vulnerability"
-                    value={uploadForm().tags}
-                    onInput={(e) => setUploadForm(f => ({ ...f, tags: e.currentTarget.value }))}
-                  />
-                </div>
-
-                <div>
-                  <label class="block text-sm text-dark-muted mb-1">Category (fallback for routing)</label>
-                  <input
-                    type="text"
-                    class="w-full bg-dark-bg border border-dark-border rounded-lg px-4 py-2"
-                    placeholder="security"
-                    value={uploadForm().category}
-                    onInput={(e) => setUploadForm(f => ({ ...f, category: e.currentTarget.value }))}
-                  />
-                </div>
-              </Show>
-
-              {/* Content */}
-              <div>
-                <label class="block text-sm text-dark-muted mb-1">Content *</label>
-                <textarea
-                  class="w-full bg-dark-bg border border-dark-border rounded-lg px-4 py-2 h-48 font-mono text-sm"
-                  placeholder="Document content..."
-                  value={uploadForm().content}
-                  onInput={(e) => setUploadForm(f => ({ ...f, content: e.currentTarget.value }))}
-                />
-              </div>
-            </div>
-            <div class="px-6 py-4 border-t border-dark-border flex justify-end gap-3">
-              <button
-                class="px-4 py-2 border border-dark-border rounded-lg hover:bg-dark-border"
-                onClick={() => setShowUploadModal(false)}
-              >
-                Cancel
-              </button>
-              <button
-                class="px-4 py-2 bg-primary-600 hover:bg-primary-700 text-white rounded-lg disabled:opacity-50"
-                disabled={uploading()}
-                onClick={handleUpload}
-              >
-                {uploading() ? 'Uploading...' : 'Upload'}
-              </button>
+      <Modal
+        open={showUploadModal()}
+        onClose={() => setShowUploadModal(false)}
+        title="上传文档"
+        size="xl"
+        footer={
+          <>
+            <button type="button" class="btn btn-secondary" onClick={() => setShowUploadModal(false)}>
+              取消
+            </button>
+            <button
+              type="button"
+              class="btn btn-primary"
+              disabled={uploading()}
+              onClick={handleUpload}
+            >
+              {uploading() ? (
+                <>
+                  <div class="loading-spinner" />
+                  上传中...
+                </>
+              ) : '上传'}
+            </button>
+          </>
+        }
+      >
+        <div class="space-y-4">
+          {/* Routing Toggle */}
+          <div class="flex items-center gap-3 p-3 bg-dark-800/50 rounded-xl border border-dark-700/50">
+            <label class="relative inline-flex items-center cursor-pointer">
+              <input
+                type="checkbox"
+                class="sr-only peer"
+                checked={uploadForm().useRouting}
+                onChange={(e) => setUploadForm(f => ({ ...f, useRouting: e.currentTarget.checked }))}
+              />
+              <div class="w-11 h-6 bg-dark-700 peer-focus:outline-none peer-focus:ring-2 peer-focus:ring-primary-500 rounded-full peer peer-checked:after:translate-x-full rtl:peer-checked:after:-translate-x-full peer-checked:after:border-white after:content-[''] after:absolute after:top-[2px] after:start-[2px] after:bg-white after:border-gray-300 after:border after:rounded-full after:h-5 after:w-5 after:transition-all peer-checked:bg-primary-600"></div>
+            </label>
+            <div>
+              <p class="text-sm font-medium text-dark-200">智能路由</p>
+              <p class="text-xs text-dark-500">根据标签/分类自动选择知识库</p>
             </div>
           </div>
+
+          <div class="grid grid-cols-2 gap-4">
+            <div>
+              <label class="label">文件名 *</label>
+              <input
+                type="text"
+                class="input"
+                placeholder="document.md"
+                value={uploadForm().filename}
+                onInput={(e) => setUploadForm(f => ({ ...f, filename: e.currentTarget.value }))}
+              />
+            </div>
+            <div>
+              <label class="label">标题</label>
+              <input
+                type="text"
+                class="input"
+                placeholder="文档标题"
+                value={uploadForm().title}
+                onInput={(e) => setUploadForm(f => ({ ...f, title: e.currentTarget.value }))}
+              />
+            </div>
+          </div>
+
+          <div>
+            <label class="label">来源 URL</label>
+            <div class="flex gap-2">
+              <input
+                type="url"
+                class="input flex-1 font-mono"
+                placeholder="https://example.com/article"
+                value={uploadForm().url}
+                onInput={(e) => {
+                  setUploadForm(f => ({ ...f, url: e.currentTarget.value }))
+                  setUrlCheckResult(null)
+                }}
+              />
+              <button
+                type="button"
+                class="btn btn-secondary"
+                onClick={handleCheckUrl}
+              >
+                检查
+              </button>
+            </div>
+            <Show when={urlCheckResult()}>
+              <p class={`text-sm mt-1 ${urlCheckResult()!.exists ? 'text-amber-400' : 'text-emerald-400'}`}>
+                {urlCheckResult()!.exists ? 'URL 已存在于数据库中' : 'URL 可用'}
+              </p>
+            </Show>
+          </div>
+
+          <Show when={uploadForm().useRouting}>
+            <div class="grid grid-cols-2 gap-4">
+              <div>
+                <label class="label">标签</label>
+                <input
+                  type="text"
+                  class="input"
+                  placeholder="security, web, vulnerability"
+                  value={uploadForm().tags}
+                  onInput={(e) => setUploadForm(f => ({ ...f, tags: e.currentTarget.value }))}
+                />
+                <p class="text-xs text-dark-500 mt-1">逗号分隔</p>
+              </div>
+              <div>
+                <label class="label">分类</label>
+                <input
+                  type="text"
+                  class="input"
+                  placeholder="security"
+                  value={uploadForm().category}
+                  onInput={(e) => setUploadForm(f => ({ ...f, category: e.currentTarget.value }))}
+                />
+                <p class="text-xs text-dark-500 mt-1">用于路由匹配</p>
+              </div>
+            </div>
+          </Show>
+
+          <div>
+            <label class="label">内容 *</label>
+            <textarea
+              class="input font-mono text-sm resize-none"
+              rows="10"
+              placeholder="文档内容..."
+              value={uploadForm().content}
+              onInput={(e) => setUploadForm(f => ({ ...f, content: e.currentTarget.value }))}
+            />
+          </div>
         </div>
-      </Show>
+      </Modal>
     </div>
   )
 }
