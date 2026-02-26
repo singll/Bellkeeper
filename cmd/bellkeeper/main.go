@@ -71,6 +71,11 @@ func runServer(cmd *cobra.Command, args []string) {
 		log.Fatalf("Failed to connect to database: %v", err)
 	}
 
+	// Run auto-migration and seed defaults
+	if err := model.AutoMigrate(db); err != nil {
+		log.Fatalf("Failed to run migrations: %v", err)
+	}
+
 	// Initialize repositories
 	repos := repository.NewRepositories(db)
 
