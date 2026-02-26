@@ -1786,7 +1786,50 @@ ssh root@192.168.7.1
 - [x] P1 重要问题修复 (设置种子化、Webhook Headers、上传验证、错误提示)
 - [x] 部署验证通过
 
-### 11.3 后续优化方向
+### 11.3 Phase 6: 功能完整性迁移
+
+> **来源**: 与旧 knowledge-management 项目逐一对比，发现以下功能未迁移
+>
+> **优先级**: P0 = n8n 工作流依赖, P1 = 核心文档管理, P2 = 增强功能
+
+#### Batch A: 标签高级端点 (P0 — 工作流依赖)
+
+- [x] `GET /api/tags/all` — 不分页获取全部标签（下拉选择、工作流用）
+- [x] `POST /api/tags/batch` — 批量获取/创建标签（auto_create 支持）
+- [x] `POST /api/tags/match` — 关键词智能匹配标签
+- [x] `POST /api/tags/by-names` — 按名称列表查询标签
+
+#### Batch B: RagFlow 高级操作 (P1 — 核心文档管理)
+
+- [x] RagFlow Dataset CRUD — 创建/更新/删除 RagFlow 知识库本身
+- [x] 文档解析控制 — 启动解析 / 停止解析 / 查询解析状态
+- [x] 批量上传 — 多文档一次上传
+- [x] 批量删除 — 多文档一次删除 + 清理 ArticleTag
+- [x] 文档转移 — 在 Dataset 间移动文档（下载 → 重新上传）
+- [x] 文档元数据更新 — 上传后修改 source_url/tags/category 等
+- [x] Chunks 管理 — 查看/删除文档分块
+
+#### Batch C: 知识库映射高级端点 (P0 — 工作流依赖)
+
+- [x] `GET /api/datasets/all` — 不分页获取所有映射（dict 格式，工作流用）
+- [x] `GET /api/datasets/by-name/:name` — 按名称查询映射
+- [x] `POST /api/datasets/by-tag` — 独立的标签路由端点
+- [x] Article-Tag 管理 API — 添加/查询/按标签查文档
+
+#### Batch D: Webhook 模板变量系统 (P1)
+
+- [x] `{{variable}}` 模板变量替换引擎
+- [x] 内置变量: timestamp, date, webhook_name, article_url
+- [x] 触发时自定义变量传入
+- [x] Webhook 历史按 status 筛选
+
+#### Batch E: 前端功能补齐 (P2)
+
+- [ ] Datasets 页面: 显示 RagFlow 原始知识库列表（Tab 切换）
+- [ ] Documents 页面: 批量操作、解析控制、文档转移
+- [ ] Webhooks 页面: 变量编辑器、触发 payload 面板
+
+### 11.4 后续优化方向
 
 以下为非阻断性的持续优化项目，可在日常迭代中逐步完成：
 
@@ -1942,6 +1985,21 @@ Batch 3: 前端功能修复         ✅ 完成
 | `/api/workflows/executions` | GET | ✅ 正常 | 需配置 n8n API Key |
 | `/api/ragflow/documents` | GET | ✅ 正常 | 连接 RagFlow 正常 |
 | `/api/ragflow/check-url` | GET | ✅ 正常 | URL 检查正常 |
+| `/api/tags/all` | GET | ✅ 新增 | 不分页获取全部标签 |
+| `/api/tags/batch` | POST | ✅ 新增 | 批量获取/创建标签 |
+| `/api/tags/match` | POST | ✅ 新增 | 关键词智能匹配标签 |
+| `/api/tags/by-names` | POST | ✅ 新增 | 按名称列表查询标签 |
+| `/api/datasets/all` | GET | ✅ 新增 | 不分页获取所有映射 |
+| `/api/datasets/by-name/:name` | GET | ✅ 新增 | 按名称查询映射 |
+| `/api/datasets/by-tag` | POST | ✅ 新增 | 标签路由推荐端点 |
+| `/api/datasets/article-tags` | POST/GET | ✅ 新增 | Article-Tag 管理 |
+| `/api/ragflow/datasets` | CRUD | ✅ 新增 | RagFlow 知识库 CRUD |
+| `/api/ragflow/documents/parse` | POST | ✅ 新增 | 文档解析控制 |
+| `/api/ragflow/upload/batch` | POST | ✅ 新增 | 批量上传 |
+| `/api/ragflow/documents/batch-delete` | POST | ✅ 新增 | 批量删除 |
+| `/api/ragflow/documents/transfer` | POST | ✅ 新增 | 文档转移 |
+| `/api/ragflow/documents/metadata` | PUT | ✅ 新增 | 文档元数据更新 |
+| `/api/ragflow/chunks` | GET/DELETE | ✅ 新增 | Chunks 管理 |
 | 通过 Caddy 认证访问 | ALL | ✅ 正常 | Remote-User Header 已修复 |
 
 ---

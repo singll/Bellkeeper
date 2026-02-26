@@ -110,6 +110,11 @@ func runServer(cmd *cobra.Command, args []string) {
 		api.GET("/tags/:id", handlers.Tag.Get)
 		api.PUT("/tags/:id", handlers.Tag.Update)
 		api.DELETE("/tags/:id", handlers.Tag.Delete)
+		// Tags - 高级端点 (Batch A)
+		api.GET("/tags/all", handlers.Tag.GetAll)
+		api.POST("/tags/batch", handlers.Tag.BatchGetOrCreate)
+		api.POST("/tags/match", handlers.Tag.Match)
+		api.POST("/tags/by-names", handlers.Tag.GetByNames)
 
 		// Data Sources
 		api.GET("/datasources", handlers.DataSource.List)
@@ -140,6 +145,13 @@ func runServer(cmd *cobra.Command, args []string) {
 		api.GET("/datasets/:id", handlers.Dataset.Get)
 		api.PUT("/datasets/:id", handlers.Dataset.Update)
 		api.DELETE("/datasets/:id", handlers.Dataset.Delete)
+		// Dataset Mappings - 高级端点 (Batch C)
+		api.GET("/datasets/all", handlers.Dataset.GetAll)
+		api.GET("/datasets/by-name/:name", handlers.Dataset.GetByName)
+		api.POST("/datasets/by-tag", handlers.Dataset.RecommendByTag)
+		api.POST("/datasets/article-tags", handlers.Dataset.AddArticleTags)
+		api.GET("/datasets/article-tags/:document_id", handlers.Dataset.GetArticleTags)
+		api.GET("/datasets/articles-by-tag/:tag_id", handlers.Dataset.GetArticlesByTag)
 
 		// RagFlow
 		api.POST("/ragflow/upload", handlers.RagFlow.Upload)
@@ -147,6 +159,21 @@ func runServer(cmd *cobra.Command, args []string) {
 		api.GET("/ragflow/check-url", handlers.RagFlow.CheckURL)
 		api.GET("/ragflow/documents", handlers.RagFlow.ListDocuments)
 		api.DELETE("/ragflow/documents/:id", handlers.RagFlow.DeleteDocument)
+		// RagFlow - 高级操作 (Batch B)
+		api.GET("/ragflow/datasets", handlers.RagFlow.ListDatasets)
+		api.GET("/ragflow/datasets/:dataset_id", handlers.RagFlow.GetDataset)
+		api.POST("/ragflow/datasets", handlers.RagFlow.CreateDataset)
+		api.PUT("/ragflow/datasets/:dataset_id", handlers.RagFlow.UpdateDataset)
+		api.DELETE("/ragflow/datasets/:dataset_id", handlers.RagFlow.DeleteDataset)
+		api.POST("/ragflow/documents/parse", handlers.RagFlow.RunParsing)
+		api.POST("/ragflow/documents/parse/stop", handlers.RagFlow.StopParsing)
+		api.GET("/ragflow/documents/parse/status", handlers.RagFlow.GetParsingStatus)
+		api.POST("/ragflow/upload/batch", handlers.RagFlow.BatchUpload)
+		api.POST("/ragflow/documents/batch-delete", handlers.RagFlow.BatchDeleteDocuments)
+		api.POST("/ragflow/documents/transfer", handlers.RagFlow.TransferDocument)
+		api.PUT("/ragflow/documents/metadata", handlers.RagFlow.UpdateDocumentMetadata)
+		api.GET("/ragflow/chunks", handlers.RagFlow.ListChunks)
+		api.DELETE("/ragflow/chunks", handlers.RagFlow.DeleteChunks)
 
 		// Settings
 		api.GET("/settings", handlers.Setting.List)

@@ -66,3 +66,11 @@ func (r *WebhookRepository) GetHistory(webhookID uint, limit int) ([]model.Webho
 	}
 	return history, nil
 }
+
+func (r *WebhookRepository) GetHistoryByStatus(webhookID uint, status string, limit int) ([]model.WebhookHistory, error) {
+	var history []model.WebhookHistory
+	if err := r.db.Where("webhook_id = ? AND status = ?", webhookID, status).Order("created_at DESC").Limit(limit).Find(&history).Error; err != nil {
+		return nil, err
+	}
+	return history, nil
+}

@@ -103,3 +103,42 @@ func (r *DatasetMappingRepository) ArticleURLExists(url string) (bool, error) {
 	}
 	return count > 0, nil
 }
+
+// --- Batch C: 高级端点 ---
+
+func (r *DatasetMappingRepository) GetAll() ([]model.DatasetMapping, error) {
+	var mappings []model.DatasetMapping
+	if err := r.db.Preload("Tags").Where("is_active = ?", true).Order("name ASC").Find(&mappings).Error; err != nil {
+		return nil, err
+	}
+	return mappings, nil
+}
+
+func (r *DatasetMappingRepository) GetArticleTagsByDocumentID(documentID string) ([]model.ArticleTag, error) {
+	var ats []model.ArticleTag
+	if err := r.db.Preload("Tag").Where("document_id = ?", documentID).Find(&ats).Error; err != nil {
+		return nil, err
+	}
+	return ats, nil
+}
+
+func (r *DatasetMappingRepository) GetArticlesByTagID(tagID uint, page, perPage int) ([]model.ArticleTag, int64, error) {
+	var ats []model.ArticleTag
+	var total int64
+
+	query := r.db.Model(&model.ArticleTag{}).Where("tag_id = ?", tagID)
+	if err := query.Count(&total).Error; err != nil {
+		return nil, 0, err
+	}
+
+	offset := (page - 1) * perPage
+	if err := query.Preload("Tag").Offset(offset).Limit(perPage).Order("created_at DESC").Find(&ats).Error; err != nil {
+		return nil, 0, err
+	}
+
+	return ats, total, nil
+}
+
+func (r *DatasetMappingRepository) DeleteArticleTagsByDocumentIDs(documentIDs []string) error {
+	return r.db.Where("document_id IN ?", documentIDs).Delete(&model.ArticleTag{}).Error
+}

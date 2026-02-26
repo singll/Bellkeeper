@@ -6,6 +6,7 @@ import (
 	"fmt"
 	"io"
 	"net/http"
+	"strings"
 	"time"
 
 	"github.com/singll/bellkeeper/internal/config"
@@ -215,4 +216,248 @@ func (s *RagFlowService) DeleteDocument(datasetID, documentID string) error {
 	}
 
 	return nil
+}
+
+// --- Batch B: RagFlow 高级操作 ---
+
+// ListDatasets lists all RagFlow datasets (knowledge bases)
+func (s *RagFlowService) ListDatasets(page, limit int) (map[string]interface{}, error) {
+	url := fmt.Sprintf("%s/api/v1/datasets?page=%d&limit=%d", s.cfg.BaseURL, page, limit)
+	return s.doGet(url)
+}
+
+// GetDataset gets a single dataset's details
+func (s *RagFlowService) GetDataset(datasetID string) (map[string]interface{}, error) {
+	url := fmt.Sprintf("%s/api/v1/datasets/%s", s.cfg.BaseURL, datasetID)
+	return s.doGet(url)
+}
+
+// CreateDataset creates a new RagFlow dataset
+func (s *RagFlowService) CreateDataset(name string, params map[string]interface{}) (map[string]interface{}, error) {
+	url := fmt.Sprintf("%s/api/v1/datasets", s.cfg.BaseURL)
+	if params == nil {
+		params = make(map[string]interface{})
+	}
+	params["name"] = name
+	return s.doPost(url, params)
+}
+
+// UpdateDataset updates a RagFlow dataset
+func (s *RagFlowService) UpdateDataset(datasetID string, params map[string]interface{}) (map[string]interface{}, error) {
+	url := fmt.Sprintf("%s/api/v1/datasets/%s", s.cfg.BaseURL, datasetID)
+	return s.doPut(url, params)
+}
+
+// DeleteDataset deletes a RagFlow dataset
+func (s *RagFlowService) DeleteDataset(datasetID string) error {
+	url := fmt.Sprintf("%s/api/v1/datasets/%s", s.cfg.BaseURL, datasetID)
+	return s.doDelete(url)
+}
+
+// RunParsing triggers document parsing
+func (s *RagFlowService) RunParsing(datasetID string, documentIDs []string) (map[string]interface{}, error) {
+	url := fmt.Sprintf("%s/api/v1/datasets/%s/documents/parse", s.cfg.BaseURL, datasetID)
+	payload := map[string]interface{}{"document_ids": documentIDs}
+	return s.doPost(url, payload)
+}
+
+// StopParsing stops document parsing
+func (s *RagFlowService) StopParsing(datasetID string, documentIDs []string) (map[string]interface{}, error) {
+	url := fmt.Sprintf("%s/api/v1/datasets/%s/documents/parse", s.cfg.BaseURL, datasetID)
+	payload := map[string]interface{}{"document_ids": documentIDs}
+	return s.doRequestJSON("DELETE", url, payload)
+}
+
+// GetParsingStatus gets document parsing status
+func (s *RagFlowService) GetParsingStatus(datasetID, documentID string) (map[string]interface{}, error) {
+	url := fmt.Sprintf("%s/api/v1/datasets/%s/documents?id=%s", s.cfg.BaseURL, datasetID, documentID)
+	return s.doGet(url)
+}
+
+// BatchUpload uploads multiple documents to a dataset
+func (s *RagFlowService) BatchUpload(datasetID string, documents []UploadRequest) ([]map[string]interface{}, []string) {
+	var results []map[string]interface{}
+	var errors []string
+
+	for _, doc := range documents {
+		resp, err := s.uploadToRagFlow(datasetID, doc.Filename, doc.Content)
+		if err != nil {
+			errors = append(errors, fmt.Sprintf("%s: %v", doc.Filename, err))
+			continue
+		}
+		results = append(results, map[string]interface{}{
+			"filename": doc.Filename,
+			"response": resp,
+		})
+	}
+
+	return results, errors
+}
+
+// BatchDeleteDocuments deletes multiple documents from a dataset
+func (s *RagFlowService) BatchDeleteDocuments(datasetID string, documentIDs []string) ([]string, []string) {
+	var deleted []string
+	var errors []string
+
+	for _, docID := range documentIDs {
+		if err := s.DeleteDocument(datasetID, docID); err != nil {
+			errors = append(errors, fmt.Sprintf("%s: %v", docID, err))
+		} else {
+			deleted = append(deleted, docID)
+		}
+	}
+
+	return deleted, errors
+}
+
+// TransferDocument transfers a document from one dataset to another
+func (s *RagFlowService) TransferDocument(sourceDatasetID, targetDatasetID, documentID string) (map[string]interface{}, error) {
+	// 1. Get document content by downloading
+	downloadURL := fmt.Sprintf("%s/api/v1/datasets/%s/documents/%s/download", s.cfg.BaseURL, sourceDatasetID, documentID)
+	content, filename, err := s.downloadDocument(downloadURL)
+	if err != nil {
+		return nil, fmt.Errorf("download failed: %w", err)
+	}
+
+	// 2. Upload to target dataset
+	resp, err := s.uploadToRagFlow(targetDatasetID, filename, content)
+	if err != nil {
+		return nil, fmt.Errorf("upload to target failed: %w", err)
+	}
+
+	// 3. Delete from source
+	if err := s.DeleteDocument(sourceDatasetID, documentID); err != nil {
+		return map[string]interface{}{
+			"upload":        resp,
+			"delete_failed": true,
+			"error":         err.Error(),
+		}, nil
+	}
+
+	return map[string]interface{}{
+		"upload":  resp,
+		"deleted": true,
+	}, nil
+}
+
+// UpdateDocumentMetadata updates document metadata
+func (s *RagFlowService) UpdateDocumentMetadata(datasetID, documentID string, metadata map[string]interface{}) (map[string]interface{}, error) {
+	url := fmt.Sprintf("%s/api/v1/datasets/%s/documents/%s", s.cfg.BaseURL, datasetID, documentID)
+	return s.doPut(url, metadata)
+}
+
+// ListChunks lists chunks for a document
+func (s *RagFlowService) ListChunks(datasetID, documentID string, page, limit int) (map[string]interface{}, error) {
+	url := fmt.Sprintf("%s/api/v1/datasets/%s/documents/%s/chunks?page=%d&limit=%d",
+		s.cfg.BaseURL, datasetID, documentID, page, limit)
+	return s.doGet(url)
+}
+
+// DeleteChunks deletes specific chunks
+func (s *RagFlowService) DeleteChunks(datasetID, documentID string, chunkIDs []string) (map[string]interface{}, error) {
+	url := fmt.Sprintf("%s/api/v1/datasets/%s/documents/%s/chunks", s.cfg.BaseURL, datasetID, documentID)
+	payload := map[string]interface{}{"chunk_ids": chunkIDs}
+	return s.doRequestJSON("DELETE", url, payload)
+}
+
+// --- HTTP helper methods ---
+
+func (s *RagFlowService) doGet(url string) (map[string]interface{}, error) {
+	req, err := http.NewRequest("GET", url, nil)
+	if err != nil {
+		return nil, err
+	}
+	req.Header.Set("Authorization", "Bearer "+s.cfg.APIKey)
+
+	resp, err := s.client.Do(req)
+	if err != nil {
+		return nil, err
+	}
+	defer resp.Body.Close()
+
+	body, _ := io.ReadAll(resp.Body)
+	var result map[string]interface{}
+	json.Unmarshal(body, &result)
+	return result, nil
+}
+
+func (s *RagFlowService) doPost(url string, payload map[string]interface{}) (map[string]interface{}, error) {
+	return s.doRequestJSON("POST", url, payload)
+}
+
+func (s *RagFlowService) doPut(url string, payload map[string]interface{}) (map[string]interface{}, error) {
+	return s.doRequestJSON("PUT", url, payload)
+}
+
+func (s *RagFlowService) doDelete(url string) error {
+	req, err := http.NewRequest("DELETE", url, nil)
+	if err != nil {
+		return err
+	}
+	req.Header.Set("Authorization", "Bearer "+s.cfg.APIKey)
+
+	resp, err := s.client.Do(req)
+	if err != nil {
+		return err
+	}
+	defer resp.Body.Close()
+
+	if resp.StatusCode >= 400 {
+		body, _ := io.ReadAll(resp.Body)
+		return fmt.Errorf("request failed: %s", string(body))
+	}
+	return nil
+}
+
+func (s *RagFlowService) doRequestJSON(method, url string, payload map[string]interface{}) (map[string]interface{}, error) {
+	body, _ := json.Marshal(payload)
+	req, err := http.NewRequest(method, url, bytes.NewBuffer(body))
+	if err != nil {
+		return nil, err
+	}
+	req.Header.Set("Content-Type", "application/json")
+	req.Header.Set("Authorization", "Bearer "+s.cfg.APIKey)
+
+	resp, err := s.client.Do(req)
+	if err != nil {
+		return nil, err
+	}
+	defer resp.Body.Close()
+
+	respBody, _ := io.ReadAll(resp.Body)
+	var result map[string]interface{}
+	json.Unmarshal(respBody, &result)
+	return result, nil
+}
+
+func (s *RagFlowService) downloadDocument(url string) (string, string, error) {
+	req, err := http.NewRequest("GET", url, nil)
+	if err != nil {
+		return "", "", err
+	}
+	req.Header.Set("Authorization", "Bearer "+s.cfg.APIKey)
+
+	resp, err := s.client.Do(req)
+	if err != nil {
+		return "", "", err
+	}
+	defer resp.Body.Close()
+
+	if resp.StatusCode >= 400 {
+		body, _ := io.ReadAll(resp.Body)
+		return "", "", fmt.Errorf("download failed: %s", string(body))
+	}
+
+	body, _ := io.ReadAll(resp.Body)
+
+	// Extract filename from Content-Disposition header
+	filename := "document.txt"
+	if cd := resp.Header.Get("Content-Disposition"); cd != "" {
+		if idx := bytes.Index([]byte(cd), []byte("filename=")); idx != -1 {
+			filename = cd[idx+9:]
+			filename = strings.Trim(filename, "\"")
+		}
+	}
+
+	return string(body), filename, nil
 }

@@ -69,3 +69,27 @@ func (r *TagRepository) GetByIDs(ids []uint) ([]model.Tag, error) {
 	}
 	return tags, nil
 }
+
+func (r *TagRepository) GetAll() ([]model.Tag, error) {
+	var tags []model.Tag
+	if err := r.db.Order("name ASC").Find(&tags).Error; err != nil {
+		return nil, err
+	}
+	return tags, nil
+}
+
+func (r *TagRepository) GetByNames(names []string) ([]model.Tag, error) {
+	var tags []model.Tag
+	if err := r.db.Where("name IN ?", names).Find(&tags).Error; err != nil {
+		return nil, err
+	}
+	return tags, nil
+}
+
+func (r *TagRepository) MatchByKeyword(keyword string) ([]model.Tag, error) {
+	var tags []model.Tag
+	if err := r.db.Where("name ILIKE ?", "%"+keyword+"%").Order("name ASC").Find(&tags).Error; err != nil {
+		return nil, err
+	}
+	return tags, nil
+}

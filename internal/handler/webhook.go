@@ -183,10 +183,19 @@ func (h *WebhookHandler) Trigger(c *gin.Context) {
 		return
 	}
 
-	var payload map[string]interface{}
-	c.ShouldBindJSON(&payload)
+	var req struct {
+		Payload   map[string]interface{} `json:"payload"`
+		Variables map[string]string      `json:"variables"`
+	}
+	c.ShouldBindJSON(&req)
 
-	history, err := h.svc.Trigger(uint(id), payload)
+	// Use template-aware trigger if variables are provided or body_template exists
+	var history *model.WebhookHistory
+	if req.Variables != nil {
+		history, err = h.svc.TriggerWithVariables(uint(id), req.Payload, req.Variables)
+	} else {
+		history, err = h.svc.TriggerWithVariables(uint(id), req.Payload, nil)
+	}
 	if err != nil {
 		c.JSON(http.StatusInternalServerError, gin.H{"error": err.Error(), "history": history})
 		return
@@ -203,8 +212,14 @@ func (h *WebhookHandler) History(c *gin.Context) {
 	}
 
 	limit, _ := strconv.Atoi(c.DefaultQuery("limit", "20"))
+	status := c.Query("status")
 
-	history, err := h.svc.GetHistory(uint(id), limit)
+	var history []model.WebhookHistory
+	if status != "" {
+		history, err = h.svc.GetHistoryByStatus(uint(id), status, limit)
+	} else {
+		history, err = h.svc.GetHistory(uint(id), limit)
+	}
 	if err != nil {
 		c.JSON(http.StatusInternalServerError, gin.H{"error": err.Error()})
 		return
