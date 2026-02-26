@@ -22,7 +22,7 @@ type RSSRequest struct {
 	URL                  string `json:"url" binding:"required"`
 	Category             string `json:"category"`
 	Description          string `json:"description"`
-	IsActive             bool   `json:"is_active"`
+	IsActive             *bool  `json:"is_active"`
 	FetchIntervalMinutes int    `json:"fetch_interval_minutes"`
 	TagIDs               []uint `json:"tag_ids"`
 }
@@ -70,12 +70,17 @@ func (h *RSSHandler) Create(c *gin.Context) {
 		return
 	}
 
+	isActive := true
+	if req.IsActive != nil {
+		isActive = *req.IsActive
+	}
+
 	feed := &model.RSSFeed{
 		Name:                 req.Name,
 		URL:                  req.URL,
 		Category:             req.Category,
 		Description:          req.Description,
-		IsActive:             req.IsActive,
+		IsActive:             isActive,
 		FetchIntervalMinutes: req.FetchIntervalMinutes,
 	}
 
@@ -114,7 +119,9 @@ func (h *RSSHandler) Update(c *gin.Context) {
 	feed.URL = req.URL
 	feed.Category = req.Category
 	feed.Description = req.Description
-	feed.IsActive = req.IsActive
+	if req.IsActive != nil {
+		feed.IsActive = *req.IsActive
+	}
 	feed.FetchIntervalMinutes = req.FetchIntervalMinutes
 
 	if err := h.svc.Update(feed, req.TagIDs); err != nil {

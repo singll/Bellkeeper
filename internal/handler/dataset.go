@@ -22,8 +22,8 @@ type DatasetRequest struct {
 	DisplayName string `json:"display_name"`
 	DatasetID   string `json:"dataset_id" binding:"required"`
 	Description string `json:"description"`
-	IsDefault   bool   `json:"is_default"`
-	IsActive    bool   `json:"is_active"`
+	IsDefault   *bool  `json:"is_default"`
+	IsActive    *bool  `json:"is_active"`
 	ParserID    string `json:"parser_id"`
 	TagIDs      []uint `json:"tag_ids"`
 }
@@ -69,13 +69,22 @@ func (h *DatasetHandler) Create(c *gin.Context) {
 		return
 	}
 
+	isActive := true
+	if req.IsActive != nil {
+		isActive = *req.IsActive
+	}
+	isDefault := false
+	if req.IsDefault != nil {
+		isDefault = *req.IsDefault
+	}
+
 	mapping := &model.DatasetMapping{
 		Name:        req.Name,
 		DisplayName: req.DisplayName,
 		DatasetID:   req.DatasetID,
 		Description: req.Description,
-		IsDefault:   req.IsDefault,
-		IsActive:    req.IsActive,
+		IsDefault:   isDefault,
+		IsActive:    isActive,
 		ParserID:    req.ParserID,
 	}
 
@@ -114,8 +123,12 @@ func (h *DatasetHandler) Update(c *gin.Context) {
 	mapping.DisplayName = req.DisplayName
 	mapping.DatasetID = req.DatasetID
 	mapping.Description = req.Description
-	mapping.IsDefault = req.IsDefault
-	mapping.IsActive = req.IsActive
+	if req.IsDefault != nil {
+		mapping.IsDefault = *req.IsDefault
+	}
+	if req.IsActive != nil {
+		mapping.IsActive = *req.IsActive
+	}
 	mapping.ParserID = req.ParserID
 
 	if err := h.svc.Update(mapping, req.TagIDs); err != nil {

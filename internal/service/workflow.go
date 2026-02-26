@@ -84,9 +84,8 @@ type n8nExecution struct {
 
 // Status retrieves the list of workflows from n8n
 func (s *WorkflowService) Status() ([]WorkflowStatus, error) {
-	// If no API key configured, return placeholder data
 	if s.cfg.APIKey == "" {
-		return s.getPlaceholderStatus(), nil
+		return []WorkflowStatus{}, nil
 	}
 
 	req, err := http.NewRequest("GET", s.cfg.APIBaseURL+"/workflows", nil)
@@ -99,12 +98,12 @@ func (s *WorkflowService) Status() ([]WorkflowStatus, error) {
 
 	resp, err := s.client.Do(req)
 	if err != nil {
-		return s.getPlaceholderStatus(), nil // Fallback to placeholder on error
+		return nil, fmt.Errorf("failed to connect to n8n: %w", err)
 	}
 	defer resp.Body.Close()
 
 	if resp.StatusCode != http.StatusOK {
-		return s.getPlaceholderStatus(), nil
+		return nil, fmt.Errorf("n8n returned HTTP %d", resp.StatusCode)
 	}
 
 	body, err := io.ReadAll(resp.Body)
@@ -327,11 +326,3 @@ func (s *WorkflowService) Trigger(name string, payload map[string]interface{}) (
 	return result, nil
 }
 
-// getPlaceholderStatus returns placeholder workflow status when API is not available
-func (s *WorkflowService) getPlaceholderStatus() []WorkflowStatus {
-	return []WorkflowStatus{
-		{ID: "placeholder-1", Name: "scheduled-fetch", Active: true},
-		{ID: "placeholder-2", Name: "core-crawler", Active: true},
-		{ID: "placeholder-3", Name: "manual-ingest", Active: true},
-	}
-}

@@ -23,7 +23,7 @@ type DataSourceRequest struct {
 	Type        string `json:"type"`
 	Category    string `json:"category"`
 	Description string `json:"description"`
-	IsActive    bool   `json:"is_active"`
+	IsActive    *bool  `json:"is_active"`
 	TagIDs      []uint `json:"tag_ids"`
 }
 
@@ -70,13 +70,18 @@ func (h *DataSourceHandler) Create(c *gin.Context) {
 		return
 	}
 
+	isActive := true
+	if req.IsActive != nil {
+		isActive = *req.IsActive
+	}
+
 	source := &model.DataSource{
 		Name:        req.Name,
 		URL:         req.URL,
 		Type:        req.Type,
 		Category:    req.Category,
 		Description: req.Description,
-		IsActive:    req.IsActive,
+		IsActive:    isActive,
 	}
 
 	if err := h.svc.Create(source, req.TagIDs); err != nil {
@@ -111,7 +116,9 @@ func (h *DataSourceHandler) Update(c *gin.Context) {
 	source.Type = req.Type
 	source.Category = req.Category
 	source.Description = req.Description
-	source.IsActive = req.IsActive
+	if req.IsActive != nil {
+		source.IsActive = *req.IsActive
+	}
 
 	if err := h.svc.Update(source, req.TagIDs); err != nil {
 		c.JSON(http.StatusInternalServerError, gin.H{"error": err.Error()})

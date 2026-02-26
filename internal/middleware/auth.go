@@ -18,7 +18,7 @@ type UserInfo struct {
 // AutheliaAuth middleware validates Authelia headers
 func AutheliaAuth(mode string) gin.HandlerFunc {
 	return func(c *gin.Context) {
-		user := c.GetHeader("X-Remote-User")
+		user := c.GetHeader("Remote-User")
 
 		// In debug mode, allow requests without auth
 		if mode == "debug" && user == "" {
@@ -43,9 +43,9 @@ func AutheliaAuth(mode string) gin.HandlerFunc {
 
 		userInfo := UserInfo{
 			Username: user,
-			Email:    c.GetHeader("X-Remote-Email"),
-			Name:     c.GetHeader("X-Remote-Name"),
-			Groups:   parseGroups(c.GetHeader("X-Remote-Groups")),
+			Email:    c.GetHeader("Remote-Email"),
+			Name:     c.GetHeader("Remote-Name"),
+			Groups:   parseGroups(c.GetHeader("Remote-Groups")),
 		}
 
 		c.Set("user", userInfo)

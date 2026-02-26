@@ -29,6 +29,7 @@ const Webhooks: Component = () => {
     url: '',
     method: 'POST',
     content_type: 'application/json',
+    headers: '{}',
     body_template: '',
     timeout_seconds: 30,
     description: '',
@@ -42,6 +43,7 @@ const Webhooks: Component = () => {
       url: '',
       method: 'POST',
       content_type: 'application/json',
+      headers: '{}',
       body_template: '',
       timeout_seconds: 30,
       description: '',
@@ -52,11 +54,16 @@ const Webhooks: Component = () => {
 
   const openEditModal = (webhook: WebhookConfig) => {
     setEditing(webhook)
+    let headersStr = '{}'
+    try {
+      headersStr = webhook.headers ? JSON.stringify(webhook.headers, null, 2) : '{}'
+    } catch { headersStr = '{}' }
     setForm({
       name: webhook.name,
       url: webhook.url,
       method: webhook.method,
       content_type: webhook.content_type,
+      headers: headersStr,
       body_template: webhook.body_template,
       timeout_seconds: webhook.timeout_seconds,
       description: webhook.description,
@@ -74,11 +81,20 @@ const Webhooks: Component = () => {
     e.preventDefault()
     setSubmitting(true)
     try {
+      let headers = {}
+      try {
+        headers = JSON.parse(form().headers || '{}')
+      } catch {
+        toast.error('Headers JSON 格式无效')
+        setSubmitting(false)
+        return
+      }
+      const payload = { ...form(), headers }
       if (editing()) {
-        await webhooksApi.update(editing()!.id, form())
+        await webhooksApi.update(editing()!.id, payload)
         toast.success('Webhook 更新成功')
       } else {
-        await webhooksApi.create(form())
+        await webhooksApi.create(payload)
         toast.success('Webhook 创建成功')
       }
       setShowModal(false)
@@ -385,6 +401,17 @@ const Webhooks: Component = () => {
               onInput={(e) => setForm({ ...form(), body_template: e.currentTarget.value })}
             />
             <p class="text-xs text-dark-500 mt-1">JSON 格式，留空使用默认值</p>
+          </div>
+          <div>
+            <label class="label">自定义 Headers</label>
+            <textarea
+              class="input font-mono text-sm resize-none"
+              rows="3"
+              placeholder='{"Authorization": "Bearer xxx"}'
+              value={form().headers}
+              onInput={(e) => setForm({ ...form(), headers: e.currentTarget.value })}
+            />
+            <p class="text-xs text-dark-500 mt-1">JSON 格式的 HTTP 请求头</p>
           </div>
           <div>
             <label class="label">描述</label>

@@ -95,8 +95,20 @@ const Documents: Component = () => {
 
   const handleUpload = async () => {
     const form = uploadForm()
-    if (!form.content || !form.filename) {
-      toast.error('请填写内容和文件名')
+    if (!form.filename) {
+      toast.error('请填写文件名')
+      return
+    }
+    if (!form.filename.includes('.')) {
+      toast.error('文件名需要包含扩展名，例如 document.md')
+      return
+    }
+    if (!form.content) {
+      toast.error('请填写文档内容')
+      return
+    }
+    if (!form.useRouting && !selectedDataset()) {
+      toast.error('请先选择一个知识库')
       return
     }
 

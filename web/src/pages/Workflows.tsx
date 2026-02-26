@@ -146,6 +146,19 @@ const Workflows: Component = () => {
             }
           >
             <Show
+              when={!workflows.error}
+              fallback={
+                <div class="empty-state py-8">
+                  <svg class="empty-state-icon w-12 h-12 text-red-400" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                    <path stroke-linecap="round" stroke-linejoin="round" stroke-width="1.5" d="M12 8v4m0 4h.01M21 12a9 9 0 11-18 0 9 9 0 0118 0z" />
+                  </svg>
+                  <p class="empty-state-title">加载失败</p>
+                  <p class="empty-state-description">{(workflows.error as Error)?.message || '请检查 n8n API Key 配置'}</p>
+                  <button class="btn btn-secondary btn-sm mt-3" onClick={() => refetchWorkflows()}>重试</button>
+                </div>
+              }
+            >
+            <Show
               when={workflows()?.data && workflows()!.data.length > 0}
               fallback={
                 <div class="empty-state py-8">
@@ -217,6 +230,7 @@ const Workflows: Component = () => {
                   )}
                 </For>
               </div>
+            </Show>
             </Show>
           </Show>
         </div>
