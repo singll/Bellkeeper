@@ -58,13 +58,15 @@ func (h *RagFlowHandler) CheckURL(c *gin.Context) {
 		return
 	}
 
-	exists, err := h.svc.CheckURL(url)
+	normalize := c.DefaultQuery("normalize", "true") == "true"
+
+	result, err := h.svc.CheckURLEnhanced(url, normalize)
 	if err != nil {
 		c.JSON(http.StatusInternalServerError, gin.H{"error": err.Error()})
 		return
 	}
 
-	c.JSON(http.StatusOK, gin.H{"exists": exists})
+	c.JSON(http.StatusOK, result)
 }
 
 func (h *RagFlowHandler) ListDocuments(c *gin.Context) {
@@ -342,6 +344,26 @@ func (h *RagFlowHandler) DeleteChunks(c *gin.Context) {
 	}
 
 	result, err := h.svc.DeleteChunks(req.DatasetID, req.DocumentID, req.ChunkIDs)
+	if err != nil {
+		c.JSON(http.StatusInternalServerError, gin.H{"error": err.Error()})
+		return
+	}
+	c.JSON(http.StatusOK, result)
+}
+
+// BatchTransferDocuments transfers multiple documents between datasets
+func (h *RagFlowHandler) BatchTransferDocuments(c *gin.Context) {
+	var req struct {
+		SourceDatasetID string   `json:"source_dataset_id" binding:"required"`
+		TargetDatasetID string   `json:"target_dataset_id" binding:"required"`
+		DocumentIDs     []string `json:"document_ids" binding:"required"`
+	}
+	if err := c.ShouldBindJSON(&req); err != nil {
+		c.JSON(http.StatusBadRequest, gin.H{"error": err.Error()})
+		return
+	}
+
+	result, err := h.svc.BatchTransferDocuments(req.SourceDatasetID, req.TargetDatasetID, req.DocumentIDs)
 	if err != nil {
 		c.JSON(http.StatusInternalServerError, gin.H{"error": err.Error()})
 		return

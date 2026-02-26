@@ -3,6 +3,7 @@ package service
 import (
 	"bytes"
 	"encoding/json"
+	"fmt"
 	"io"
 	"net/http"
 	"regexp"
@@ -201,6 +202,11 @@ func (s *WebhookService) TriggerWithVariables(id uint, payload map[string]interf
 	webhook, err := s.repo.GetByID(id)
 	if err != nil {
 		return nil, err
+	}
+
+	// Check if webhook is active
+	if !webhook.IsActive {
+		return nil, fmt.Errorf("webhook '%s' is disabled", webhook.Name)
 	}
 
 	variables := buildVariables(webhook, payload, customVars)

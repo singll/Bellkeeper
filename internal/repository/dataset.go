@@ -142,3 +142,30 @@ func (r *DatasetMappingRepository) GetArticlesByTagID(tagID uint, page, perPage 
 func (r *DatasetMappingRepository) DeleteArticleTagsByDocumentIDs(documentIDs []string) error {
 	return r.db.Where("document_id IN ?", documentIDs).Delete(&model.ArticleTag{}).Error
 }
+
+// FindArticleTagsByURL finds article tags matching the exact URL
+func (r *DatasetMappingRepository) FindArticleTagsByURL(url string) ([]model.ArticleTag, error) {
+	var ats []model.ArticleTag
+	if err := r.db.Preload("Tag").Where("article_url = ?", url).Find(&ats).Error; err != nil {
+		return nil, err
+	}
+	return ats, nil
+}
+
+// FindArticleTagsByURLs finds article tags matching any of the given URLs
+func (r *DatasetMappingRepository) FindArticleTagsByURLs(urls []string) ([]model.ArticleTag, error) {
+	var ats []model.ArticleTag
+	if err := r.db.Preload("Tag").Where("article_url IN ?", urls).Find(&ats).Error; err != nil {
+		return nil, err
+	}
+	return ats, nil
+}
+
+// GetAllArticleURLs returns all article URLs (for normalized matching)
+func (r *DatasetMappingRepository) GetAllArticleURLs() ([]model.ArticleTag, error) {
+	var ats []model.ArticleTag
+	if err := r.db.Select("id, document_id, dataset_id, article_url, article_title").Find(&ats).Error; err != nil {
+		return nil, err
+	}
+	return ats, nil
+}

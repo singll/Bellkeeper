@@ -2,6 +2,7 @@ package service
 
 import (
 	"github.com/singll/bellkeeper/internal/model"
+	"github.com/singll/bellkeeper/internal/pkg/urlutil"
 	"github.com/singll/bellkeeper/internal/repository"
 )
 
@@ -138,4 +139,180 @@ func (s *DatasetService) GetArticlesByTag(tagID uint, page, perPage int) ([]mode
 // DeleteArticleTagsByDocumentIDs cleans up article-tag associations
 func (s *DatasetService) DeleteArticleTagsByDocumentIDs(documentIDs []string) error {
 	return s.repo.DeleteArticleTagsByDocumentIDs(documentIDs)
+}
+
+// URLCheckResult holds the result of a single URL check
+type URLCheckResult struct {
+	Exists     bool   `json:"exists"`
+	DocumentID string `json:"document_id,omitempty"`
+	DatasetID  string `json:"dataset_id,omitempty"`
+	Title      string `json:"title,omitempty"`
+	StoredURL  string `json:"stored_url,omitempty"`
+	MatchType  string `json:"match_type,omitempty"` // "exact", "normalized", "fuzzy"
+}
+
+// CheckURL checks if a URL exists in the local ArticleTag table with optional normalization and fuzzy matching
+func (s *DatasetService) CheckURL(rawURL string, normalize bool, fuzzy bool) (*URLCheckResult, error) {
+	// 1. Exact match
+	ats, err := s.repo.FindArticleTagsByURL(rawURL)
+	if err != nil {
+		return nil, err
+	}
+	if len(ats) > 0 {
+		return &URLCheckResult{
+			Exists:     true,
+			DocumentID: ats[0].DocumentID,
+			DatasetID:  ats[0].DatasetID,
+			Title:      ats[0].ArticleTitle,
+			StoredURL:  ats[0].ArticleURL,
+			MatchType:  "exact",
+		}, nil
+	}
+
+	// 2. Normalized match
+	if normalize {
+		normalizedURL := urlutil.Normalize(rawURL)
+		allArticles, err := s.repo.GetAllArticleURLs()
+		if err != nil {
+			return nil, err
+		}
+		for _, at := range allArticles {
+			if urlutil.Normalize(at.ArticleURL) == normalizedURL {
+				return &URLCheckResult{
+					Exists:     true,
+					DocumentID: at.DocumentID,
+					DatasetID:  at.DatasetID,
+					Title:      at.ArticleTitle,
+					StoredURL:  at.ArticleURL,
+					MatchType:  "normalized",
+				}, nil
+			}
+		}
+	}
+
+	// 3. Fuzzy match
+	if fuzzy {
+		allArticles, err := s.repo.GetAllArticleURLs()
+		if err != nil {
+			return nil, err
+		}
+		for _, at := range allArticles {
+			if urlutil.FuzzyMatch(rawURL, at.ArticleURL, 10) {
+				return &URLCheckResult{
+					Exists:     true,
+					DocumentID: at.DocumentID,
+					DatasetID:  at.DatasetID,
+					Title:      at.ArticleTitle,
+					StoredURL:  at.ArticleURL,
+					MatchType:  "fuzzy",
+				}, nil
+			}
+		}
+	}
+
+	return &URLCheckResult{Exists: false}, nil
+}
+
+// BatchCheckURLs checks multiple URLs at once
+func (s *DatasetService) BatchCheckURLs(urls []string, normalize bool, fuzzy bool) (map[string]*URLCheckResult, error) {
+	results := make(map[string]*URLCheckResult)
+
+	// 1. Batch exact match
+	ats, err := s.repo.FindArticleTagsByURLs(urls)
+	if err != nil {
+		return nil, err
+	}
+	exactMap := make(map[string]*model.ArticleTag)
+	for i := range ats {
+		if _, exists := exactMap[ats[i].ArticleURL]; !exists {
+			exactMap[ats[i].ArticleURL] = &ats[i]
+		}
+	}
+	for _, u := range urls {
+		if at, ok := exactMap[u]; ok {
+			results[u] = &URLCheckResult{
+				Exists:     true,
+				DocumentID: at.DocumentID,
+				DatasetID:  at.DatasetID,
+				Title:      at.ArticleTitle,
+				StoredURL:  at.ArticleURL,
+				MatchType:  "exact",
+			}
+		}
+	}
+
+	// 2. Normalized + fuzzy for unmatched URLs
+	if normalize || fuzzy {
+		var unmatched []string
+		for _, u := range urls {
+			if _, ok := results[u]; !ok {
+				unmatched = append(unmatched, u)
+			}
+		}
+		if len(unmatched) > 0 {
+			allArticles, err := s.repo.GetAllArticleURLs()
+			if err != nil {
+				return nil, err
+			}
+
+			// Build normalized map
+			var normalizedMap map[string]*model.ArticleTag
+			if normalize {
+				normalizedMap = make(map[string]*model.ArticleTag)
+				for i := range allArticles {
+					norm := urlutil.Normalize(allArticles[i].ArticleURL)
+					if _, exists := normalizedMap[norm]; !exists {
+						normalizedMap[norm] = &allArticles[i]
+					}
+				}
+			}
+
+			for _, u := range unmatched {
+				// Normalized check
+				if normalize && normalizedMap != nil {
+					norm := urlutil.Normalize(u)
+					if at, ok := normalizedMap[norm]; ok {
+						results[u] = &URLCheckResult{
+							Exists:     true,
+							DocumentID: at.DocumentID,
+							DatasetID:  at.DatasetID,
+							Title:      at.ArticleTitle,
+							StoredURL:  at.ArticleURL,
+							MatchType:  "normalized",
+						}
+						continue
+					}
+				}
+				// Fuzzy check
+				if fuzzy {
+					for i := range allArticles {
+						if urlutil.FuzzyMatch(u, allArticles[i].ArticleURL, 10) {
+							results[u] = &URLCheckResult{
+								Exists:     true,
+								DocumentID: allArticles[i].DocumentID,
+								DatasetID:  allArticles[i].DatasetID,
+								Title:      allArticles[i].ArticleTitle,
+								StoredURL:  allArticles[i].ArticleURL,
+								MatchType:  "fuzzy",
+							}
+							break
+						}
+					}
+				}
+				// Not found
+				if _, ok := results[u]; !ok {
+					results[u] = &URLCheckResult{Exists: false}
+				}
+			}
+		}
+	} else {
+		// Mark remaining as not found
+		for _, u := range urls {
+			if _, ok := results[u]; !ok {
+				results[u] = &URLCheckResult{Exists: false}
+			}
+		}
+	}
+
+	return results, nil
 }

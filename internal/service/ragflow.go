@@ -11,6 +11,7 @@ import (
 
 	"github.com/singll/bellkeeper/internal/config"
 	"github.com/singll/bellkeeper/internal/model"
+	"github.com/singll/bellkeeper/internal/pkg/urlutil"
 	"github.com/singll/bellkeeper/internal/repository"
 )
 
@@ -137,6 +138,48 @@ func (s *RagFlowService) UploadWithRouting(req *UploadRequest) (*UploadResponse,
 // CheckURL checks if a URL has been uploaded before
 func (s *RagFlowService) CheckURL(url string) (bool, error) {
 	return s.datasetRepo.ArticleURLExists(url)
+}
+
+// CheckURLEnhanced checks a URL with optional normalization, returning detailed info
+func (s *RagFlowService) CheckURLEnhanced(rawURL string, normalize bool) (map[string]interface{}, error) {
+	// 1. Exact match in local ArticleTag table
+	ats, err := s.datasetRepo.FindArticleTagsByURL(rawURL)
+	if err != nil {
+		return nil, err
+	}
+	if len(ats) > 0 {
+		return map[string]interface{}{
+			"exists":      true,
+			"document_id": ats[0].DocumentID,
+			"dataset_id":  ats[0].DatasetID,
+			"title":       ats[0].ArticleTitle,
+			"stored_url":  ats[0].ArticleURL,
+			"match_type":  "exact",
+		}, nil
+	}
+
+	// 2. Normalized match
+	if normalize {
+		normalizedURL := urlutil.Normalize(rawURL)
+		allArticles, err := s.datasetRepo.GetAllArticleURLs()
+		if err != nil {
+			return nil, err
+		}
+		for _, at := range allArticles {
+			if urlutil.Normalize(at.ArticleURL) == normalizedURL {
+				return map[string]interface{}{
+					"exists":      true,
+					"document_id": at.DocumentID,
+					"dataset_id":  at.DatasetID,
+					"title":       at.ArticleTitle,
+					"stored_url":  at.ArticleURL,
+					"match_type":  "normalized",
+				}, nil
+			}
+		}
+	}
+
+	return map[string]interface{}{"exists": false}, nil
 }
 
 func (s *RagFlowService) uploadToRagFlow(datasetID, filename, content string) (*UploadResponse, error) {
@@ -337,6 +380,37 @@ func (s *RagFlowService) TransferDocument(sourceDatasetID, targetDatasetID, docu
 	return map[string]interface{}{
 		"upload":  resp,
 		"deleted": true,
+	}, nil
+}
+
+// BatchTransferDocuments transfers multiple documents between datasets
+func (s *RagFlowService) BatchTransferDocuments(sourceDatasetID, targetDatasetID string, documentIDs []string) (map[string]interface{}, error) {
+	var results []map[string]interface{}
+	successCount := 0
+	failedCount := 0
+
+	for _, docID := range documentIDs {
+		result, err := s.TransferDocument(sourceDatasetID, targetDatasetID, docID)
+		entry := map[string]interface{}{
+			"document_id": docID,
+		}
+		if err != nil {
+			entry["success"] = false
+			entry["error"] = err.Error()
+			failedCount++
+		} else {
+			entry["success"] = true
+			entry["result"] = result
+			successCount++
+		}
+		results = append(results, entry)
+	}
+
+	return map[string]interface{}{
+		"total":   len(documentIDs),
+		"success": successCount,
+		"failed":  failedCount,
+		"results": results,
 	}, nil
 }
 

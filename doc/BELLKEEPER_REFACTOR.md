@@ -1829,6 +1829,16 @@ ssh root@192.168.7.1
 - [ ] Documents 页面: 批量操作、解析控制、文档转移
 - [ ] Webhooks 页面: 变量编辑器、触发 payload 面板
 
+#### Batch F: 功能完整性补齐 (P0 — 迁移遗漏)
+
+> 与旧 knowledge-management 逐一对比后发现的遗漏功能
+
+- [x] URL 归一化工具 (`internal/pkg/urlutil/normalize.go`) — 去除追踪参数、统一大小写、去尾斜杠
+- [x] `POST /api/datasets/check-url` — 增强 URL 检查（单个/批量/归一化/模糊匹配）
+- [x] `GET /api/ragflow/check-url` 增强 — 支持归一化匹配，返回 document_id/dataset_id 详细信息
+- [x] `POST /api/ragflow/documents/batch-transfer` — 批量文档跨 Dataset 转移
+- [x] Webhook 触发前检查 `is_active` 状态 — 禁用的 Webhook 拒绝触发
+
 ### 11.4 后续优化方向
 
 以下为非阻断性的持续优化项目，可在日常迭代中逐步完成：

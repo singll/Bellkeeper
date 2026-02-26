@@ -152,6 +152,7 @@ func runServer(cmd *cobra.Command, args []string) {
 		api.POST("/datasets/article-tags", handlers.Dataset.AddArticleTags)
 		api.GET("/datasets/article-tags/:document_id", handlers.Dataset.GetArticleTags)
 		api.GET("/datasets/articles-by-tag/:tag_id", handlers.Dataset.GetArticlesByTag)
+		api.POST("/datasets/check-url", handlers.Dataset.CheckURL)
 
 		// RagFlow
 		api.POST("/ragflow/upload", handlers.RagFlow.Upload)
@@ -174,6 +175,7 @@ func runServer(cmd *cobra.Command, args []string) {
 		api.PUT("/ragflow/documents/metadata", handlers.RagFlow.UpdateDocumentMetadata)
 		api.GET("/ragflow/chunks", handlers.RagFlow.ListChunks)
 		api.DELETE("/ragflow/chunks", handlers.RagFlow.DeleteChunks)
+		api.POST("/ragflow/documents/batch-transfer", handlers.RagFlow.BatchTransferDocuments)
 
 		// Settings
 		api.GET("/settings", handlers.Setting.List)

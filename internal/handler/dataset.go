@@ -270,3 +270,50 @@ func (h *DatasetHandler) GetArticlesByTag(c *gin.Context) {
 		"per_page": perPage,
 	})
 }
+
+// CheckURL checks if a URL exists in the local ArticleTag table with normalization and fuzzy matching
+func (h *DatasetHandler) CheckURL(c *gin.Context) {
+	var req struct {
+		URL       string   `json:"url"`
+		URLs      []string `json:"urls"`
+		Normalize *bool    `json:"normalize"`
+		Fuzzy     *bool    `json:"fuzzy"`
+	}
+	if err := c.ShouldBindJSON(&req); err != nil {
+		c.JSON(http.StatusBadRequest, gin.H{"error": err.Error()})
+		return
+	}
+
+	normalize := true
+	if req.Normalize != nil {
+		normalize = *req.Normalize
+	}
+	fuzzy := false
+	if req.Fuzzy != nil {
+		fuzzy = *req.Fuzzy
+	}
+
+	// Batch mode
+	if len(req.URLs) > 0 {
+		results, err := h.svc.BatchCheckURLs(req.URLs, normalize, fuzzy)
+		if err != nil {
+			c.JSON(http.StatusInternalServerError, gin.H{"error": err.Error()})
+			return
+		}
+		c.JSON(http.StatusOK, gin.H{"results": results})
+		return
+	}
+
+	// Single URL mode
+	if req.URL == "" {
+		c.JSON(http.StatusBadRequest, gin.H{"error": "url or urls required"})
+		return
+	}
+
+	result, err := h.svc.CheckURL(req.URL, normalize, fuzzy)
+	if err != nil {
+		c.JSON(http.StatusInternalServerError, gin.H{"error": err.Error()})
+		return
+	}
+	c.JSON(http.StatusOK, result)
+}
