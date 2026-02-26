@@ -432,6 +432,120 @@ BELLKEEPER_N8N_WEBHOOK_BASE_URL=http://n8n:5678
 | `ui_page_size` | ui | 默认分页大小 |
 | `ui_theme` | ui | 界面主题 |
 
+## 开发规范
+
+### 后端 (Go / Gin)
+
+#### 分层架构
+
+严格遵循 **Router → Handler → Service → Repository → Model** 单向依赖：
+
+- **Handler** 只做 HTTP 协议处理（解析请求、返回响应），不含业务逻辑
+- **Service** 承载所有业务规则和外部 API 调用，可跨 Repository 组合
+- **Repository** 仅封装 GORM 查询，不引用其他 Repository
+- **Model** 纯数据结构定义，不包含行为方法
+
+```
+禁止：Handler 直接调用 Repository
+禁止：Repository 之间互相引用
+禁止：Service 直接操作 *gin.Context
+```
+
+#### 统一响应格式
+
+所有 Handler 必须使用 `internal/pkg/response` 包返回响应，禁止直接写 `c.JSON(...)` + `gin.H{...}`：
+
+```go
+// 正确 ✓
+response.Success(c, data)
+response.Page(c, list, total, page, perPage)
+response.Created(c, item)
+response.Deleted(c)
+response.BadRequest(c, "invalid parameter")
+
+// 错误 ✗
+c.JSON(http.StatusOK, gin.H{"data": data})
+```
+
+**例外**：代理转发上游 API 原始响应的端点（如 RagFlow 文档列表），保持 `c.JSON(http.StatusOK, result)` 直接透传。
+
+#### 参数解析
+
+使用 `response.ParsePagination(c)` 和 `response.ParseID(c, "id")` 替代手动解析，保持一致的默认值和错误处理。
+
+#### 常量管理
+
+所有硬编码值必须收入 `internal/pkg/defaults` 包，禁止在业务代码中直接写魔法数字或字符串：
+
+```go
+// 正确 ✓
+defaults.DefaultTagColor
+defaults.HealthCheckTimeout
+
+// 错误 ✗
+"#409EFF"
+5 * time.Second
+```
+
+#### 路由注册
+
+路由定义集中在 `internal/router/` 包，按功能域分组为独立函数（`registerTagRoutes`、`registerWebhookRoutes` 等），`main.go` 只负责初始化和启动。
+
+#### 依赖注入
+
+采用手动构造函数注入，沿链路传递：
+
+```go
+Config → DB → Repositories → Services(repos, cfg, version) → Handlers(services) → Router
+```
+
+不使用 DI 容器，不使用全局变量，不使用 `init()` 函数。
+
+#### 错误处理
+
+- **永远不要忽略 error 返回值**，即使是 `json.Marshal`、`io.ReadAll` 等"不太可能失败"的调用
+- Service 层返回 `error` 给 Handler，由 Handler 决定 HTTP 状态码
+- 外部 API 调用失败时记录日志 (`log.Printf`) 并返回有意义的错误信息
+- Repository 层的错误直接向上传播，不做吞没
+
+#### 版本管理
+
+版本号通过 `main.go` 的 `ldflags` 注入，经构造函数链传递到需要的位置，禁止在多处硬编码。
+
+### 前端 (SolidJS / TypeScript / TailwindCSS)
+
+#### 配色体系
+
+采用**深炭灰**主题，避免使用纯黑 (`#000000` / `#020617`) 作为背景：
+
+| 层级 | 用途 | 色阶 |
+|------|------|------|
+| 页面背景 | `body` | `dark-900` (#0f172a) |
+| 卡片/面板 | `.card` | `dark-800/70` |
+| 输入框/表格头 | `.input` `.table th` | `dark-700/40` |
+| 弹窗 | `.modal` | `dark-800` |
+| 悬停态 | hover | 比当前层级亮一档 |
+
+核心原则：**每个层级之间要有可辨识的对比度差异**，用户不需要费力分辨元素边界。
+
+#### 组件规范
+
+- 统一使用 `useToast()` 进行操作反馈，成功/失败/警告有对应样式
+- 弹窗统一使用 `<Modal>` 组件，支持 ESC 关闭和点击遮罩关闭
+- 列表页标准结构：Header (标题 + 操作按钮) → 搜索/筛选栏 → 数据表格 → 分页
+- 加载态使用 `<Show when={!data.loading}>` + spinner fallback
+- 空态提供图标 + 文字 + 引导操作
+
+#### CSS 组织
+
+全局样式集中在 `index.css`，定义可复用的组件类（`.card`、`.btn`、`.input`、`.table` 等），页面级组件通过 TailwindCSS 工具类组合，避免重复定义。
+
+### 通用
+
+- **不过度设计**：不为假设的未来需求添加抽象层，三行重复代码优于一个不必要的抽象
+- **不引入 interface 抽象**：当前具体类型 DI 足够好，等需要写单测时再加
+- **提交粒度**：一个完整功能/修复对应一次提交，不拆分碎片化提交
+
 ## 本地开发
 
 ### 环境要求
