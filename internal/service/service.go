@@ -19,7 +19,7 @@ type Services struct {
 }
 
 // NewServices creates all service instances
-func NewServices(repos *repository.Repositories, cfg *config.Config) *Services {
+func NewServices(repos *repository.Repositories, cfg *config.Config, version string) *Services {
 	return &Services{
 		Tag:        NewTagService(repos.Tag),
 		DataSource: NewDataSourceService(repos.DataSource, repos.Tag),
@@ -28,7 +28,7 @@ func NewServices(repos *repository.Repositories, cfg *config.Config) *Services {
 		Dataset:    NewDatasetService(repos.DatasetMapping, repos.Tag),
 		Setting:    NewSettingService(repos.Setting),
 		RagFlow:    NewRagFlowService(cfg.RagFlow, repos.DatasetMapping, repos.Tag),
-		Health:     NewHealthService(cfg, repos.Tag, repos.DataSource, repos.RSS, repos.DatasetMapping),
+		Health:     NewHealthService(cfg, version, repos.Tag, repos.DataSource, repos.RSS, repos.DatasetMapping),
 		Workflow:   NewWorkflowService(cfg.N8N),
 	}
 }

@@ -383,7 +383,7 @@ const Documents: Component = () => {
       >
         <div class="space-y-4">
           {/* Routing Toggle */}
-          <div class="flex items-center gap-3 p-3 bg-dark-800/50 rounded-xl border border-dark-700/50">
+          <div class="flex items-center gap-3 p-3 bg-dark-700/50 rounded-xl border border-dark-600/50">
             <label class="relative inline-flex items-center cursor-pointer">
               <input
                 type="checkbox"

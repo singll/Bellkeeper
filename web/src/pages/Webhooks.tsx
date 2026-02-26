@@ -465,7 +465,7 @@ const Webhooks: Component = () => {
             <div class="space-y-3 max-h-96 overflow-y-auto">
               <For each={history()?.data}>
                 {(h) => (
-                  <div class="p-4 bg-dark-800/50 rounded-xl border border-dark-700/50">
+                  <div class="p-4 bg-dark-700/50 rounded-xl border border-dark-600/50">
                     <div class="flex items-center justify-between mb-2">
                       <div class="flex items-center gap-2">
                         <span class={`status-dot ${h.status === 'success' ? 'status-dot-success' : 'status-dot-danger'}`} />

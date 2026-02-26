@@ -2,10 +2,11 @@ package handler
 
 import (
 	"net/http"
-	"strconv"
 
 	"github.com/gin-gonic/gin"
 	"github.com/singll/bellkeeper/internal/model"
+	"github.com/singll/bellkeeper/internal/pkg/defaults"
+	"github.com/singll/bellkeeper/internal/pkg/response"
 	"github.com/singll/bellkeeper/internal/service"
 )
 
@@ -29,43 +30,36 @@ type DatasetRequest struct {
 }
 
 func (h *DatasetHandler) List(c *gin.Context) {
-	page, _ := strconv.Atoi(c.DefaultQuery("page", "1"))
-	perPage, _ := strconv.Atoi(c.DefaultQuery("per_page", "20"))
+	page, perPage := response.ParsePagination(c)
 
 	mappings, total, err := h.svc.List(page, perPage)
 	if err != nil {
-		c.JSON(http.StatusInternalServerError, gin.H{"error": err.Error()})
+		response.InternalError(c, err.Error())
 		return
 	}
 
-	c.JSON(http.StatusOK, gin.H{
-		"data":     mappings,
-		"total":    total,
-		"page":     page,
-		"per_page": perPage,
-	})
+	response.Page(c, mappings, total, page, perPage)
 }
 
 func (h *DatasetHandler) Get(c *gin.Context) {
-	id, err := strconv.ParseUint(c.Param("id"), 10, 32)
-	if err != nil {
-		c.JSON(http.StatusBadRequest, gin.H{"error": "invalid id"})
+	id, ok := response.ParseID(c, "id")
+	if !ok {
 		return
 	}
 
-	mapping, err := h.svc.GetByID(uint(id))
+	mapping, err := h.svc.GetByID(id)
 	if err != nil {
-		c.JSON(http.StatusNotFound, gin.H{"error": "dataset mapping not found"})
+		response.NotFound(c, "dataset mapping not found")
 		return
 	}
 
-	c.JSON(http.StatusOK, gin.H{"data": mapping})
+	response.Success(c, mapping)
 }
 
 func (h *DatasetHandler) Create(c *gin.Context) {
 	var req DatasetRequest
 	if err := c.ShouldBindJSON(&req); err != nil {
-		c.JSON(http.StatusBadRequest, gin.H{"error": err.Error()})
+		response.BadRequest(c, err.Error())
 		return
 	}
 
@@ -89,33 +83,32 @@ func (h *DatasetHandler) Create(c *gin.Context) {
 	}
 
 	if mapping.ParserID == "" {
-		mapping.ParserID = "naive"
+		mapping.ParserID = defaults.DefaultParserID
 	}
 
 	if err := h.svc.Create(mapping, req.TagIDs); err != nil {
-		c.JSON(http.StatusInternalServerError, gin.H{"error": err.Error()})
+		response.InternalError(c, err.Error())
 		return
 	}
 
-	c.JSON(http.StatusCreated, gin.H{"data": mapping})
+	response.Created(c, mapping)
 }
 
 func (h *DatasetHandler) Update(c *gin.Context) {
-	id, err := strconv.ParseUint(c.Param("id"), 10, 32)
-	if err != nil {
-		c.JSON(http.StatusBadRequest, gin.H{"error": "invalid id"})
+	id, ok := response.ParseID(c, "id")
+	if !ok {
 		return
 	}
 
-	mapping, err := h.svc.GetByID(uint(id))
+	mapping, err := h.svc.GetByID(id)
 	if err != nil {
-		c.JSON(http.StatusNotFound, gin.H{"error": "dataset mapping not found"})
+		response.NotFound(c, "dataset mapping not found")
 		return
 	}
 
 	var req DatasetRequest
 	if err := c.ShouldBindJSON(&req); err != nil {
-		c.JSON(http.StatusBadRequest, gin.H{"error": err.Error()})
+		response.BadRequest(c, err.Error())
 		return
 	}
 
@@ -132,26 +125,25 @@ func (h *DatasetHandler) Update(c *gin.Context) {
 	mapping.ParserID = req.ParserID
 
 	if err := h.svc.Update(mapping, req.TagIDs); err != nil {
-		c.JSON(http.StatusInternalServerError, gin.H{"error": err.Error()})
+		response.InternalError(c, err.Error())
 		return
 	}
 
-	c.JSON(http.StatusOK, gin.H{"data": mapping})
+	response.Success(c, mapping)
 }
 
 func (h *DatasetHandler) Delete(c *gin.Context) {
-	id, err := strconv.ParseUint(c.Param("id"), 10, 32)
-	if err != nil {
-		c.JSON(http.StatusBadRequest, gin.H{"error": "invalid id"})
+	id, ok := response.ParseID(c, "id")
+	if !ok {
 		return
 	}
 
-	if err := h.svc.Delete(uint(id)); err != nil {
-		c.JSON(http.StatusInternalServerError, gin.H{"error": err.Error()})
+	if err := h.svc.Delete(id); err != nil {
+		response.InternalError(c, err.Error())
 		return
 	}
 
-	c.JSON(http.StatusOK, gin.H{"message": "deleted"})
+	response.Deleted(c)
 }
 
 // --- Batch C: 高级端点 ---
@@ -160,11 +152,10 @@ func (h *DatasetHandler) Delete(c *gin.Context) {
 func (h *DatasetHandler) GetAll(c *gin.Context) {
 	mappings, err := h.svc.GetAll()
 	if err != nil {
-		c.JSON(http.StatusInternalServerError, gin.H{"error": err.Error()})
+		response.InternalError(c, err.Error())
 		return
 	}
 
-	// Build dict format (name -> mapping) for workflow convenience
 	dict := make(map[string]interface{})
 	for _, m := range mappings {
 		dict[m.Name] = m
@@ -181,11 +172,11 @@ func (h *DatasetHandler) GetByName(c *gin.Context) {
 	name := c.Param("name")
 	mapping, err := h.svc.GetByName(name)
 	if err != nil {
-		c.JSON(http.StatusNotFound, gin.H{"error": "dataset mapping not found"})
+		response.NotFound(c, "dataset mapping not found")
 		return
 	}
 
-	c.JSON(http.StatusOK, gin.H{"data": mapping})
+	response.Success(c, mapping)
 }
 
 // RecommendByTag recommends a dataset based on tags with fallback logic
@@ -195,13 +186,13 @@ func (h *DatasetHandler) RecommendByTag(c *gin.Context) {
 		Category string   `json:"category"`
 	}
 	if err := c.ShouldBindJSON(&req); err != nil {
-		c.JSON(http.StatusBadRequest, gin.H{"error": err.Error()})
+		response.BadRequest(c, err.Error())
 		return
 	}
 
 	mapping, matchType, err := h.svc.RecommendByTags(req.Tags, req.Category)
 	if err != nil {
-		c.JSON(http.StatusNotFound, gin.H{"error": "no matching dataset found"})
+		response.NotFound(c, "no matching dataset found")
 		return
 	}
 
@@ -221,17 +212,17 @@ func (h *DatasetHandler) AddArticleTags(c *gin.Context) {
 		URL        string `json:"url"`
 	}
 	if err := c.ShouldBindJSON(&req); err != nil {
-		c.JSON(http.StatusBadRequest, gin.H{"error": err.Error()})
+		response.BadRequest(c, err.Error())
 		return
 	}
 
 	created, err := h.svc.AddArticleTags(req.DocumentID, req.DatasetID, req.TagIDs, req.Title, req.URL)
 	if err != nil {
-		c.JSON(http.StatusInternalServerError, gin.H{"error": err.Error()})
+		response.InternalError(c, err.Error())
 		return
 	}
 
-	c.JSON(http.StatusCreated, gin.H{"data": created})
+	response.Created(c, created)
 }
 
 // GetArticleTags returns tags for a given document
@@ -239,36 +230,29 @@ func (h *DatasetHandler) GetArticleTags(c *gin.Context) {
 	documentID := c.Param("document_id")
 	ats, err := h.svc.GetArticleTags(documentID)
 	if err != nil {
-		c.JSON(http.StatusInternalServerError, gin.H{"error": err.Error()})
+		response.InternalError(c, err.Error())
 		return
 	}
 
-	c.JSON(http.StatusOK, gin.H{"data": ats})
+	response.Success(c, ats)
 }
 
 // GetArticlesByTag returns paginated articles for a given tag
 func (h *DatasetHandler) GetArticlesByTag(c *gin.Context) {
-	tagID, err := strconv.ParseUint(c.Param("tag_id"), 10, 32)
-	if err != nil {
-		c.JSON(http.StatusBadRequest, gin.H{"error": "invalid tag_id"})
+	tagID, ok := response.ParseID(c, "tag_id")
+	if !ok {
 		return
 	}
 
-	page, _ := strconv.Atoi(c.DefaultQuery("page", "1"))
-	perPage, _ := strconv.Atoi(c.DefaultQuery("per_page", "20"))
+	page, perPage := response.ParsePagination(c)
 
-	ats, total, err := h.svc.GetArticlesByTag(uint(tagID), page, perPage)
+	ats, total, err := h.svc.GetArticlesByTag(tagID, page, perPage)
 	if err != nil {
-		c.JSON(http.StatusInternalServerError, gin.H{"error": err.Error()})
+		response.InternalError(c, err.Error())
 		return
 	}
 
-	c.JSON(http.StatusOK, gin.H{
-		"data":     ats,
-		"total":    total,
-		"page":     page,
-		"per_page": perPage,
-	})
+	response.Page(c, ats, total, page, perPage)
 }
 
 // CheckURL checks if a URL exists in the local ArticleTag table with normalization and fuzzy matching
@@ -280,7 +264,7 @@ func (h *DatasetHandler) CheckURL(c *gin.Context) {
 		Fuzzy     *bool    `json:"fuzzy"`
 	}
 	if err := c.ShouldBindJSON(&req); err != nil {
-		c.JSON(http.StatusBadRequest, gin.H{"error": err.Error()})
+		response.BadRequest(c, err.Error())
 		return
 	}
 
@@ -297,7 +281,7 @@ func (h *DatasetHandler) CheckURL(c *gin.Context) {
 	if len(req.URLs) > 0 {
 		results, err := h.svc.BatchCheckURLs(req.URLs, normalize, fuzzy)
 		if err != nil {
-			c.JSON(http.StatusInternalServerError, gin.H{"error": err.Error()})
+			response.InternalError(c, err.Error())
 			return
 		}
 		c.JSON(http.StatusOK, gin.H{"results": results})
@@ -306,13 +290,13 @@ func (h *DatasetHandler) CheckURL(c *gin.Context) {
 
 	// Single URL mode
 	if req.URL == "" {
-		c.JSON(http.StatusBadRequest, gin.H{"error": "url or urls required"})
+		response.BadRequest(c, "url or urls required")
 		return
 	}
 
 	result, err := h.svc.CheckURL(req.URL, normalize, fuzzy)
 	if err != nil {
-		c.JSON(http.StatusInternalServerError, gin.H{"error": err.Error()})
+		response.InternalError(c, err.Error())
 		return
 	}
 	c.JSON(http.StatusOK, result)

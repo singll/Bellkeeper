@@ -174,7 +174,7 @@ const Workflows: Component = () => {
                 <For each={workflows()?.data}>
                   {(workflow) => (
                     <div
-                      class="p-4 bg-dark-800/50 rounded-xl border border-dark-700/50 cursor-pointer transition-all hover:border-dark-600/50"
+                      class="p-4 bg-dark-700/50 rounded-xl border border-dark-600/50 cursor-pointer transition-all hover:border-dark-600/50"
                       classList={{
                         'ring-2 ring-primary-500 border-primary-500/50': selectedWorkflow() === workflow.id,
                       }}
@@ -283,7 +283,7 @@ const Workflows: Component = () => {
                 <div class="space-y-2 max-h-96 overflow-y-auto">
                   <For each={executions()?.data}>
                     {(execution) => (
-                      <div class="p-3 bg-dark-800/50 rounded-xl border border-dark-700/50">
+                      <div class="p-3 bg-dark-700/50 rounded-xl border border-dark-600/50">
                         <div class="flex items-center justify-between">
                           <div class="flex items-center gap-2">
                             <span class={`badge ${getStatusBadge(execution.status)}`}>
@@ -361,7 +361,7 @@ const Workflows: Component = () => {
           </div>
 
           <Show when={triggerResult()}>
-            <div class="p-4 bg-dark-800/50 rounded-xl border border-dark-700/50">
+            <div class="p-4 bg-dark-700/50 rounded-xl border border-dark-600/50">
               <div class="text-sm font-medium text-dark-300 mb-2">结果</div>
               <pre class="text-sm font-mono text-dark-400 overflow-auto max-h-32">
                 {triggerResult()}

@@ -1,11 +1,9 @@
 package handler
 
 import (
-	"net/http"
-	"strconv"
-
 	"github.com/gin-gonic/gin"
 	"github.com/singll/bellkeeper/internal/model"
+	"github.com/singll/bellkeeper/internal/pkg/response"
 	"github.com/singll/bellkeeper/internal/service"
 )
 
@@ -28,45 +26,38 @@ type DataSourceRequest struct {
 }
 
 func (h *DataSourceHandler) List(c *gin.Context) {
-	page, _ := strconv.Atoi(c.DefaultQuery("page", "1"))
-	perPage, _ := strconv.Atoi(c.DefaultQuery("per_page", "20"))
+	page, perPage := response.ParsePagination(c)
 	category := c.Query("category")
 	keyword := c.Query("keyword")
 
 	sources, total, err := h.svc.List(page, perPage, category, keyword)
 	if err != nil {
-		c.JSON(http.StatusInternalServerError, gin.H{"error": err.Error()})
+		response.InternalError(c, err.Error())
 		return
 	}
 
-	c.JSON(http.StatusOK, gin.H{
-		"data":     sources,
-		"total":    total,
-		"page":     page,
-		"per_page": perPage,
-	})
+	response.Page(c, sources, total, page, perPage)
 }
 
 func (h *DataSourceHandler) Get(c *gin.Context) {
-	id, err := strconv.ParseUint(c.Param("id"), 10, 32)
-	if err != nil {
-		c.JSON(http.StatusBadRequest, gin.H{"error": "invalid id"})
+	id, ok := response.ParseID(c, "id")
+	if !ok {
 		return
 	}
 
-	source, err := h.svc.GetByID(uint(id))
+	source, err := h.svc.GetByID(id)
 	if err != nil {
-		c.JSON(http.StatusNotFound, gin.H{"error": "data source not found"})
+		response.NotFound(c, "data source not found")
 		return
 	}
 
-	c.JSON(http.StatusOK, gin.H{"data": source})
+	response.Success(c, source)
 }
 
 func (h *DataSourceHandler) Create(c *gin.Context) {
 	var req DataSourceRequest
 	if err := c.ShouldBindJSON(&req); err != nil {
-		c.JSON(http.StatusBadRequest, gin.H{"error": err.Error()})
+		response.BadRequest(c, err.Error())
 		return
 	}
 
@@ -85,29 +76,28 @@ func (h *DataSourceHandler) Create(c *gin.Context) {
 	}
 
 	if err := h.svc.Create(source, req.TagIDs); err != nil {
-		c.JSON(http.StatusInternalServerError, gin.H{"error": err.Error()})
+		response.InternalError(c, err.Error())
 		return
 	}
 
-	c.JSON(http.StatusCreated, gin.H{"data": source})
+	response.Created(c, source)
 }
 
 func (h *DataSourceHandler) Update(c *gin.Context) {
-	id, err := strconv.ParseUint(c.Param("id"), 10, 32)
-	if err != nil {
-		c.JSON(http.StatusBadRequest, gin.H{"error": "invalid id"})
+	id, ok := response.ParseID(c, "id")
+	if !ok {
 		return
 	}
 
-	source, err := h.svc.GetByID(uint(id))
+	source, err := h.svc.GetByID(id)
 	if err != nil {
-		c.JSON(http.StatusNotFound, gin.H{"error": "data source not found"})
+		response.NotFound(c, "data source not found")
 		return
 	}
 
 	var req DataSourceRequest
 	if err := c.ShouldBindJSON(&req); err != nil {
-		c.JSON(http.StatusBadRequest, gin.H{"error": err.Error()})
+		response.BadRequest(c, err.Error())
 		return
 	}
 
@@ -121,24 +111,23 @@ func (h *DataSourceHandler) Update(c *gin.Context) {
 	}
 
 	if err := h.svc.Update(source, req.TagIDs); err != nil {
-		c.JSON(http.StatusInternalServerError, gin.H{"error": err.Error()})
+		response.InternalError(c, err.Error())
 		return
 	}
 
-	c.JSON(http.StatusOK, gin.H{"data": source})
+	response.Success(c, source)
 }
 
 func (h *DataSourceHandler) Delete(c *gin.Context) {
-	id, err := strconv.ParseUint(c.Param("id"), 10, 32)
-	if err != nil {
-		c.JSON(http.StatusBadRequest, gin.H{"error": "invalid id"})
+	id, ok := response.ParseID(c, "id")
+	if !ok {
 		return
 	}
 
-	if err := h.svc.Delete(uint(id)); err != nil {
-		c.JSON(http.StatusInternalServerError, gin.H{"error": err.Error()})
+	if err := h.svc.Delete(id); err != nil {
+		response.InternalError(c, err.Error())
 		return
 	}
 
-	c.JSON(http.StatusOK, gin.H{"message": "deleted"})
+	response.Deleted(c)
 }

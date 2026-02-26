@@ -2,6 +2,7 @@ package service
 
 import (
 	"github.com/singll/bellkeeper/internal/model"
+	"github.com/singll/bellkeeper/internal/pkg/defaults"
 	"github.com/singll/bellkeeper/internal/repository"
 )
 
@@ -38,8 +39,7 @@ func (s *TagService) GetOrCreateByNames(names []string) ([]model.Tag, error) {
 	for _, name := range names {
 		tag, err := s.repo.GetByName(name)
 		if err != nil {
-			// Create new tag
-			tag = &model.Tag{Name: name, Color: "#409EFF"}
+			tag = &model.Tag{Name: name, Color: defaults.DefaultTagColor}
 			if err := s.repo.Create(tag); err != nil {
 				return nil, err
 			}
@@ -91,7 +91,7 @@ func (s *TagService) BatchGetOrCreate(names []string, autoCreate bool) (found []
 		if t, ok := existingMap[name]; ok {
 			found = append(found, t)
 		} else if autoCreate {
-			tag := &model.Tag{Name: name, Color: "#409EFF"}
+			tag := &model.Tag{Name: name, Color: defaults.DefaultTagColor}
 			if err := s.repo.Create(tag); err != nil {
 				return nil, nil, nil, err
 			}

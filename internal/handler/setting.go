@@ -1,9 +1,8 @@
 package handler
 
 import (
-	"net/http"
-
 	"github.com/gin-gonic/gin"
+	"github.com/singll/bellkeeper/internal/pkg/response"
 	"github.com/singll/bellkeeper/internal/service"
 )
 
@@ -20,7 +19,7 @@ func (h *SettingHandler) List(c *gin.Context) {
 
 	settings, err := h.svc.List(category)
 	if err != nil {
-		c.JSON(http.StatusInternalServerError, gin.H{"error": err.Error()})
+		response.InternalError(c, err.Error())
 		return
 	}
 
@@ -31,7 +30,7 @@ func (h *SettingHandler) List(c *gin.Context) {
 		}
 	}
 
-	c.JSON(http.StatusOK, gin.H{"data": settings})
+	response.Success(c, settings)
 }
 
 func (h *SettingHandler) Get(c *gin.Context) {
@@ -39,7 +38,7 @@ func (h *SettingHandler) Get(c *gin.Context) {
 
 	setting, err := h.svc.Get(key)
 	if err != nil {
-		c.JSON(http.StatusNotFound, gin.H{"error": "setting not found"})
+		response.NotFound(c, "setting not found")
 		return
 	}
 
@@ -48,7 +47,7 @@ func (h *SettingHandler) Get(c *gin.Context) {
 		setting.Value = setting.MaskedValue()
 	}
 
-	c.JSON(http.StatusOK, gin.H{"data": setting})
+	response.Success(c, setting)
 }
 
 type UpdateSettingRequest struct {
@@ -64,7 +63,7 @@ func (h *SettingHandler) Update(c *gin.Context) {
 
 	var req UpdateSettingRequest
 	if err := c.ShouldBindJSON(&req); err != nil {
-		c.JSON(http.StatusBadRequest, gin.H{"error": err.Error()})
+		response.BadRequest(c, err.Error())
 		return
 	}
 
@@ -73,9 +72,9 @@ func (h *SettingHandler) Update(c *gin.Context) {
 	}
 
 	if err := h.svc.Set(key, req.Value, req.ValueType, req.Category, req.Description, req.IsSecret); err != nil {
-		c.JSON(http.StatusInternalServerError, gin.H{"error": err.Error()})
+		response.InternalError(c, err.Error())
 		return
 	}
 
-	c.JSON(http.StatusOK, gin.H{"message": "updated"})
+	response.Message(c, "updated")
 }

@@ -2,10 +2,10 @@ package handler
 
 import (
 	"net/http"
-	"strconv"
 
 	"github.com/gin-gonic/gin"
 	"github.com/singll/bellkeeper/internal/model"
+	"github.com/singll/bellkeeper/internal/pkg/response"
 	"github.com/singll/bellkeeper/internal/service"
 )
 
@@ -15,11 +15,11 @@ import (
 func (h *TagHandler) GetAll(c *gin.Context) {
 	tags, err := h.svc.GetAll()
 	if err != nil {
-		c.JSON(http.StatusInternalServerError, gin.H{"error": err.Error()})
+		response.InternalError(c, err.Error())
 		return
 	}
 
-	c.JSON(http.StatusOK, gin.H{"data": tags})
+	response.Success(c, tags)
 }
 
 // BatchGetOrCreate bulk get/create tags with auto_create support
@@ -29,13 +29,13 @@ func (h *TagHandler) BatchGetOrCreate(c *gin.Context) {
 		AutoCreate bool     `json:"auto_create"`
 	}
 	if err := c.ShouldBindJSON(&req); err != nil {
-		c.JSON(http.StatusBadRequest, gin.H{"error": err.Error()})
+		response.BadRequest(c, err.Error())
 		return
 	}
 
 	found, created, notFound, err := h.svc.BatchGetOrCreate(req.Names, req.AutoCreate)
 	if err != nil {
-		c.JSON(http.StatusInternalServerError, gin.H{"error": err.Error()})
+		response.InternalError(c, err.Error())
 		return
 	}
 
@@ -52,17 +52,17 @@ func (h *TagHandler) Match(c *gin.Context) {
 		Keywords []string `json:"keywords" binding:"required"`
 	}
 	if err := c.ShouldBindJSON(&req); err != nil {
-		c.JSON(http.StatusBadRequest, gin.H{"error": err.Error()})
+		response.BadRequest(c, err.Error())
 		return
 	}
 
 	tags, err := h.svc.MatchByKeywords(req.Keywords)
 	if err != nil {
-		c.JSON(http.StatusInternalServerError, gin.H{"error": err.Error()})
+		response.InternalError(c, err.Error())
 		return
 	}
 
-	c.JSON(http.StatusOK, gin.H{"data": tags})
+	response.Success(c, tags)
 }
 
 // GetByNames returns tags matching the given name list
@@ -71,17 +71,17 @@ func (h *TagHandler) GetByNames(c *gin.Context) {
 		Names []string `json:"names" binding:"required"`
 	}
 	if err := c.ShouldBindJSON(&req); err != nil {
-		c.JSON(http.StatusBadRequest, gin.H{"error": err.Error()})
+		response.BadRequest(c, err.Error())
 		return
 	}
 
 	tags, err := h.svc.GetByNames(req.Names)
 	if err != nil {
-		c.JSON(http.StatusInternalServerError, gin.H{"error": err.Error()})
+		response.InternalError(c, err.Error())
 		return
 	}
 
-	c.JSON(http.StatusOK, gin.H{"data": tags})
+	response.Success(c, tags)
 }
 
 type TagHandler struct {
@@ -93,92 +93,83 @@ func NewTagHandler(svc *service.TagService) *TagHandler {
 }
 
 func (h *TagHandler) List(c *gin.Context) {
-	page, _ := strconv.Atoi(c.DefaultQuery("page", "1"))
-	perPage, _ := strconv.Atoi(c.DefaultQuery("per_page", "20"))
+	page, perPage := response.ParsePagination(c)
 	keyword := c.Query("keyword")
 
 	tags, total, err := h.svc.List(page, perPage, keyword)
 	if err != nil {
-		c.JSON(http.StatusInternalServerError, gin.H{"error": err.Error()})
+		response.InternalError(c, err.Error())
 		return
 	}
 
-	c.JSON(http.StatusOK, gin.H{
-		"data":     tags,
-		"total":    total,
-		"page":     page,
-		"per_page": perPage,
-	})
+	response.Page(c, tags, total, page, perPage)
 }
 
 func (h *TagHandler) Get(c *gin.Context) {
-	id, err := strconv.ParseUint(c.Param("id"), 10, 32)
-	if err != nil {
-		c.JSON(http.StatusBadRequest, gin.H{"error": "invalid id"})
+	id, ok := response.ParseID(c, "id")
+	if !ok {
 		return
 	}
 
-	tag, err := h.svc.GetByID(uint(id))
+	tag, err := h.svc.GetByID(id)
 	if err != nil {
-		c.JSON(http.StatusNotFound, gin.H{"error": "tag not found"})
+		response.NotFound(c, "tag not found")
 		return
 	}
 
-	c.JSON(http.StatusOK, gin.H{"data": tag})
+	response.Success(c, tag)
 }
 
 func (h *TagHandler) Create(c *gin.Context) {
 	var tag model.Tag
 	if err := c.ShouldBindJSON(&tag); err != nil {
-		c.JSON(http.StatusBadRequest, gin.H{"error": err.Error()})
+		response.BadRequest(c, err.Error())
 		return
 	}
 
 	if err := h.svc.Create(&tag); err != nil {
-		c.JSON(http.StatusInternalServerError, gin.H{"error": err.Error()})
+		response.InternalError(c, err.Error())
 		return
 	}
 
-	c.JSON(http.StatusCreated, gin.H{"data": tag})
+	response.Created(c, tag)
 }
 
 func (h *TagHandler) Update(c *gin.Context) {
-	id, err := strconv.ParseUint(c.Param("id"), 10, 32)
-	if err != nil {
-		c.JSON(http.StatusBadRequest, gin.H{"error": "invalid id"})
+	id, ok := response.ParseID(c, "id")
+	if !ok {
 		return
 	}
 
-	tag, err := h.svc.GetByID(uint(id))
+	tag, err := h.svc.GetByID(id)
 	if err != nil {
-		c.JSON(http.StatusNotFound, gin.H{"error": "tag not found"})
+		response.NotFound(c, "tag not found")
 		return
 	}
 
 	if err := c.ShouldBindJSON(tag); err != nil {
-		c.JSON(http.StatusBadRequest, gin.H{"error": err.Error()})
+		response.BadRequest(c, err.Error())
 		return
 	}
 
 	if err := h.svc.Update(tag); err != nil {
-		c.JSON(http.StatusInternalServerError, gin.H{"error": err.Error()})
+		response.InternalError(c, err.Error())
 		return
 	}
 
-	c.JSON(http.StatusOK, gin.H{"data": tag})
+	response.Success(c, tag)
 }
 
 func (h *TagHandler) Delete(c *gin.Context) {
-	id, err := strconv.ParseUint(c.Param("id"), 10, 32)
-	if err != nil {
-		c.JSON(http.StatusBadRequest, gin.H{"error": "invalid id"})
+	id, ok := response.ParseID(c, "id")
+	if !ok {
 		return
 	}
 
-	if err := h.svc.Delete(uint(id)); err != nil {
-		c.JSON(http.StatusInternalServerError, gin.H{"error": err.Error()})
+	if err := h.svc.Delete(id); err != nil {
+		response.InternalError(c, err.Error())
 		return
 	}
 
-	c.JSON(http.StatusOK, gin.H{"message": "deleted"})
+	response.Deleted(c)
 }

@@ -183,7 +183,7 @@ const Datasets: Component = () => {
                           <p class="text-xs text-dark-500 mt-0.5 font-mono">{dataset.name}</p>
                         </td>
                         <td>
-                          <code class="text-dark-400 font-mono text-sm bg-dark-800/50 px-2 py-1 rounded">
+                          <code class="text-dark-400 font-mono text-sm bg-dark-700/50 px-2 py-1 rounded">
                             {dataset.dataset_id.slice(0, 12)}...
                           </code>
                         </td>
@@ -364,7 +364,7 @@ const Datasets: Component = () => {
           <div>
             <label class="label">关联标签</label>
             <p class="text-xs text-dark-500 mb-2">选择标签后，带有这些标签的文档将自动路由到此知识库</p>
-            <div class="flex flex-wrap gap-2 p-3 bg-dark-800/50 rounded-xl border border-dark-700/50">
+            <div class="flex flex-wrap gap-2 p-3 bg-dark-700/50 rounded-xl border border-dark-600/50">
               <Show when={allTags()?.data && allTags()!.data.length > 0} fallback={
                 <span class="text-dark-500 text-sm">暂无标签，请先创建标签</span>
               }>

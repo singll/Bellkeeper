@@ -120,7 +120,7 @@ const Layout: Component<RouteSectionProps> = (props) => {
       {/* Mobile Overlay */}
       <Show when={mobileMenuOpen()}>
         <div
-          class="lg:hidden fixed inset-0 bg-dark-950/80 backdrop-blur-sm z-40"
+          class="lg:hidden fixed inset-0 bg-dark-900/80 backdrop-blur-sm z-40"
           onClick={() => setMobileMenuOpen(false)}
         />
       </Show>
@@ -128,13 +128,13 @@ const Layout: Component<RouteSectionProps> = (props) => {
       {/* Sidebar */}
       <aside
         class={`fixed lg:sticky top-0 left-0 h-screen z-40 flex flex-col
-                bg-dark-900/80 backdrop-blur-xl border-r border-dark-700/50
+                bg-dark-800/90 backdrop-blur-xl border-r border-dark-600/50
                 transition-all duration-300 ease-out
                 ${sidebarCollapsed() ? 'w-20' : 'w-64'}
                 ${mobileMenuOpen() ? 'translate-x-0' : '-translate-x-full lg:translate-x-0'}`}
       >
         {/* Logo */}
-        <div class="h-16 flex items-center justify-between px-4 border-b border-dark-700/50">
+        <div class="h-16 flex items-center justify-between px-4 border-b border-dark-600/50">
           <Show when={!sidebarCollapsed()}>
             <div class="flex items-center gap-2">
               <div class="w-8 h-8 rounded-lg bg-gradient-to-br from-primary-500 to-accent-500 flex items-center justify-center">
@@ -169,7 +169,7 @@ const Layout: Component<RouteSectionProps> = (props) => {
                       ${sidebarCollapsed() ? 'justify-center' : ''}
                       ${isActive(item.path)
                         ? 'bg-primary-500/20 text-primary-300 shadow-sm'
-                        : 'text-dark-400 hover:bg-dark-800/50 hover:text-dark-200'
+                        : 'text-dark-400 hover:bg-dark-700/50 hover:text-dark-200'
                       }`}
               onClick={() => setMobileMenuOpen(false)}
             >
@@ -187,7 +187,7 @@ const Layout: Component<RouteSectionProps> = (props) => {
         </nav>
 
         {/* Footer */}
-        <div class="px-4 py-3 border-t border-dark-700/50">
+        <div class="px-4 py-3 border-t border-dark-600/50">
           <Show
             when={!sidebarCollapsed()}
             fallback={

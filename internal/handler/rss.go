@@ -1,11 +1,10 @@
 package handler
 
 import (
-	"net/http"
-	"strconv"
-
 	"github.com/gin-gonic/gin"
 	"github.com/singll/bellkeeper/internal/model"
+	"github.com/singll/bellkeeper/internal/pkg/defaults"
+	"github.com/singll/bellkeeper/internal/pkg/response"
 	"github.com/singll/bellkeeper/internal/service"
 )
 
@@ -28,45 +27,38 @@ type RSSRequest struct {
 }
 
 func (h *RSSHandler) List(c *gin.Context) {
-	page, _ := strconv.Atoi(c.DefaultQuery("page", "1"))
-	perPage, _ := strconv.Atoi(c.DefaultQuery("per_page", "20"))
+	page, perPage := response.ParsePagination(c)
 	category := c.Query("category")
 	keyword := c.Query("keyword")
 
 	feeds, total, err := h.svc.List(page, perPage, category, keyword)
 	if err != nil {
-		c.JSON(http.StatusInternalServerError, gin.H{"error": err.Error()})
+		response.InternalError(c, err.Error())
 		return
 	}
 
-	c.JSON(http.StatusOK, gin.H{
-		"data":     feeds,
-		"total":    total,
-		"page":     page,
-		"per_page": perPage,
-	})
+	response.Page(c, feeds, total, page, perPage)
 }
 
 func (h *RSSHandler) Get(c *gin.Context) {
-	id, err := strconv.ParseUint(c.Param("id"), 10, 32)
-	if err != nil {
-		c.JSON(http.StatusBadRequest, gin.H{"error": "invalid id"})
+	id, ok := response.ParseID(c, "id")
+	if !ok {
 		return
 	}
 
-	feed, err := h.svc.GetByID(uint(id))
+	feed, err := h.svc.GetByID(id)
 	if err != nil {
-		c.JSON(http.StatusNotFound, gin.H{"error": "RSS feed not found"})
+		response.NotFound(c, "RSS feed not found")
 		return
 	}
 
-	c.JSON(http.StatusOK, gin.H{"data": feed})
+	response.Success(c, feed)
 }
 
 func (h *RSSHandler) Create(c *gin.Context) {
 	var req RSSRequest
 	if err := c.ShouldBindJSON(&req); err != nil {
-		c.JSON(http.StatusBadRequest, gin.H{"error": err.Error()})
+		response.BadRequest(c, err.Error())
 		return
 	}
 
@@ -85,33 +77,32 @@ func (h *RSSHandler) Create(c *gin.Context) {
 	}
 
 	if feed.FetchIntervalMinutes == 0 {
-		feed.FetchIntervalMinutes = 60
+		feed.FetchIntervalMinutes = defaults.DefaultFetchInterval
 	}
 
 	if err := h.svc.Create(feed, req.TagIDs); err != nil {
-		c.JSON(http.StatusInternalServerError, gin.H{"error": err.Error()})
+		response.InternalError(c, err.Error())
 		return
 	}
 
-	c.JSON(http.StatusCreated, gin.H{"data": feed})
+	response.Created(c, feed)
 }
 
 func (h *RSSHandler) Update(c *gin.Context) {
-	id, err := strconv.ParseUint(c.Param("id"), 10, 32)
-	if err != nil {
-		c.JSON(http.StatusBadRequest, gin.H{"error": "invalid id"})
+	id, ok := response.ParseID(c, "id")
+	if !ok {
 		return
 	}
 
-	feed, err := h.svc.GetByID(uint(id))
+	feed, err := h.svc.GetByID(id)
 	if err != nil {
-		c.JSON(http.StatusNotFound, gin.H{"error": "RSS feed not found"})
+		response.NotFound(c, "RSS feed not found")
 		return
 	}
 
 	var req RSSRequest
 	if err := c.ShouldBindJSON(&req); err != nil {
-		c.JSON(http.StatusBadRequest, gin.H{"error": err.Error()})
+		response.BadRequest(c, err.Error())
 		return
 	}
 
@@ -125,24 +116,23 @@ func (h *RSSHandler) Update(c *gin.Context) {
 	feed.FetchIntervalMinutes = req.FetchIntervalMinutes
 
 	if err := h.svc.Update(feed, req.TagIDs); err != nil {
-		c.JSON(http.StatusInternalServerError, gin.H{"error": err.Error()})
+		response.InternalError(c, err.Error())
 		return
 	}
 
-	c.JSON(http.StatusOK, gin.H{"data": feed})
+	response.Success(c, feed)
 }
 
 func (h *RSSHandler) Delete(c *gin.Context) {
-	id, err := strconv.ParseUint(c.Param("id"), 10, 32)
-	if err != nil {
-		c.JSON(http.StatusBadRequest, gin.H{"error": "invalid id"})
+	id, ok := response.ParseID(c, "id")
+	if !ok {
 		return
 	}
 
-	if err := h.svc.Delete(uint(id)); err != nil {
-		c.JSON(http.StatusInternalServerError, gin.H{"error": err.Error()})
+	if err := h.svc.Delete(id); err != nil {
+		response.InternalError(c, err.Error())
 		return
 	}
 
-	c.JSON(http.StatusOK, gin.H{"message": "deleted"})
+	response.Deleted(c)
 }

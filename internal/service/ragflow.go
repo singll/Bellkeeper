@@ -5,12 +5,14 @@ import (
 	"encoding/json"
 	"fmt"
 	"io"
+	"log"
 	"net/http"
 	"strings"
 	"time"
 
 	"github.com/singll/bellkeeper/internal/config"
 	"github.com/singll/bellkeeper/internal/model"
+	"github.com/singll/bellkeeper/internal/pkg/defaults"
 	"github.com/singll/bellkeeper/internal/pkg/urlutil"
 	"github.com/singll/bellkeeper/internal/repository"
 )
@@ -52,7 +54,6 @@ type UploadResponse struct {
 func (s *RagFlowService) Upload(req *UploadRequest) (*UploadResponse, error) {
 	datasetID := req.DatasetID
 	if datasetID == "" {
-		// Use default dataset
 		defaultMapping, err := s.datasetRepo.GetDefault()
 		if err != nil {
 			return nil, fmt.Errorf("no dataset specified and no default found: %w", err)
@@ -60,7 +61,6 @@ func (s *RagFlowService) Upload(req *UploadRequest) (*UploadResponse, error) {
 		datasetID = defaultMapping.DatasetID
 	}
 
-	// Upload to RagFlow
 	return s.uploadToRagFlow(datasetID, req.Filename, req.Content)
 }
 
@@ -70,19 +70,18 @@ func (s *RagFlowService) UploadWithRouting(req *UploadRequest) (*UploadResponse,
 
 	// 1. Try to find dataset by tags
 	if len(req.Tags) > 0 && req.AutoCreateTags {
-		// Get or create tags
 		var tagIDs []uint
 		for _, tagName := range req.Tags {
 			tag, err := s.tagRepo.GetByName(tagName)
 			if err != nil {
-				// Create new tag
-				tag = &model.Tag{Name: tagName, Color: "#409EFF"}
-				s.tagRepo.Create(tag)
+				tag = &model.Tag{Name: tagName, Color: defaults.DefaultTagColor}
+				if err := s.tagRepo.Create(tag); err != nil {
+					return nil, "", fmt.Errorf("failed to create tag %q: %w", tagName, err)
+				}
 			}
 			tagIDs = append(tagIDs, tag.ID)
 		}
 
-		// Find matching dataset
 		if len(tagIDs) > 0 {
 			mappings, err := s.datasetRepo.GetByTagIDs(tagIDs)
 			if err == nil && len(mappings) > 0 {
@@ -114,19 +113,21 @@ func (s *RagFlowService) UploadWithRouting(req *UploadRequest) (*UploadResponse,
 		return nil, datasetID, err
 	}
 
-	// Save article-tag associations
+	// Save article-tag associations (non-fatal errors are logged)
 	if resp.Code == 0 && resp.Data != nil {
 		if docID, ok := resp.Data["id"].(string); ok {
 			for _, tagName := range req.Tags {
 				tag, _ := s.tagRepo.GetByName(tagName)
 				if tag != nil {
-					s.datasetRepo.CreateArticleTag(&model.ArticleTag{
+					if err := s.datasetRepo.CreateArticleTag(&model.ArticleTag{
 						DocumentID:   docID,
 						DatasetID:    datasetID,
 						TagID:        tag.ID,
 						ArticleTitle: req.Title,
 						ArticleURL:   req.URL,
-					})
+					}); err != nil {
+						log.Printf("warn: failed to create article-tag association for doc %s tag %s: %v", docID, tagName, err)
+					}
 				}
 			}
 		}
@@ -190,7 +191,11 @@ func (s *RagFlowService) uploadToRagFlow(datasetID, filename, content string) (*
 		"text": content,
 	}
 
-	body, _ := json.Marshal(payload)
+	body, err := json.Marshal(payload)
+	if err != nil {
+		return nil, fmt.Errorf("failed to marshal request: %w", err)
+	}
+
 	req, err := http.NewRequest("POST", url, bytes.NewBuffer(body))
 	if err != nil {
 		return nil, err
@@ -205,9 +210,15 @@ func (s *RagFlowService) uploadToRagFlow(datasetID, filename, content string) (*
 	}
 	defer resp.Body.Close()
 
-	respBody, _ := io.ReadAll(resp.Body)
+	respBody, err := io.ReadAll(resp.Body)
+	if err != nil {
+		return nil, fmt.Errorf("failed to read response: %w", err)
+	}
+
 	var result UploadResponse
-	json.Unmarshal(respBody, &result)
+	if err := json.Unmarshal(respBody, &result); err != nil {
+		return nil, fmt.Errorf("failed to parse response: %w", err)
+	}
 
 	return &result, nil
 }
@@ -215,25 +226,7 @@ func (s *RagFlowService) uploadToRagFlow(datasetID, filename, content string) (*
 // ListDocuments lists documents in a dataset
 func (s *RagFlowService) ListDocuments(datasetID string, page, limit int) (map[string]interface{}, error) {
 	url := fmt.Sprintf("%s/api/v1/datasets/%s/documents?page=%d&limit=%d", s.cfg.BaseURL, datasetID, page, limit)
-
-	req, err := http.NewRequest("GET", url, nil)
-	if err != nil {
-		return nil, err
-	}
-
-	req.Header.Set("Authorization", "Bearer "+s.cfg.APIKey)
-
-	resp, err := s.client.Do(req)
-	if err != nil {
-		return nil, err
-	}
-	defer resp.Body.Close()
-
-	body, _ := io.ReadAll(resp.Body)
-	var result map[string]interface{}
-	json.Unmarshal(body, &result)
-
-	return result, nil
+	return s.doGet(url)
 }
 
 // DeleteDocument deletes a document from RagFlow
@@ -355,20 +348,17 @@ func (s *RagFlowService) BatchDeleteDocuments(datasetID string, documentIDs []st
 
 // TransferDocument transfers a document from one dataset to another
 func (s *RagFlowService) TransferDocument(sourceDatasetID, targetDatasetID, documentID string) (map[string]interface{}, error) {
-	// 1. Get document content by downloading
 	downloadURL := fmt.Sprintf("%s/api/v1/datasets/%s/documents/%s/download", s.cfg.BaseURL, sourceDatasetID, documentID)
 	content, filename, err := s.downloadDocument(downloadURL)
 	if err != nil {
 		return nil, fmt.Errorf("download failed: %w", err)
 	}
 
-	// 2. Upload to target dataset
 	resp, err := s.uploadToRagFlow(targetDatasetID, filename, content)
 	if err != nil {
 		return nil, fmt.Errorf("upload to target failed: %w", err)
 	}
 
-	// 3. Delete from source
 	if err := s.DeleteDocument(sourceDatasetID, documentID); err != nil {
 		return map[string]interface{}{
 			"upload":        resp,
@@ -449,9 +439,14 @@ func (s *RagFlowService) doGet(url string) (map[string]interface{}, error) {
 	}
 	defer resp.Body.Close()
 
-	body, _ := io.ReadAll(resp.Body)
+	body, err := io.ReadAll(resp.Body)
+	if err != nil {
+		return nil, fmt.Errorf("failed to read response: %w", err)
+	}
 	var result map[string]interface{}
-	json.Unmarshal(body, &result)
+	if err := json.Unmarshal(body, &result); err != nil {
+		return nil, fmt.Errorf("failed to parse response: %w", err)
+	}
 	return result, nil
 }
 
@@ -484,7 +479,11 @@ func (s *RagFlowService) doDelete(url string) error {
 }
 
 func (s *RagFlowService) doRequestJSON(method, url string, payload map[string]interface{}) (map[string]interface{}, error) {
-	body, _ := json.Marshal(payload)
+	body, err := json.Marshal(payload)
+	if err != nil {
+		return nil, fmt.Errorf("failed to marshal request: %w", err)
+	}
+
 	req, err := http.NewRequest(method, url, bytes.NewBuffer(body))
 	if err != nil {
 		return nil, err
@@ -498,9 +497,14 @@ func (s *RagFlowService) doRequestJSON(method, url string, payload map[string]in
 	}
 	defer resp.Body.Close()
 
-	respBody, _ := io.ReadAll(resp.Body)
+	respBody, err := io.ReadAll(resp.Body)
+	if err != nil {
+		return nil, fmt.Errorf("failed to read response: %w", err)
+	}
 	var result map[string]interface{}
-	json.Unmarshal(respBody, &result)
+	if err := json.Unmarshal(respBody, &result); err != nil {
+		return nil, fmt.Errorf("failed to parse response: %w", err)
+	}
 	return result, nil
 }
 
@@ -522,7 +526,10 @@ func (s *RagFlowService) downloadDocument(url string) (string, string, error) {
 		return "", "", fmt.Errorf("download failed: %s", string(body))
 	}
 
-	body, _ := io.ReadAll(resp.Body)
+	body, err := io.ReadAll(resp.Body)
+	if err != nil {
+		return "", "", fmt.Errorf("failed to read download response: %w", err)
+	}
 
 	// Extract filename from Content-Disposition header
 	filename := "document.txt"

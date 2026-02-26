@@ -48,20 +48,25 @@ bellkeeper/
 │
 ├── internal/
 │   ├── config/                    # 配置管理 (Viper)
-│   │   ├── config.go              #   配置结构体定义
-│   │   └── defaults.go            #   默认值
+│   │   └── config.go              #   配置结构体 + 加载 + 默认值
 │   │
-│   ├── handler/                   # HTTP 处理器 (8 个)
+│   ├── router/                    # 路由注册
+│   │   └── router.go              #   按功能域分组注册所有 API 路由
+│   │
+│   ├── handler/                   # HTTP 处理器 (9 个)
+│   │   ├── handler.go             #   Handler 注册中心
 │   │   ├── health.go              #   健康检查
-│   │   ├── tag.go                 #   标签 CRUD
+│   │   ├── tag.go                 #   标签 CRUD + 批量/匹配
 │   │   ├── datasource.go          #   数据源 CRUD
 │   │   ├── rss.go                 #   RSS 订阅 CRUD
 │   │   ├── webhook.go             #   Webhook CRUD + 触发/历史
-│   │   ├── dataset.go             #   知识库映射 CRUD
+│   │   ├── dataset.go             #   知识库映射 CRUD + 智能推荐
 │   │   ├── ragflow.go             #   RagFlow 文档管理
+│   │   ├── setting.go             #   系统设置
 │   │   └── workflow.go            #   n8n 工作流管理
 │   │
 │   ├── service/                   # 业务逻辑层 (9 个)
+│   │   ├── service.go             #   Service 注册中心
 │   │   ├── health.go              #   服务健康检查逻辑
 │   │   ├── tag.go                 #   标签业务 (含 GetOrCreateByNames)
 │   │   ├── datasource.go          #   数据源业务
@@ -73,6 +78,7 @@ bellkeeper/
 │   │   └── setting.go             #   配置管理 (含秘钥掩码)
 │   │
 │   ├── repository/                # 数据访问层 (6 个)
+│   │   ├── repository.go          #   Repository 注册中心
 │   │   ├── tag.go
 │   │   ├── datasource.go
 │   │   ├── rss.go
@@ -89,10 +95,18 @@ bellkeeper/
 │   │   ├── dataset_mapping.go     #   DatasetMapping + ArticleTag
 │   │   └── setting.go             #   Setting (含 MaskedValue)
 │   │
-│   └── middleware/                 # HTTP 中间件
-│       ├── auth.go                #   Authelia Forward Auth (Remote-User)
-│       ├── cors.go                #   CORS
-│       └── logger.go              #   Zap 结构化日志
+│   ├── middleware/                 # HTTP 中间件
+│   │   ├── auth.go                #   Authelia Forward Auth (Remote-User)
+│   │   ├── cors.go                #   CORS
+│   │   └── logger.go              #   Zap 结构化日志
+│   │
+│   └── pkg/                       # 内部工具包
+│       ├── response/              #   统一 API 响应辅助函数
+│       │   └── response.go        #     Success / Page / Error / ParsePagination / ParseID
+│       ├── defaults/              #   集中管理的常量和默认值
+│       │   └── defaults.go        #     DefaultTagColor / DefaultParserID / HealthCheckTimeout 等
+│       └── urlutil/               #   URL 规范化
+│           └── normalize.go
 │
 ├── web/                           # 前端 (SolidJS)
 │   ├── src/
@@ -113,7 +127,8 @@ bellkeeper/
 │   │   │   ├── Workflows.tsx      #   n8n 工作流
 │   │   │   └── Settings.tsx       #   系统设置
 │   │   ├── index.tsx              #   前端入口
-│   │   └── index.css              #   全局样式
+│   │   └── index.css              #   全局样式 (深炭灰主题)
+│   ├── index.html
 │   ├── package.json
 │   ├── vite.config.ts
 │   ├── tsconfig.json
@@ -129,13 +144,86 @@ bellkeeper/
 ├── migrations/
 │   └── 001_init.up.sql            # 初始数据库迁移
 │
-├── doc/
-│   └── BELLKEEPER_REFACTOR.md     # 架构设计文档
-│
 ├── go.mod
 ├── go.sum
 ├── Makefile
 └── README.md
+```
+
+## 架构设计
+
+```
+                      Handler 层 (HTTP 请求/响应)
+                            │
+                    ┌───────┴────────┐
+                    │  response 包    │  ← 统一响应格式 (Success/Page/Error)
+                    │  ParsePagination│  ← 通用分页解析
+                    └───────┬────────┘
+                            │
+                      Service 层 (业务逻辑)
+                            │
+                    ┌───────┴────────┐
+                    │  defaults 包    │  ← 集中管理的常量
+                    └───────┬────────┘
+                            │
+                     Repository 层 (数据访问)
+                            │
+                       Model 层 (GORM)
+```
+
+### 分层职责
+
+| 层级 | 目录 | 职责 |
+|------|------|------|
+| **路由** | `internal/router/` | 按功能域分组注册 API 路由，与 main.go 解耦 |
+| **处理器** | `internal/handler/` | HTTP 请求解析、参数校验、调用 Service、返回响应 |
+| **业务逻辑** | `internal/service/` | 核心业务规则、跨实体操作、外部 API 集成 |
+| **数据访问** | `internal/repository/` | GORM 查询封装、分页、过滤 |
+| **数据模型** | `internal/model/` | 数据库表结构定义、关联关系、迁移 |
+| **中间件** | `internal/middleware/` | 认证、CORS、请求日志 |
+| **工具包** | `internal/pkg/` | 统一响应、常量定义、URL 规范化 |
+
+### 依赖注入
+
+```
+Config → DB → Repositories → Services → Handlers → Router
+```
+
+采用手动构造函数注入，清晰明确，无需 DI 容器。
+
+### 外部集成
+
+```
+┌─────────────────────────────────────────────────────────────┐
+│                      Caddy (反向代理)                        │
+│                    + Authelia (认证)                          │
+└───────────────────────────┬─────────────────────────────────┘
+                            │ Remote-User Header
+┌───────────────────────────▼─────────────────────────────────┐
+│                     Bellkeeper Backend                        │
+│  ┌─────────────┐  ┌──────────────┐  ┌────────────────────┐  │
+│  │  Middleware  │→ │   Handler    │→ │     Service        │  │
+│  │  Auth/CORS  │  │  (HTTP API)  │  │  (Business Logic)  │  │
+│  │  Logger     │  │              │  │                    │  │
+│  └─────────────┘  └──────────────┘  └────────┬───────────┘  │
+│                                               │              │
+│                                    ┌──────────▼───────────┐  │
+│                                    │    Repository        │  │
+│                                    │  (Data Access)       │  │
+│                                    └──────────┬───────────┘  │
+│                                               │              │
+│  ┌────────────────────────────────────────────┼───────────┐  │
+│  │               SolidJS Frontend (嵌入)       │           │  │
+│  │  Dashboard | Tags | DataSources | RSS      │           │  │
+│  │  Datasets | Documents | Webhooks           │           │  │
+│  │  Workflows | Settings                      │           │  │
+│  └────────────────────────────────────────────┼───────────┘  │
+└───────────────────────────────────────────────┼──────────────┘
+          │                                     │
+    ┌─────▼─────┐  ┌──────▼──────┐  ┌─────────▼─────────┐
+    │ PostgreSQL │  │   RagFlow   │  │       n8n         │
+    │  (数据库)  │  │ (向量知识库) │  │  (工作流引擎)     │
+    └───────────┘  └─────────────┘  └───────────────────┘
 ```
 
 ## API 端点
@@ -397,41 +485,6 @@ Bellkeeper 使用 **Authelia Forward Auth** 进行认证。Caddy 反向代理将
 | `Remote-Groups` | 用户组 (逗号分隔) |
 
 在 `debug` 模式下，未提供认证 Header 时自动使用 `dev-user` 身份。
-
-## 架构设计
-
-```
-┌─────────────────────────────────────────────────────────────┐
-│                      Caddy (反向代理)                        │
-│                    + Authelia (认证)                          │
-└───────────────────────────┬─────────────────────────────────┘
-                            │ Remote-User Header
-┌───────────────────────────▼─────────────────────────────────┐
-│                     Bellkeeper Backend                        │
-│  ┌─────────────┐  ┌──────────────┐  ┌────────────────────┐  │
-│  │  Middleware  │→ │   Handler    │→ │     Service        │  │
-│  │  Auth/CORS  │  │  (HTTP API)  │  │  (Business Logic)  │  │
-│  │  Logger     │  │              │  │                    │  │
-│  └─────────────┘  └──────────────┘  └────────┬───────────┘  │
-│                                               │              │
-│                                    ┌──────────▼───────────┐  │
-│                                    │    Repository        │  │
-│                                    │  (Data Access)       │  │
-│                                    └──────────┬───────────┘  │
-│                                               │              │
-│  ┌────────────────────────────────────────────┼───────────┐  │
-│  │               SolidJS Frontend (嵌入)       │           │  │
-│  │  Dashboard | Tags | DataSources | RSS      │           │  │
-│  │  Datasets | Documents | Webhooks           │           │  │
-│  │  Workflows | Settings                      │           │  │
-│  └────────────────────────────────────────────┼───────────┘  │
-└───────────────────────────────────────────────┼──────────────┘
-          │                                     │
-    ┌─────▼─────┐  ┌──────▼──────┐  ┌─────────▼─────────┐
-    │ PostgreSQL │  │   RagFlow   │  │       n8n         │
-    │  (数据库)  │  │ (向量知识库) │  │  (工作流引擎)     │
-    └───────────┘  └─────────────┘  └───────────────────┘
-```
 
 ## License
 

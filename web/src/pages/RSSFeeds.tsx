@@ -395,7 +395,7 @@ const RSSFeeds: Component = () => {
           </div>
           <div>
             <label class="label">标签</label>
-            <div class="flex flex-wrap gap-2 p-3 bg-dark-800/50 rounded-xl border border-dark-700/50">
+            <div class="flex flex-wrap gap-2 p-3 bg-dark-700/50 rounded-xl border border-dark-600/50">
               <Show when={allTags()?.data && allTags()!.data.length > 0} fallback={
                 <span class="text-dark-500 text-sm">暂无标签，请先创建标签</span>
               }>

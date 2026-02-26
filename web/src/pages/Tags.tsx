@@ -272,7 +272,7 @@ const Tags: Component = () => {
             <div class="flex items-center gap-3">
               <input
                 type="color"
-                class="w-12 h-12 rounded-xl cursor-pointer border-2 border-dark-700 bg-dark-800"
+                class="w-12 h-12 rounded-xl cursor-pointer border-2 border-dark-600 bg-dark-700"
                 value={form().color}
                 onInput={(e) => setForm({ ...form(), color: e.currentTarget.value })}
               />

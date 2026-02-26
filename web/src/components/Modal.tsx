@@ -66,7 +66,7 @@ const Modal: Component<ModalProps> = (props) => {
               <div class="modal-header flex items-center justify-between">
                 <h3 class="text-lg font-semibold text-white">{props.title}</h3>
                 <button
-                  class="text-dark-400 hover:text-white transition-colors p-1 rounded-lg hover:bg-dark-800"
+                  class="text-dark-400 hover:text-white transition-colors p-1 rounded-lg hover:bg-dark-700"
                   onClick={props.onClose}
                 >
                   <svg class="w-5 h-5" fill="none" viewBox="0 0 24 24" stroke="currentColor">

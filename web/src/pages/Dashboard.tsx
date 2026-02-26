@@ -92,7 +92,7 @@ const Dashboard: Component = () => {
           {(stat) => (
             <div class="card card-hover">
               <div class="flex items-center gap-3">
-                <div class={`w-10 h-10 rounded-lg flex items-center justify-center bg-dark-800/50 ${stat.color}`}>
+                <div class={`w-10 h-10 rounded-lg flex items-center justify-center bg-dark-700/50 ${stat.color}`}>
                   <svg class="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
                     <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d={stat.icon} />
                   </svg>
@@ -121,7 +121,7 @@ const Dashboard: Component = () => {
               <div class="space-y-3">
                 <For each={Object.entries(h().services || {})}>
                   {([name, status]) => (
-                    <div class="flex items-center justify-between p-3 bg-dark-800/50 rounded-xl">
+                    <div class="flex items-center justify-between p-3 bg-dark-700/50 rounded-xl">
                       <div class="flex items-center gap-3">
                         <span class={`status-dot ${
                           status.status === 'up' ? 'status-dot-success' : 'status-dot-danger'
@@ -165,7 +165,7 @@ const Dashboard: Component = () => {
             <div class="space-y-3">
               <For each={workflows()?.data.slice(0, 5)}>
                 {(workflow) => (
-                  <div class="flex items-center justify-between p-3 bg-dark-800/50 rounded-xl group hover:bg-dark-800/70 transition-colors">
+                  <div class="flex items-center justify-between p-3 bg-dark-700/50 rounded-xl group hover:bg-dark-700/70 transition-colors">
                     <div class="flex items-center gap-3">
                       <span class={`status-dot ${
                         workflow.active ? 'status-dot-success' : 'status-dot-gray'

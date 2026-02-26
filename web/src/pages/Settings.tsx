@@ -69,7 +69,7 @@ const Settings: Component = () => {
                 class="flex items-center gap-2 px-4 py-2 rounded-xl transition-all"
                 classList={{
                   'bg-primary-600 text-white shadow-lg shadow-primary-500/25': category() === cat.value,
-                  'text-dark-400 hover:text-white hover:bg-dark-800/50': category() !== cat.value,
+                  'text-dark-400 hover:text-white hover:bg-dark-700/50': category() !== cat.value,
                 }}
                 onClick={() => setCategory(cat.value)}
               >
@@ -113,7 +113,7 @@ const Settings: Component = () => {
                     <div class="flex items-start justify-between gap-4">
                       <div class="flex-1 min-w-0">
                         <div class="flex items-center gap-2 flex-wrap">
-                          <code class="font-mono text-sm text-white bg-dark-800/50 px-2 py-1 rounded">
+                          <code class="font-mono text-sm text-white bg-dark-700/50 px-2 py-1 rounded">
                             {setting.key}
                           </code>
                           <span class="badge badge-gray">{setting.value_type}</span>
@@ -129,7 +129,7 @@ const Settings: Component = () => {
                           fallback={
                             <div class="flex items-center gap-3">
                               <div class="text-right">
-                                <code class="font-mono text-sm text-dark-300 bg-dark-800/50 px-3 py-1.5 rounded-lg block max-w-[200px] truncate">
+                                <code class="font-mono text-sm text-dark-300 bg-dark-700/50 px-3 py-1.5 rounded-lg block max-w-[200px] truncate">
                                   {setting.is_secret ? '••••••••' : setting.value || '(空)'}
                                 </code>
                               </div>

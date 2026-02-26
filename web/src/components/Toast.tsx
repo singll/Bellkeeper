@@ -94,7 +94,7 @@ export const ToastProvider: ParentComponent = (props) => {
         <For each={toasts()}>
           {(toast) => (
             <div
-              class={`pointer-events-auto flex items-center gap-3 px-4 py-3 bg-dark-800/95 backdrop-blur-md border border-dark-700/50 border-l-4 ${getBorderColor(toast.type)} rounded-xl shadow-lg animate-slide-down max-w-sm`}
+              class={`pointer-events-auto flex items-center gap-3 px-4 py-3 bg-dark-700/95 backdrop-blur-md border border-dark-600/50 border-l-4 ${getBorderColor(toast.type)} rounded-xl shadow-lg animate-slide-down max-w-sm`}
             >
               {getIcon(toast.type)}
               <p class="text-sm text-dark-100 flex-1">{toast.message}</p>

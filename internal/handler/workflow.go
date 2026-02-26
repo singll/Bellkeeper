@@ -5,6 +5,7 @@ import (
 	"strconv"
 
 	"github.com/gin-gonic/gin"
+	"github.com/singll/bellkeeper/internal/pkg/response"
 	"github.com/singll/bellkeeper/internal/service"
 )
 
@@ -19,11 +20,11 @@ func NewWorkflowHandler(svc *service.WorkflowService) *WorkflowHandler {
 func (h *WorkflowHandler) Status(c *gin.Context) {
 	status, err := h.svc.Status()
 	if err != nil {
-		c.JSON(http.StatusInternalServerError, gin.H{"error": err.Error()})
+		response.InternalError(c, err.Error())
 		return
 	}
 
-	c.JSON(http.StatusOK, gin.H{"data": status})
+	response.Success(c, status)
 }
 
 func (h *WorkflowHandler) Get(c *gin.Context) {
@@ -31,33 +32,33 @@ func (h *WorkflowHandler) Get(c *gin.Context) {
 
 	workflow, err := h.svc.GetWorkflow(id)
 	if err != nil {
-		c.JSON(http.StatusInternalServerError, gin.H{"error": err.Error()})
+		response.InternalError(c, err.Error())
 		return
 	}
 
-	c.JSON(http.StatusOK, gin.H{"data": workflow})
+	response.Success(c, workflow)
 }
 
 func (h *WorkflowHandler) Activate(c *gin.Context) {
 	id := c.Param("id")
 
 	if err := h.svc.ActivateWorkflow(id); err != nil {
-		c.JSON(http.StatusInternalServerError, gin.H{"error": err.Error()})
+		response.InternalError(c, err.Error())
 		return
 	}
 
-	c.JSON(http.StatusOK, gin.H{"message": "workflow activated"})
+	response.Message(c, "workflow activated")
 }
 
 func (h *WorkflowHandler) Deactivate(c *gin.Context) {
 	id := c.Param("id")
 
 	if err := h.svc.DeactivateWorkflow(id); err != nil {
-		c.JSON(http.StatusInternalServerError, gin.H{"error": err.Error()})
+		response.InternalError(c, err.Error())
 		return
 	}
 
-	c.JSON(http.StatusOK, gin.H{"message": "workflow deactivated"})
+	response.Message(c, "workflow deactivated")
 }
 
 func (h *WorkflowHandler) Executions(c *gin.Context) {
@@ -71,11 +72,11 @@ func (h *WorkflowHandler) Executions(c *gin.Context) {
 
 	executions, err := h.svc.GetExecutions(workflowID, limit)
 	if err != nil {
-		c.JSON(http.StatusInternalServerError, gin.H{"error": err.Error()})
+		response.InternalError(c, err.Error())
 		return
 	}
 
-	c.JSON(http.StatusOK, gin.H{"data": executions})
+	response.Success(c, executions)
 }
 
 func (h *WorkflowHandler) Trigger(c *gin.Context) {
@@ -90,5 +91,5 @@ func (h *WorkflowHandler) Trigger(c *gin.Context) {
 		return
 	}
 
-	c.JSON(http.StatusOK, gin.H{"data": result})
+	response.Success(c, result)
 }

@@ -7,6 +7,8 @@ import (
 
 	"github.com/gin-gonic/gin"
 	"github.com/singll/bellkeeper/internal/model"
+	"github.com/singll/bellkeeper/internal/pkg/defaults"
+	"github.com/singll/bellkeeper/internal/pkg/response"
 	"github.com/singll/bellkeeper/internal/service"
 	"gorm.io/datatypes"
 )
@@ -32,43 +34,36 @@ func NewWebhookHandler(svc *service.WebhookService) *WebhookHandler {
 }
 
 func (h *WebhookHandler) List(c *gin.Context) {
-	page, _ := strconv.Atoi(c.DefaultQuery("page", "1"))
-	perPage, _ := strconv.Atoi(c.DefaultQuery("per_page", "20"))
+	page, perPage := response.ParsePagination(c)
 
 	webhooks, total, err := h.svc.List(page, perPage)
 	if err != nil {
-		c.JSON(http.StatusInternalServerError, gin.H{"error": err.Error()})
+		response.InternalError(c, err.Error())
 		return
 	}
 
-	c.JSON(http.StatusOK, gin.H{
-		"data":     webhooks,
-		"total":    total,
-		"page":     page,
-		"per_page": perPage,
-	})
+	response.Page(c, webhooks, total, page, perPage)
 }
 
 func (h *WebhookHandler) Get(c *gin.Context) {
-	id, err := strconv.ParseUint(c.Param("id"), 10, 32)
-	if err != nil {
-		c.JSON(http.StatusBadRequest, gin.H{"error": "invalid id"})
+	id, ok := response.ParseID(c, "id")
+	if !ok {
 		return
 	}
 
-	webhook, err := h.svc.GetByID(uint(id))
+	webhook, err := h.svc.GetByID(id)
 	if err != nil {
-		c.JSON(http.StatusNotFound, gin.H{"error": "webhook not found"})
+		response.NotFound(c, "webhook not found")
 		return
 	}
 
-	c.JSON(http.StatusOK, gin.H{"data": webhook})
+	response.Success(c, webhook)
 }
 
 func (h *WebhookHandler) Create(c *gin.Context) {
 	var req WebhookRequest
 	if err := c.ShouldBindJSON(&req); err != nil {
-		c.JSON(http.StatusBadRequest, gin.H{"error": err.Error()})
+		response.BadRequest(c, err.Error())
 		return
 	}
 
@@ -79,7 +74,11 @@ func (h *WebhookHandler) Create(c *gin.Context) {
 
 	var headersJSON datatypes.JSON
 	if req.Headers != nil {
-		data, _ := json.Marshal(req.Headers)
+		data, err := json.Marshal(req.Headers)
+		if err != nil {
+			response.BadRequest(c, "invalid headers format")
+			return
+		}
 		headersJSON = datatypes.JSON(data)
 	}
 
@@ -96,39 +95,38 @@ func (h *WebhookHandler) Create(c *gin.Context) {
 	}
 
 	if webhook.Method == "" {
-		webhook.Method = "POST"
+		webhook.Method = defaults.DefaultWebhookMethod
 	}
 	if webhook.ContentType == "" {
-		webhook.ContentType = "application/json"
+		webhook.ContentType = defaults.DefaultWebhookContentType
 	}
 	if webhook.TimeoutSeconds == 0 {
-		webhook.TimeoutSeconds = 30
+		webhook.TimeoutSeconds = defaults.DefaultWebhookTimeout
 	}
 
 	if err := h.svc.Create(webhook); err != nil {
-		c.JSON(http.StatusInternalServerError, gin.H{"error": err.Error()})
+		response.InternalError(c, err.Error())
 		return
 	}
 
-	c.JSON(http.StatusCreated, gin.H{"data": webhook})
+	response.Created(c, webhook)
 }
 
 func (h *WebhookHandler) Update(c *gin.Context) {
-	id, err := strconv.ParseUint(c.Param("id"), 10, 32)
-	if err != nil {
-		c.JSON(http.StatusBadRequest, gin.H{"error": "invalid id"})
+	id, ok := response.ParseID(c, "id")
+	if !ok {
 		return
 	}
 
-	webhook, err := h.svc.GetByID(uint(id))
+	webhook, err := h.svc.GetByID(id)
 	if err != nil {
-		c.JSON(http.StatusNotFound, gin.H{"error": "webhook not found"})
+		response.NotFound(c, "webhook not found")
 		return
 	}
 
 	var req WebhookRequest
 	if err := c.ShouldBindJSON(&req); err != nil {
-		c.JSON(http.StatusBadRequest, gin.H{"error": err.Error()})
+		response.BadRequest(c, err.Error())
 		return
 	}
 
@@ -141,7 +139,11 @@ func (h *WebhookHandler) Update(c *gin.Context) {
 		webhook.ContentType = req.ContentType
 	}
 	if req.Headers != nil {
-		data, _ := json.Marshal(req.Headers)
+		data, err := json.Marshal(req.Headers)
+		if err != nil {
+			response.BadRequest(c, "invalid headers format")
+			return
+		}
 		webhook.Headers = datatypes.JSON(data)
 	}
 	webhook.BodyTemplate = req.BodyTemplate
@@ -154,32 +156,30 @@ func (h *WebhookHandler) Update(c *gin.Context) {
 	}
 
 	if err := h.svc.Update(webhook); err != nil {
-		c.JSON(http.StatusInternalServerError, gin.H{"error": err.Error()})
+		response.InternalError(c, err.Error())
 		return
 	}
 
-	c.JSON(http.StatusOK, gin.H{"data": webhook})
+	response.Success(c, webhook)
 }
 
 func (h *WebhookHandler) Delete(c *gin.Context) {
-	id, err := strconv.ParseUint(c.Param("id"), 10, 32)
-	if err != nil {
-		c.JSON(http.StatusBadRequest, gin.H{"error": "invalid id"})
+	id, ok := response.ParseID(c, "id")
+	if !ok {
 		return
 	}
 
-	if err := h.svc.Delete(uint(id)); err != nil {
-		c.JSON(http.StatusInternalServerError, gin.H{"error": err.Error()})
+	if err := h.svc.Delete(id); err != nil {
+		response.InternalError(c, err.Error())
 		return
 	}
 
-	c.JSON(http.StatusOK, gin.H{"message": "deleted"})
+	response.Deleted(c)
 }
 
 func (h *WebhookHandler) Trigger(c *gin.Context) {
-	id, err := strconv.ParseUint(c.Param("id"), 10, 32)
-	if err != nil {
-		c.JSON(http.StatusBadRequest, gin.H{"error": "invalid id"})
+	id, ok := response.ParseID(c, "id")
+	if !ok {
 		return
 	}
 
@@ -189,25 +189,18 @@ func (h *WebhookHandler) Trigger(c *gin.Context) {
 	}
 	c.ShouldBindJSON(&req)
 
-	// Use template-aware trigger if variables are provided or body_template exists
-	var history *model.WebhookHistory
-	if req.Variables != nil {
-		history, err = h.svc.TriggerWithVariables(uint(id), req.Payload, req.Variables)
-	} else {
-		history, err = h.svc.TriggerWithVariables(uint(id), req.Payload, nil)
-	}
+	history, err := h.svc.TriggerWithVariables(id, req.Payload, req.Variables)
 	if err != nil {
 		c.JSON(http.StatusInternalServerError, gin.H{"error": err.Error(), "history": history})
 		return
 	}
 
-	c.JSON(http.StatusOK, gin.H{"data": history})
+	response.Success(c, history)
 }
 
 func (h *WebhookHandler) History(c *gin.Context) {
-	id, err := strconv.ParseUint(c.Param("id"), 10, 32)
-	if err != nil {
-		c.JSON(http.StatusBadRequest, gin.H{"error": "invalid id"})
+	id, ok := response.ParseID(c, "id")
+	if !ok {
 		return
 	}
 
@@ -215,15 +208,16 @@ func (h *WebhookHandler) History(c *gin.Context) {
 	status := c.Query("status")
 
 	var history []model.WebhookHistory
+	var err error
 	if status != "" {
-		history, err = h.svc.GetHistoryByStatus(uint(id), status, limit)
+		history, err = h.svc.GetHistoryByStatus(id, status, limit)
 	} else {
-		history, err = h.svc.GetHistory(uint(id), limit)
+		history, err = h.svc.GetHistory(id, limit)
 	}
 	if err != nil {
-		c.JSON(http.StatusInternalServerError, gin.H{"error": err.Error()})
+		response.InternalError(c, err.Error())
 		return
 	}
 
-	c.JSON(http.StatusOK, gin.H{"data": history})
+	response.Success(c, history)
 }
