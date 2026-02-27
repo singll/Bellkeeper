@@ -17,9 +17,10 @@ type Config struct {
 }
 
 type ServerConfig struct {
-	Host string `mapstructure:"host"`
-	Port int    `mapstructure:"port"`
-	Mode string `mapstructure:"mode"` // debug, release
+	Host   string `mapstructure:"host"`
+	Port   int    `mapstructure:"port"`
+	Mode   string `mapstructure:"mode"`    // debug, release
+	APIKey string `mapstructure:"api_key"` // API Key for internal service auth
 }
 
 type DatabaseConfig struct {

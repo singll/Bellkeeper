@@ -15,12 +15,24 @@ type UserInfo struct {
 	Groups   []string `json:"groups"`
 }
 
-// AutheliaAuth middleware validates Authelia headers
-func AutheliaAuth(mode string) gin.HandlerFunc {
+// AutheliaAuth middleware validates Authelia headers or API Key
+func AutheliaAuth(mode string, apiKey string) gin.HandlerFunc {
 	return func(c *gin.Context) {
+		// 1. API Key authentication (for internal service calls like n8n)
+		if apiKey != "" && c.GetHeader("X-API-Key") == apiKey {
+			c.Set("user", UserInfo{
+				Username: "api-service",
+				Email:    "api@internal",
+				Name:     "API Service",
+				Groups:   []string{"admins"},
+			})
+			c.Next()
+			return
+		}
+
 		user := c.GetHeader("Remote-User")
 
-		// In debug mode, allow requests without auth
+		// 2. In debug mode, allow requests without auth
 		if mode == "debug" && user == "" {
 			user = "dev-user"
 			c.Set("user", UserInfo{

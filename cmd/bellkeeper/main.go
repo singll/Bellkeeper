@@ -94,7 +94,7 @@ func runServer(cmd *cobra.Command, args []string) {
 	r.Use(middleware.Logger())
 
 	// Register all routes
-	router.Setup(r, handlers, cfg.Server.Mode)
+	router.Setup(r, handlers, cfg.Server.Mode, cfg.Server.APIKey)
 
 	// Serve frontend static files
 	if _, err := os.Stat("web/dist"); err == nil {

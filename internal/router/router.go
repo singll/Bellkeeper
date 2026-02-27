@@ -7,14 +7,14 @@ import (
 )
 
 // Setup configures all routes on the Gin engine.
-func Setup(r *gin.Engine, handlers *handler.Handlers, mode string) {
+func Setup(r *gin.Engine, handlers *handler.Handlers, mode string, apiKey string) {
 	// Health check (no auth required)
 	r.GET("/api/health", handlers.Health.Check)
 	r.GET("/api/health/detailed", handlers.Health.Detailed)
 
-	// API routes (with Authelia auth)
+	// API routes (with Authelia auth + API Key support)
 	api := r.Group("/api")
-	api.Use(middleware.AutheliaAuth(mode))
+	api.Use(middleware.AutheliaAuth(mode, apiKey))
 
 	registerTagRoutes(api, handlers.Tag)
 	registerDataSourceRoutes(api, handlers.DataSource)
