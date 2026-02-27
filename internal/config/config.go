@@ -105,6 +105,7 @@ func setDefaults(v *viper.Viper) {
 	v.SetDefault("server.host", "0.0.0.0")
 	v.SetDefault("server.port", 8080)
 	v.SetDefault("server.mode", "debug")
+	v.SetDefault("server.api_key", "")
 
 	// Database
 	v.SetDefault("database.driver", "postgres")
