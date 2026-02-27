@@ -1,5 +1,5 @@
 import { Component, createSignal, createResource, For, Show } from 'solid-js'
-import { settingsApi } from '@/api'
+import { settingsApi, systemApi, healthApi } from '@/api'
 import { useToast } from '@/components/Toast'
 import type { Setting } from '@/types'
 
@@ -9,6 +9,8 @@ const Settings: Component = () => {
   const [editingKey, setEditingKey] = createSignal<string | null>(null)
   const [editValue, setEditValue] = createSignal('')
   const [saving, setSaving] = createSignal(false)
+  const [restarting, setRestarting] = createSignal(false)
+  const [showRestartConfirm, setShowRestartConfirm] = createSignal(false)
 
   const [settings, { refetch }] = createResource(
     () => category(),
@@ -52,8 +54,91 @@ const Settings: Component = () => {
     }
   }
 
+  const pollHealth = (): Promise<void> => {
+    return new Promise((resolve, reject) => {
+      let attempts = 0
+      const maxAttempts = 15
+      const interval = setInterval(async () => {
+        attempts++
+        try {
+          await healthApi.check()
+          clearInterval(interval)
+          resolve()
+        } catch {
+          if (attempts >= maxAttempts) {
+            clearInterval(interval)
+            reject(new Error('Service did not come back within 30s'))
+          }
+        }
+      }, 2000)
+    })
+  }
+
+  const handleRestart = async () => {
+    setShowRestartConfirm(false)
+    setRestarting(true)
+    try {
+      await systemApi.restart()
+    } catch {
+      // Expected: connection may close before response arrives
+    }
+
+    // Wait a moment for the server to begin shutting down
+    await new Promise(r => setTimeout(r, 2000))
+
+    try {
+      await pollHealth()
+      toast.success('服务已重启完成')
+      // Reload to pick up any config changes
+      setTimeout(() => window.location.reload(), 500)
+    } catch {
+      toast.error('服务重启超时，请手动刷新页面')
+      setRestarting(false)
+    }
+  }
+
   return (
     <div class="animate-fade-in">
+      {/* Restart overlay */}
+      <Show when={restarting()}>
+        <div class="fixed inset-0 bg-dark-900/80 backdrop-blur-sm z-50 flex items-center justify-center">
+          <div class="text-center">
+            <div class="loading-spinner w-10 h-10 mx-auto mb-4" />
+            <p class="text-lg text-white font-medium">正在重启服务...</p>
+            <p class="text-sm text-dark-400 mt-2">请稍候，服务将在几秒内恢复</p>
+          </div>
+        </div>
+      </Show>
+
+      {/* Restart confirmation dialog */}
+      <Show when={showRestartConfirm()}>
+        <div class="fixed inset-0 bg-dark-900/60 backdrop-blur-sm z-50 flex items-center justify-center" onClick={() => setShowRestartConfirm(false)}>
+          <div class="card max-w-md mx-4 shadow-2xl" onClick={(e) => e.stopPropagation()}>
+            <div class="flex items-start gap-3 mb-4">
+              <div class="w-10 h-10 rounded-full bg-amber-500/20 flex items-center justify-center flex-shrink-0">
+                <svg class="w-5 h-5 text-amber-400" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                  <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M12 9v2m0 4h.01m-6.938 4h13.856c1.54 0 2.502-1.667 1.732-2.5L13.732 4c-.77-.833-1.964-.833-2.732 0L4.082 16.5c-.77.833.192 2.5 1.732 2.5z" />
+                </svg>
+              </div>
+              <div>
+                <h3 class="text-lg font-semibold text-white">确认重启服务</h3>
+                <p class="text-sm text-dark-400 mt-1">
+                  服务将会优雅关闭并自动重启。进行中的请求会被等待完成，重启过程约需 5-10 秒。
+                </p>
+              </div>
+            </div>
+            <div class="flex justify-end gap-3">
+              <button class="btn btn-ghost" onClick={() => setShowRestartConfirm(false)}>
+                取消
+              </button>
+              <button class="btn bg-amber-500 hover:bg-amber-600 text-white" onClick={handleRestart}>
+                确认重启
+              </button>
+            </div>
+          </div>
+        </div>
+      </Show>
+
       {/* Header */}
       <div class="mb-6">
         <h1 class="text-2xl font-bold text-white">系统设置</h1>
@@ -197,6 +282,26 @@ const Settings: Component = () => {
             </div>
           </Show>
         </Show>
+      </div>
+
+      {/* System Operations Card */}
+      <div class="card mt-6">
+        <div class="flex items-center justify-between">
+          <div>
+            <h3 class="text-base font-semibold text-white">系统操作</h3>
+            <p class="text-sm text-dark-400 mt-1">修改 API 配置后需重启服务才能生效</p>
+          </div>
+          <button
+            class="btn bg-amber-500/20 text-amber-400 hover:bg-amber-500/30 border border-amber-500/30"
+            onClick={() => setShowRestartConfirm(true)}
+            disabled={restarting()}
+          >
+            <svg class="w-4 h-4 mr-2" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+              <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M4 4v5h.582m15.356 2A8.001 8.001 0 004.582 9m0 0H9m11 11v-5h-.581m0 0a8.003 8.003 0 01-15.357-2m15.357 2H15" />
+            </svg>
+            重启服务
+          </button>
+        </div>
       </div>
 
       {/* Info Card */}

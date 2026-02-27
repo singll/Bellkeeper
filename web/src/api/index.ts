@@ -194,6 +194,12 @@ export const healthApi = {
   detailed: () => request<HealthStatus>('/health/detailed'),
 }
 
+// System API
+export const systemApi = {
+  restart: () =>
+    request<{ message: string }>('/system/restart', { method: 'POST' }),
+}
+
 // Workflows API
 export const workflowsApi = {
   list: () => request<{ data: Workflow[] }>('/workflows/status'),

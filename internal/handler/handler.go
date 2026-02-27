@@ -15,10 +15,11 @@ type Handlers struct {
 	RagFlow    *RagFlowHandler
 	Health     *HealthHandler
 	Workflow   *WorkflowHandler
+	System     *SystemHandler
 }
 
 // NewHandlers creates all handler instances
-func NewHandlers(services *service.Services) *Handlers {
+func NewHandlers(services *service.Services, shutdownChan chan struct{}) *Handlers {
 	return &Handlers{
 		Tag:        NewTagHandler(services.Tag),
 		DataSource: NewDataSourceHandler(services.DataSource),
@@ -29,5 +30,6 @@ func NewHandlers(services *service.Services) *Handlers {
 		RagFlow:    NewRagFlowHandler(services.RagFlow),
 		Health:     NewHealthHandler(services.Health),
 		Workflow:   NewWorkflowHandler(services.Workflow),
+		System:     NewSystemHandler(shutdownChan),
 	}
 }

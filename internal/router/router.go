@@ -24,6 +24,7 @@ func Setup(r *gin.Engine, handlers *handler.Handlers, mode string, apiKey string
 	registerRagFlowRoutes(api, handlers.RagFlow)
 	registerSettingRoutes(api, handlers.Setting)
 	registerWorkflowRoutes(api, handlers.Workflow)
+	registerSystemRoutes(api, handlers.System)
 }
 
 func registerTagRoutes(api *gin.RouterGroup, h *handler.TagHandler) {
@@ -118,4 +119,8 @@ func registerWorkflowRoutes(api *gin.RouterGroup, h *handler.WorkflowHandler) {
 	api.POST("/workflows/:id/deactivate", h.Deactivate)
 	api.GET("/workflows/executions", h.Executions)
 	api.POST("/workflows/trigger/:name", h.Trigger)
+}
+
+func registerSystemRoutes(api *gin.RouterGroup, h *handler.SystemHandler) {
+	api.POST("/system/restart", h.Restart)
 }

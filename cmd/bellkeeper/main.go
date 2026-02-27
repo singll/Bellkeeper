@@ -1,9 +1,14 @@
 package main
 
 import (
+	"context"
 	"fmt"
 	"log"
+	"net/http"
 	"os"
+	"os/signal"
+	"syscall"
+	"time"
 
 	"github.com/singll/bellkeeper/internal/config"
 	"github.com/singll/bellkeeper/internal/handler"
@@ -77,10 +82,13 @@ func runServer(cmd *cobra.Command, args []string) {
 		log.Fatalf("Failed to run migrations: %v", err)
 	}
 
+	// Shutdown channel for restart functionality
+	shutdownChan := make(chan struct{}, 1)
+
 	// Initialize layers: Repository → Service → Handler
 	repos := repository.NewRepositories(db)
 	services := service.NewServices(repos, cfg, version)
-	handlers := handler.NewHandlers(services)
+	handlers := handler.NewHandlers(services, shutdownChan)
 
 	// Setup Gin
 	if cfg.Server.Mode == "release" {
@@ -111,12 +119,46 @@ func runServer(cmd *cobra.Command, args []string) {
 		})
 	}
 
-	// Start server
+	// Create http.Server for graceful shutdown
 	addr := fmt.Sprintf("%s:%d", cfg.Server.Host, cfg.Server.Port)
-	log.Printf("Bellkeeper server starting on %s", addr)
-	if err := r.Run(addr); err != nil {
-		log.Fatalf("Failed to start server: %v", err)
+	srv := &http.Server{
+		Addr:    addr,
+		Handler: r,
 	}
+
+	// Start server in goroutine
+	go func() {
+		log.Printf("Bellkeeper server starting on %s", addr)
+		if err := srv.ListenAndServe(); err != nil && err != http.ErrServerClosed {
+			log.Fatalf("Failed to start server: %v", err)
+		}
+	}()
+
+	// Wait for shutdown signal (OS signal or restart request)
+	quit := make(chan os.Signal, 1)
+	signal.Notify(quit, syscall.SIGINT, syscall.SIGTERM)
+
+	select {
+	case sig := <-quit:
+		log.Printf("Received signal %v, shutting down...", sig)
+	case <-shutdownChan:
+		log.Println("Restart requested, shutting down gracefully...")
+	}
+
+	// Graceful shutdown with 10 second timeout
+	ctx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
+	defer cancel()
+
+	if err := srv.Shutdown(ctx); err != nil {
+		log.Printf("Server forced shutdown: %v", err)
+	}
+
+	// Close database connection
+	if sqlDB, err := db.DB(); err == nil {
+		sqlDB.Close()
+	}
+
+	log.Println("Server exited")
 }
 
 func runMigrate(cmd *cobra.Command, args []string) {
