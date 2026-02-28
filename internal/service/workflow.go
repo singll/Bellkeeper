@@ -9,18 +9,46 @@ import (
 	"time"
 
 	"github.com/singll/bellkeeper/internal/config"
+	"github.com/singll/bellkeeper/internal/repository"
 )
 
 type WorkflowService struct {
-	cfg    config.N8NConfig
-	client *http.Client
+	cfg         config.N8NConfig
+	settingRepo *repository.SettingRepository
+	client      *http.Client
 }
 
-func NewWorkflowService(cfg config.N8NConfig) *WorkflowService {
+func NewWorkflowService(cfg config.N8NConfig, settingRepo *repository.SettingRepository) *WorkflowService {
 	return &WorkflowService{
-		cfg:    cfg,
-		client: &http.Client{Timeout: 30 * time.Second},
+		cfg:         cfg,
+		settingRepo: settingRepo,
+		client:      &http.Client{Timeout: 30 * time.Second},
 	}
+}
+
+// getEffectiveConfig returns the n8n config, falling back to DB settings when startup config is empty.
+func (s *WorkflowService) getEffectiveConfig() (apiKey, apiBaseURL, webhookBaseURL string) {
+	apiKey = s.cfg.APIKey
+	apiBaseURL = s.cfg.APIBaseURL
+	webhookBaseURL = s.cfg.WebhookBaseURL
+
+	if apiKey == "" {
+		if setting, err := s.settingRepo.GetByKey("n8n_api_key"); err == nil && setting.Value != "" {
+			apiKey = setting.Value
+		}
+	}
+	if apiBaseURL == "" || apiBaseURL == "http://n8n:5678/api/v1" {
+		if setting, err := s.settingRepo.GetByKey("n8n_api_base_url"); err == nil && setting.Value != "" {
+			apiBaseURL = setting.Value
+		}
+	}
+	if webhookBaseURL == "" || webhookBaseURL == "http://n8n:5678" {
+		if setting, err := s.settingRepo.GetByKey("n8n_webhook_base_url"); err == nil && setting.Value != "" {
+			webhookBaseURL = setting.Value
+		}
+	}
+
+	return
 }
 
 type WorkflowStatus struct {
@@ -84,16 +112,18 @@ type n8nExecution struct {
 
 // Status retrieves the list of workflows from n8n
 func (s *WorkflowService) Status() ([]WorkflowStatus, error) {
-	if s.cfg.APIKey == "" {
-		return []WorkflowStatus{}, nil
+	apiKey, apiBaseURL, _ := s.getEffectiveConfig()
+
+	if apiKey == "" {
+		return nil, fmt.Errorf("n8n API key not configured: please set N8N_API_KEY environment variable or configure n8n_api_key in settings")
 	}
 
-	req, err := http.NewRequest("GET", s.cfg.APIBaseURL+"/workflows", nil)
+	req, err := http.NewRequest("GET", apiBaseURL+"/workflows", nil)
 	if err != nil {
 		return nil, fmt.Errorf("failed to create request: %w", err)
 	}
 
-	req.Header.Set("X-N8N-API-KEY", s.cfg.APIKey)
+	req.Header.Set("X-N8N-API-KEY", apiKey)
 	req.Header.Set("Accept", "application/json")
 
 	resp, err := s.client.Do(req)
@@ -138,16 +168,18 @@ func (s *WorkflowService) Status() ([]WorkflowStatus, error) {
 
 // GetWorkflow retrieves a single workflow by ID
 func (s *WorkflowService) GetWorkflow(id string) (*WorkflowStatus, error) {
-	if s.cfg.APIKey == "" {
+	apiKey, apiBaseURL, _ := s.getEffectiveConfig()
+
+	if apiKey == "" {
 		return nil, fmt.Errorf("n8n API key not configured")
 	}
 
-	req, err := http.NewRequest("GET", fmt.Sprintf("%s/workflows/%s", s.cfg.APIBaseURL, id), nil)
+	req, err := http.NewRequest("GET", fmt.Sprintf("%s/workflows/%s", apiBaseURL, id), nil)
 	if err != nil {
 		return nil, fmt.Errorf("failed to create request: %w", err)
 	}
 
-	req.Header.Set("X-N8N-API-KEY", s.cfg.APIKey)
+	req.Header.Set("X-N8N-API-KEY", apiKey)
 	req.Header.Set("Accept", "application/json")
 
 	resp, err := s.client.Do(req)
@@ -188,16 +220,18 @@ func (s *WorkflowService) GetWorkflow(id string) (*WorkflowStatus, error) {
 
 // ActivateWorkflow activates a workflow
 func (s *WorkflowService) ActivateWorkflow(id string) error {
-	if s.cfg.APIKey == "" {
+	apiKey, apiBaseURL, _ := s.getEffectiveConfig()
+
+	if apiKey == "" {
 		return fmt.Errorf("n8n API key not configured")
 	}
 
-	req, err := http.NewRequest("POST", fmt.Sprintf("%s/workflows/%s/activate", s.cfg.APIBaseURL, id), nil)
+	req, err := http.NewRequest("POST", fmt.Sprintf("%s/workflows/%s/activate", apiBaseURL, id), nil)
 	if err != nil {
 		return fmt.Errorf("failed to create request: %w", err)
 	}
 
-	req.Header.Set("X-N8N-API-KEY", s.cfg.APIKey)
+	req.Header.Set("X-N8N-API-KEY", apiKey)
 
 	resp, err := s.client.Do(req)
 	if err != nil {
@@ -214,16 +248,18 @@ func (s *WorkflowService) ActivateWorkflow(id string) error {
 
 // DeactivateWorkflow deactivates a workflow
 func (s *WorkflowService) DeactivateWorkflow(id string) error {
-	if s.cfg.APIKey == "" {
+	apiKey, apiBaseURL, _ := s.getEffectiveConfig()
+
+	if apiKey == "" {
 		return fmt.Errorf("n8n API key not configured")
 	}
 
-	req, err := http.NewRequest("POST", fmt.Sprintf("%s/workflows/%s/deactivate", s.cfg.APIBaseURL, id), nil)
+	req, err := http.NewRequest("POST", fmt.Sprintf("%s/workflows/%s/deactivate", apiBaseURL, id), nil)
 	if err != nil {
 		return fmt.Errorf("failed to create request: %w", err)
 	}
 
-	req.Header.Set("X-N8N-API-KEY", s.cfg.APIKey)
+	req.Header.Set("X-N8N-API-KEY", apiKey)
 
 	resp, err := s.client.Do(req)
 	if err != nil {
@@ -240,11 +276,13 @@ func (s *WorkflowService) DeactivateWorkflow(id string) error {
 
 // GetExecutions retrieves workflow executions
 func (s *WorkflowService) GetExecutions(workflowID string, limit int) ([]WorkflowExecution, error) {
-	if s.cfg.APIKey == "" {
+	apiKey, apiBaseURL, _ := s.getEffectiveConfig()
+
+	if apiKey == "" {
 		return nil, fmt.Errorf("n8n API key not configured")
 	}
 
-	url := fmt.Sprintf("%s/executions?limit=%d", s.cfg.APIBaseURL, limit)
+	url := fmt.Sprintf("%s/executions?limit=%d", apiBaseURL, limit)
 	if workflowID != "" {
 		url += fmt.Sprintf("&workflowId=%s", workflowID)
 	}
@@ -254,7 +292,7 @@ func (s *WorkflowService) GetExecutions(workflowID string, limit int) ([]Workflo
 		return nil, fmt.Errorf("failed to create request: %w", err)
 	}
 
-	req.Header.Set("X-N8N-API-KEY", s.cfg.APIKey)
+	req.Header.Set("X-N8N-API-KEY", apiKey)
 	req.Header.Set("Accept", "application/json")
 
 	resp, err := s.client.Do(req)
@@ -294,7 +332,9 @@ func (s *WorkflowService) GetExecutions(workflowID string, limit int) ([]Workflo
 
 // Trigger triggers a workflow via webhook
 func (s *WorkflowService) Trigger(name string, payload map[string]interface{}) (map[string]interface{}, error) {
-	url := fmt.Sprintf("%s/webhook/%s", s.cfg.WebhookBaseURL, name)
+	_, _, webhookBaseURL := s.getEffectiveConfig()
+
+	url := fmt.Sprintf("%s/webhook/%s", webhookBaseURL, name)
 
 	var body []byte
 	if payload != nil {
@@ -325,4 +365,3 @@ func (s *WorkflowService) Trigger(name string, payload map[string]interface{}) (
 
 	return result, nil
 }
-

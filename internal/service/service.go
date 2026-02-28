@@ -29,6 +29,6 @@ func NewServices(repos *repository.Repositories, cfg *config.Config, version str
 		Setting:    NewSettingService(repos.Setting),
 		RagFlow:    NewRagFlowService(cfg.RagFlow, repos.DatasetMapping, repos.Tag),
 		Health:     NewHealthService(cfg, version, repos.Tag, repos.DataSource, repos.RSS, repos.DatasetMapping),
-		Workflow:   NewWorkflowService(cfg.N8N),
+		Workflow:   NewWorkflowService(cfg.N8N, repos.Setting),
 	}
 }
