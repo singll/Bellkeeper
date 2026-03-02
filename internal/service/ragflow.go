@@ -6,6 +6,7 @@ import (
 	"fmt"
 	"io"
 	"log"
+	"mime/multipart"
 	"net/http"
 	"strings"
 	"time"
@@ -186,22 +187,27 @@ func (s *RagFlowService) CheckURLEnhanced(rawURL string, normalize bool) (map[st
 func (s *RagFlowService) uploadToRagFlow(datasetID, filename, content string) (*UploadResponse, error) {
 	url := fmt.Sprintf("%s/api/v1/datasets/%s/documents", s.cfg.BaseURL, datasetID)
 
-	payload := map[string]interface{}{
-		"name": filename,
-		"text": content,
-	}
+	// RagFlow 要求 multipart file upload，不接受 JSON body
+	var buf bytes.Buffer
+	writer := multipart.NewWriter(&buf)
 
-	body, err := json.Marshal(payload)
+	part, err := writer.CreateFormFile("file", filename)
 	if err != nil {
-		return nil, fmt.Errorf("failed to marshal request: %w", err)
+		return nil, fmt.Errorf("failed to create form file: %w", err)
+	}
+	if _, err := part.Write([]byte(content)); err != nil {
+		return nil, fmt.Errorf("failed to write content: %w", err)
+	}
+	if err := writer.Close(); err != nil {
+		return nil, fmt.Errorf("failed to close form writer: %w", err)
 	}
 
-	req, err := http.NewRequest("POST", url, bytes.NewBuffer(body))
+	req, err := http.NewRequest("POST", url, &buf)
 	if err != nil {
 		return nil, err
 	}
 
-	req.Header.Set("Content-Type", "application/json")
+	req.Header.Set("Content-Type", writer.FormDataContentType())
 	req.Header.Set("Authorization", "Bearer "+s.cfg.APIKey)
 
 	resp, err := s.client.Do(req)
