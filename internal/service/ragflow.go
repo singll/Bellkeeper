@@ -77,7 +77,11 @@ func (s *RagFlowService) UploadWithRouting(req *UploadRequest) (*UploadResponse,
 			if err != nil {
 				tag = &model.Tag{Name: tagName, Color: defaults.DefaultTagColor}
 				if err := s.tagRepo.Create(tag); err != nil {
-					return nil, "", fmt.Errorf("failed to create tag %q: %w", tagName, err)
+					// Handle race condition: another request may have created the tag concurrently
+					tag, err = s.tagRepo.GetByName(tagName)
+					if err != nil {
+						return nil, "", fmt.Errorf("failed to get or create tag %q: %w", tagName, err)
+					}
 				}
 			}
 			tagIDs = append(tagIDs, tag.ID)
