@@ -46,9 +46,9 @@ type UploadRequest struct {
 }
 
 type UploadResponse struct {
-	Code    int                    `json:"code"`
-	Message string                 `json:"message"`
-	Data    map[string]interface{} `json:"data"`
+	Code    int         `json:"code"`
+	Message string      `json:"message"`
+	Data    interface{} `json:"data"`
 }
 
 // Upload uploads a document to RagFlow
@@ -113,7 +113,19 @@ func (s *RagFlowService) UploadWithRouting(req *UploadRequest) (*UploadResponse,
 
 	// Save article-tag associations (non-fatal errors are logged)
 	if resp.Code == 0 && resp.Data != nil {
-		if docID, ok := resp.Data["id"].(string); ok {
+		// Extract document ID from response data (may be array or map)
+		var docID string
+		switch data := resp.Data.(type) {
+		case map[string]interface{}:
+			docID, _ = data["id"].(string)
+		case []interface{}:
+			if len(data) > 0 {
+				if item, ok := data[0].(map[string]interface{}); ok {
+					docID, _ = item["id"].(string)
+				}
+			}
+		}
+		if docID != "" {
 			for _, tagName := range req.Tags {
 				tag, _ := s.tagRepo.GetByName(tagName)
 				if tag != nil {
