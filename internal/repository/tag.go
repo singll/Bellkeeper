@@ -54,6 +54,38 @@ func (r *TagRepository) Create(tag *model.Tag) error {
 	return r.db.Create(tag).Error
 }
 
+// FindOrCreate gets a tag by name, creating it if it doesn't exist.
+// Handles soft-deleted tags by restoring them and concurrent creation races.
+func (r *TagRepository) FindOrCreate(name, color string) (*model.Tag, error) {
+	// 1. Try normal lookup (excludes soft-deleted)
+	var tag model.Tag
+	if err := r.db.Where("name = ?", name).First(&tag).Error; err == nil {
+		return &tag, nil
+	}
+
+	// 2. Check for soft-deleted tag and restore it
+	var softDeleted model.Tag
+	if err := r.db.Unscoped().Where("name = ?", name).First(&softDeleted).Error; err == nil {
+		// Restore: clear DeletedAt, update color
+		r.db.Unscoped().Model(&softDeleted).Updates(map[string]interface{}{
+			"deleted_at": nil,
+			"color":      color,
+		})
+		return &softDeleted, nil
+	}
+
+	// 3. Create new tag
+	tag = model.Tag{Name: name, Color: color}
+	if err := r.db.Create(&tag).Error; err != nil {
+		// 4. Race condition: another request created it concurrently
+		if err2 := r.db.Where("name = ?", name).First(&tag).Error; err2 == nil {
+			return &tag, nil
+		}
+		return nil, err
+	}
+	return &tag, nil
+}
+
 func (r *TagRepository) Update(tag *model.Tag) error {
 	return r.db.Save(tag).Error
 }
