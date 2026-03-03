@@ -1,18 +1,31 @@
 package service
 
 import (
+	"log"
+
 	"github.com/singll/bellkeeper/internal/model"
 	"github.com/singll/bellkeeper/internal/pkg/urlutil"
 	"github.com/singll/bellkeeper/internal/repository"
 )
 
+// DocumentVerifier checks if a document still exists in RAGFlow.
+// Returns true if the document exists (or on error, conservatively).
+type DocumentVerifier func(datasetID, documentID string) bool
+
 type DatasetService struct {
-	repo    *repository.DatasetMappingRepository
-	tagRepo *repository.TagRepository
+	repo     *repository.DatasetMappingRepository
+	tagRepo  *repository.TagRepository
+	verifier DocumentVerifier
 }
 
 func NewDatasetService(repo *repository.DatasetMappingRepository, tagRepo *repository.TagRepository) *DatasetService {
 	return &DatasetService{repo: repo, tagRepo: tagRepo}
+}
+
+// SetDocumentVerifier sets a function to verify document existence in RAGFlow.
+// When set, CheckURL/BatchCheckURLs will verify matches and auto-clean stale records.
+func (s *DatasetService) SetDocumentVerifier(v DocumentVerifier) {
+	s.verifier = v
 }
 
 func (s *DatasetService) List(page, perPage int) ([]model.DatasetMapping, int64, error) {
@@ -151,7 +164,26 @@ type URLCheckResult struct {
 	MatchType  string `json:"match_type,omitempty"` // "exact", "normalized", "fuzzy"
 }
 
-// CheckURL checks if a URL exists in the local ArticleTag table with optional normalization and fuzzy matching
+// verifyAndClean checks if the document still exists in RAGFlow via the verifier.
+// If the document is gone, it cleans up stale article_tags and returns false.
+// If no verifier is set, returns true (assume exists).
+func (s *DatasetService) verifyAndClean(at *model.ArticleTag) bool {
+	if s.verifier == nil {
+		return true
+	}
+	if s.verifier(at.DatasetID, at.DocumentID) {
+		return true
+	}
+	// Document no longer in RAGFlow, clean up stale records
+	log.Printf("info: document %s no longer exists in RAGFlow, cleaning up stale article_tags", at.DocumentID)
+	if err := s.repo.DeleteArticleTagsByDocumentIDs([]string{at.DocumentID}); err != nil {
+		log.Printf("warn: failed to clean up stale article_tags for document %s: %v", at.DocumentID, err)
+	}
+	return false
+}
+
+// CheckURL checks if a URL exists in the local ArticleTag table with optional normalization and fuzzy matching.
+// When a document verifier is set, matches are verified against RAGFlow and stale records are auto-cleaned.
 func (s *DatasetService) CheckURL(rawURL string, normalize bool, fuzzy bool) (*URLCheckResult, error) {
 	// 1. Exact match
 	ats, err := s.repo.FindArticleTagsByURL(rawURL)
@@ -159,14 +191,16 @@ func (s *DatasetService) CheckURL(rawURL string, normalize bool, fuzzy bool) (*U
 		return nil, err
 	}
 	if len(ats) > 0 {
-		return &URLCheckResult{
-			Exists:     true,
-			DocumentID: ats[0].DocumentID,
-			DatasetID:  ats[0].DatasetID,
-			Title:      ats[0].ArticleTitle,
-			StoredURL:  ats[0].ArticleURL,
-			MatchType:  "exact",
-		}, nil
+		if s.verifyAndClean(&ats[0]) {
+			return &URLCheckResult{
+				Exists:     true,
+				DocumentID: ats[0].DocumentID,
+				DatasetID:  ats[0].DatasetID,
+				Title:      ats[0].ArticleTitle,
+				StoredURL:  ats[0].ArticleURL,
+				MatchType:  "exact",
+			}, nil
+		}
 	}
 
 	// 2. Normalized match
@@ -176,16 +210,18 @@ func (s *DatasetService) CheckURL(rawURL string, normalize bool, fuzzy bool) (*U
 		if err != nil {
 			return nil, err
 		}
-		for _, at := range allArticles {
-			if urlutil.Normalize(at.ArticleURL) == normalizedURL {
-				return &URLCheckResult{
-					Exists:     true,
-					DocumentID: at.DocumentID,
-					DatasetID:  at.DatasetID,
-					Title:      at.ArticleTitle,
-					StoredURL:  at.ArticleURL,
-					MatchType:  "normalized",
-				}, nil
+		for i := range allArticles {
+			if urlutil.Normalize(allArticles[i].ArticleURL) == normalizedURL {
+				if s.verifyAndClean(&allArticles[i]) {
+					return &URLCheckResult{
+						Exists:     true,
+						DocumentID: allArticles[i].DocumentID,
+						DatasetID:  allArticles[i].DatasetID,
+						Title:      allArticles[i].ArticleTitle,
+						StoredURL:  allArticles[i].ArticleURL,
+						MatchType:  "normalized",
+					}, nil
+				}
 			}
 		}
 	}
@@ -196,16 +232,18 @@ func (s *DatasetService) CheckURL(rawURL string, normalize bool, fuzzy bool) (*U
 		if err != nil {
 			return nil, err
 		}
-		for _, at := range allArticles {
-			if urlutil.FuzzyMatch(rawURL, at.ArticleURL, 10) {
-				return &URLCheckResult{
-					Exists:     true,
-					DocumentID: at.DocumentID,
-					DatasetID:  at.DatasetID,
-					Title:      at.ArticleTitle,
-					StoredURL:  at.ArticleURL,
-					MatchType:  "fuzzy",
-				}, nil
+		for i := range allArticles {
+			if urlutil.FuzzyMatch(rawURL, allArticles[i].ArticleURL, 10) {
+				if s.verifyAndClean(&allArticles[i]) {
+					return &URLCheckResult{
+						Exists:     true,
+						DocumentID: allArticles[i].DocumentID,
+						DatasetID:  allArticles[i].DatasetID,
+						Title:      allArticles[i].ArticleTitle,
+						StoredURL:  allArticles[i].ArticleURL,
+						MatchType:  "fuzzy",
+					}, nil
+				}
 			}
 		}
 	}
@@ -213,7 +251,8 @@ func (s *DatasetService) CheckURL(rawURL string, normalize bool, fuzzy bool) (*U
 	return &URLCheckResult{Exists: false}, nil
 }
 
-// BatchCheckURLs checks multiple URLs at once
+// BatchCheckURLs checks multiple URLs at once.
+// When a document verifier is set, matches are verified against RAGFlow and stale records are auto-cleaned.
 func (s *DatasetService) BatchCheckURLs(urls []string, normalize bool, fuzzy bool) (map[string]*URLCheckResult, error) {
 	results := make(map[string]*URLCheckResult)
 
@@ -230,13 +269,15 @@ func (s *DatasetService) BatchCheckURLs(urls []string, normalize bool, fuzzy boo
 	}
 	for _, u := range urls {
 		if at, ok := exactMap[u]; ok {
-			results[u] = &URLCheckResult{
-				Exists:     true,
-				DocumentID: at.DocumentID,
-				DatasetID:  at.DatasetID,
-				Title:      at.ArticleTitle,
-				StoredURL:  at.ArticleURL,
-				MatchType:  "exact",
+			if s.verifyAndClean(at) {
+				results[u] = &URLCheckResult{
+					Exists:     true,
+					DocumentID: at.DocumentID,
+					DatasetID:  at.DatasetID,
+					Title:      at.ArticleTitle,
+					StoredURL:  at.ArticleURL,
+					MatchType:  "exact",
+				}
 			}
 		}
 	}
@@ -272,30 +313,34 @@ func (s *DatasetService) BatchCheckURLs(urls []string, normalize bool, fuzzy boo
 				if normalize && normalizedMap != nil {
 					norm := urlutil.Normalize(u)
 					if at, ok := normalizedMap[norm]; ok {
-						results[u] = &URLCheckResult{
-							Exists:     true,
-							DocumentID: at.DocumentID,
-							DatasetID:  at.DatasetID,
-							Title:      at.ArticleTitle,
-							StoredURL:  at.ArticleURL,
-							MatchType:  "normalized",
+						if s.verifyAndClean(at) {
+							results[u] = &URLCheckResult{
+								Exists:     true,
+								DocumentID: at.DocumentID,
+								DatasetID:  at.DatasetID,
+								Title:      at.ArticleTitle,
+								StoredURL:  at.ArticleURL,
+								MatchType:  "normalized",
+							}
+							continue
 						}
-						continue
 					}
 				}
 				// Fuzzy check
 				if fuzzy {
 					for i := range allArticles {
 						if urlutil.FuzzyMatch(u, allArticles[i].ArticleURL, 10) {
-							results[u] = &URLCheckResult{
-								Exists:     true,
-								DocumentID: allArticles[i].DocumentID,
-								DatasetID:  allArticles[i].DatasetID,
-								Title:      allArticles[i].ArticleTitle,
-								StoredURL:  allArticles[i].ArticleURL,
-								MatchType:  "fuzzy",
+							if s.verifyAndClean(&allArticles[i]) {
+								results[u] = &URLCheckResult{
+									Exists:     true,
+									DocumentID: allArticles[i].DocumentID,
+									DatasetID:  allArticles[i].DatasetID,
+									Title:      allArticles[i].ArticleTitle,
+									StoredURL:  allArticles[i].ArticleURL,
+									MatchType:  "fuzzy",
+								}
+								break
 							}
-							break
 						}
 					}
 				}
