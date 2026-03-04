@@ -201,6 +201,29 @@ func (h *RagFlowHandler) RunParsing(c *gin.Context) {
 	c.JSON(http.StatusOK, result)
 }
 
+// RunParsingThrottled submits documents for parsing in rate-controlled batches.
+func (h *RagFlowHandler) RunParsingThrottled(c *gin.Context) {
+	var req struct {
+		DatasetID       string   `json:"dataset_id" binding:"required"`
+		DocumentIDs     []string `json:"document_ids" binding:"required"`
+		BatchSize       int      `json:"batch_size"`
+		IntervalSeconds int      `json:"interval_seconds"`
+	}
+	if err := c.ShouldBindJSON(&req); err != nil {
+		response.BadRequest(c, err.Error())
+		return
+	}
+
+	h.svc.RunParsingThrottled(req.DatasetID, req.DocumentIDs, req.BatchSize, req.IntervalSeconds)
+
+	c.JSON(http.StatusOK, gin.H{
+		"message":          "throttled parsing started",
+		"total_documents":  len(req.DocumentIDs),
+		"batch_size":       req.BatchSize,
+		"interval_seconds": req.IntervalSeconds,
+	})
+}
+
 // StopParsing stops document parsing (proxy passthrough)
 func (h *RagFlowHandler) StopParsing(c *gin.Context) {
 	var req struct {

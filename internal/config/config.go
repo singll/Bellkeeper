@@ -14,6 +14,25 @@ type Config struct {
 	N8N      N8NConfig      `mapstructure:"n8n"`
 	Logging  LoggingConfig  `mapstructure:"logging"`
 	Features FeatureConfig  `mapstructure:"features"`
+	LLMProxy LLMProxyConfig `mapstructure:"llm_proxy"`
+}
+
+type LLMProxyConfig struct {
+	Enabled        bool            `mapstructure:"enabled"`
+	DefaultTimeout int             `mapstructure:"default_timeout"`
+	MaxRetries     int             `mapstructure:"max_retries"`
+	Channels       []ChannelConfig `mapstructure:"channels"`
+}
+
+type ChannelConfig struct {
+	Name      string   `mapstructure:"name"`
+	BaseURL   string   `mapstructure:"base_url"`
+	APIKey    string   `mapstructure:"api_key"`
+	RPM       int      `mapstructure:"rpm"`
+	RPD       int      `mapstructure:"rpd"`
+	Priority  int      `mapstructure:"priority"`
+	Models    []string `mapstructure:"models"`
+	IsEnabled bool     `mapstructure:"is_enabled"`
 }
 
 type ServerConfig struct {
@@ -134,4 +153,9 @@ func setDefaults(v *viper.Viper) {
 	v.SetDefault("features.auto_parse", true)
 	v.SetDefault("features.url_dedup", true)
 	v.SetDefault("features.ai_summary", false)
+
+	// LLM Proxy
+	v.SetDefault("llm_proxy.enabled", false)
+	v.SetDefault("llm_proxy.default_timeout", 60)
+	v.SetDefault("llm_proxy.max_retries", 3)
 }

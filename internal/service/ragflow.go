@@ -374,6 +374,41 @@ func (s *RagFlowService) RunParsing(datasetID string, documentIDs []string) (map
 	return s.doPost(url, payload)
 }
 
+// RunParsingThrottled submits documents for parsing in small batches with delays
+// to avoid triggering upstream Embedding rate limits. Runs in background.
+func (s *RagFlowService) RunParsingThrottled(datasetID string, documentIDs []string, batchSize, intervalSeconds int) {
+	if batchSize <= 0 {
+		batchSize = 3
+	}
+	if intervalSeconds <= 0 {
+		intervalSeconds = 30
+	}
+
+	go func() {
+		total := len(documentIDs)
+		for i := 0; i < total; i += batchSize {
+			end := i + batchSize
+			if end > total {
+				end = total
+			}
+			batch := documentIDs[i:end]
+			batchNum := i/batchSize + 1
+
+			_, err := s.RunParsing(datasetID, batch)
+			if err != nil {
+				log.Printf("warn: throttled parsing batch %d failed for dataset %s: %v", batchNum, datasetID, err)
+			} else {
+				log.Printf("info: throttled parsing batch %d (%d docs) submitted for dataset %s", batchNum, len(batch), datasetID)
+			}
+
+			if end < total {
+				time.Sleep(time.Duration(intervalSeconds) * time.Second)
+			}
+		}
+		log.Printf("info: throttled parsing completed for dataset %s (%d docs in batches of %d)", datasetID, total, batchSize)
+	}()
+}
+
 // StopParsing stops document parsing
 func (s *RagFlowService) StopParsing(datasetID string, documentIDs []string) (map[string]interface{}, error) {
 	url := fmt.Sprintf("%s/api/v1/datasets/%s/documents/parse", s.cfg.BaseURL, datasetID)

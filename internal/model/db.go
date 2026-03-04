@@ -42,6 +42,7 @@ func AutoMigrate(db *gorm.DB) error {
 		&DatasetMapping{},
 		&ArticleTag{},
 		&Setting{},
+		&LLMProxyLog{},
 	); err != nil {
 		return err
 	}

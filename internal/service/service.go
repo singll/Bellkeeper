@@ -16,6 +16,7 @@ type Services struct {
 	RagFlow    *RagFlowService
 	Health     *HealthService
 	Workflow   *WorkflowService
+	LLMProxy   *LLMProxyService
 }
 
 // NewServices creates all service instances
@@ -36,5 +37,6 @@ func NewServices(repos *repository.Repositories, cfg *config.Config, version str
 		RagFlow:    ragFlowSvc,
 		Health:     NewHealthService(cfg, version, repos.Tag, repos.DataSource, repos.RSS, repos.DatasetMapping),
 		Workflow:   NewWorkflowService(cfg.N8N, repos.Setting),
+		LLMProxy:   NewLLMProxyService(cfg.LLMProxy, repos.LLMProxy),
 	}
 }

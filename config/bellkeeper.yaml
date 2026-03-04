@@ -29,3 +29,37 @@ features:
   auto_parse: true
   url_dedup: true
   ai_summary: false
+
+llm_proxy:
+  enabled: true
+  default_timeout: 60
+  max_retries: 3
+  channels:
+    - name: glm-flash-via-newapi
+      base_url: ${LLM_NEWAPI_BASE_URL}
+      api_key: ${LLM_NEWAPI_API_KEY}
+      rpm: 30
+      rpd: 1500
+      priority: 1
+      models:
+        - glm-4-flash
+        - GLM-4.7-Flash
+      is_enabled: true
+    - name: deepseek-direct
+      base_url: https://api.deepseek.com
+      api_key: ${LLM_DEEPSEEK_API_KEY}
+      rpm: 10
+      rpd: 500
+      priority: 1
+      models:
+        - deepseek-chat
+      is_enabled: true
+    - name: kimi-direct
+      base_url: https://api.moonshot.cn
+      api_key: ${LLM_KIMI_API_KEY}
+      rpm: 3
+      rpd: 50
+      priority: 1
+      models:
+        - moonshot-v1-128k
+      is_enabled: true

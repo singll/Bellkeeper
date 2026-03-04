@@ -16,6 +16,7 @@ type Handlers struct {
 	Health     *HealthHandler
 	Workflow   *WorkflowHandler
 	System     *SystemHandler
+	LLMProxy   *LLMProxyHandler
 }
 
 // NewHandlers creates all handler instances
@@ -31,5 +32,6 @@ func NewHandlers(services *service.Services, shutdownChan chan struct{}) *Handle
 		Health:     NewHealthHandler(services.Health),
 		Workflow:   NewWorkflowHandler(services.Workflow),
 		System:     NewSystemHandler(shutdownChan),
+		LLMProxy:   NewLLMProxyHandler(services.LLMProxy),
 	}
 }

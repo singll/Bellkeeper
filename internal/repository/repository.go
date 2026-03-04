@@ -12,6 +12,7 @@ type Repositories struct {
 	Webhook        *WebhookRepository
 	DatasetMapping *DatasetMappingRepository
 	Setting        *SettingRepository
+	LLMProxy       *LLMProxyRepository
 }
 
 // NewRepositories creates all repository instances
@@ -23,5 +24,6 @@ func NewRepositories(db *gorm.DB) *Repositories {
 		Webhook:        NewWebhookRepository(db),
 		DatasetMapping: NewDatasetMappingRepository(db),
 		Setting:        NewSettingRepository(db),
+		LLMProxy:       NewLLMProxyRepository(db),
 	}
 }

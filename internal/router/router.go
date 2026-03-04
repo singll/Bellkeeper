@@ -25,6 +25,7 @@ func Setup(r *gin.Engine, handlers *handler.Handlers, mode string, apiKey string
 	registerSettingRoutes(api, handlers.Setting)
 	registerWorkflowRoutes(api, handlers.Workflow)
 	registerSystemRoutes(api, handlers.System)
+	registerLLMProxyRoutes(api, handlers.LLMProxy)
 }
 
 func registerTagRoutes(api *gin.RouterGroup, h *handler.TagHandler) {
@@ -95,6 +96,7 @@ func registerRagFlowRoutes(api *gin.RouterGroup, h *handler.RagFlowHandler) {
 	api.PUT("/ragflow/datasets/:dataset_id", h.UpdateDataset)
 	api.DELETE("/ragflow/datasets/:dataset_id", h.DeleteDataset)
 	api.POST("/ragflow/documents/parse", h.RunParsing)
+	api.POST("/ragflow/documents/parse/throttled", h.RunParsingThrottled)
 	api.POST("/ragflow/documents/parse/stop", h.StopParsing)
 	api.GET("/ragflow/documents/parse/status", h.GetParsingStatus)
 	api.POST("/ragflow/upload/batch", h.BatchUpload)
@@ -123,4 +125,16 @@ func registerWorkflowRoutes(api *gin.RouterGroup, h *handler.WorkflowHandler) {
 
 func registerSystemRoutes(api *gin.RouterGroup, h *handler.SystemHandler) {
 	api.POST("/system/restart", h.Restart)
+}
+
+func registerLLMProxyRoutes(api *gin.RouterGroup, h *handler.LLMProxyHandler) {
+	// OpenAI-compatible proxy endpoint
+	llm := api.Group("/llm")
+	llm.Any("/v1/*path", h.Proxy)
+
+	// Management endpoints
+	llm.GET("/channels/status", h.ChannelsStatus)
+	llm.GET("/stats", h.Stats)
+	llm.GET("/logs", h.Logs)
+	llm.GET("/rate-limit-events", h.RateLimitEvents)
 }
