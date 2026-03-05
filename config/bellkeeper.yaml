@@ -2,23 +2,26 @@ server:
   host: 0.0.0.0
   port: 8080
   mode: release  # debug, release
+  api_key: ${BELLKEEPER_SERVER_API_KEY}
 
 database:
   driver: postgres
-  host: localhost
+  host: ${BELLKEEPER_DATABASE_HOST}
   port: 5432
-  name: bellkeeper
-  user: bellkeeper
-  password: ${DB_PASSWORD}
+  name: ${BELLKEEPER_DATABASE_NAME}
+  user: ${BELLKEEPER_DATABASE_USER}
+  password: ${BELLKEEPER_DATABASE_PASSWORD}
   sslmode: disable
 
 ragflow:
-  base_url: http://ragflow:9380
-  api_key: ${RAGFLOW_API_KEY}
+  base_url: ${BELLKEEPER_RAGFLOW_BASE_URL}
+  api_key: ${BELLKEEPER_RAGFLOW_API_KEY}
   timeout: 30
 
 n8n:
-  webhook_base_url: http://n8n:5678
+  webhook_base_url: ${BELLKEEPER_N8N_WEBHOOK_BASE_URL}
+  api_base_url: ${BELLKEEPER_N8N_API_BASE_URL}
+  api_key: ${BELLKEEPER_N8N_API_KEY}
 
 logging:
   level: info
