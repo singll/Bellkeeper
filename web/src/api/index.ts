@@ -1,9 +1,6 @@
 import type {
   Tag,
-  DataSource,
   RSSFeed,
-  WebhookConfig,
-  WebhookHistory,
   DatasetMapping,
   Setting,
   PaginatedResponse,
@@ -60,32 +57,6 @@ export const tagsApi = {
     request<{ message: string }>(`/tags/${id}`, { method: 'DELETE' }),
 }
 
-// Data Sources API
-export const dataSourcesApi = {
-  list: (page = 1, perPage = 20, category = '', keyword = '') =>
-    request<PaginatedResponse<DataSource>>(
-      `/datasources?page=${page}&per_page=${perPage}&category=${encodeURIComponent(category)}&keyword=${encodeURIComponent(keyword)}`
-    ),
-
-  get: (id: number) =>
-    request<{ data: DataSource }>(`/datasources/${id}`),
-
-  create: (data: Partial<DataSource> & { tag_ids?: number[] }) =>
-    request<{ data: DataSource }>('/datasources', {
-      method: 'POST',
-      body: JSON.stringify(data),
-    }),
-
-  update: (id: number, data: Partial<DataSource> & { tag_ids?: number[] }) =>
-    request<{ data: DataSource }>(`/datasources/${id}`, {
-      method: 'PUT',
-      body: JSON.stringify(data),
-    }),
-
-  delete: (id: number) =>
-    request<{ message: string }>(`/datasources/${id}`, { method: 'DELETE' }),
-}
-
 // RSS Feeds API
 export const rssApi = {
   list: (page = 1, perPage = 20, category = '', keyword = '') =>
@@ -110,41 +81,6 @@ export const rssApi = {
 
   delete: (id: number) =>
     request<{ message: string }>(`/rss/${id}`, { method: 'DELETE' }),
-}
-
-// Webhooks API
-export const webhooksApi = {
-  list: (page = 1, perPage = 20) =>
-    request<PaginatedResponse<WebhookConfig>>(
-      `/webhooks?page=${page}&per_page=${perPage}`
-    ),
-
-  get: (id: number) =>
-    request<{ data: WebhookConfig }>(`/webhooks/${id}`),
-
-  create: (data: Partial<WebhookConfig>) =>
-    request<{ data: WebhookConfig }>('/webhooks', {
-      method: 'POST',
-      body: JSON.stringify(data),
-    }),
-
-  update: (id: number, data: Partial<WebhookConfig>) =>
-    request<{ data: WebhookConfig }>(`/webhooks/${id}`, {
-      method: 'PUT',
-      body: JSON.stringify(data),
-    }),
-
-  delete: (id: number) =>
-    request<{ message: string }>(`/webhooks/${id}`, { method: 'DELETE' }),
-
-  trigger: (id: number, payload?: Record<string, unknown>) =>
-    request<{ data: WebhookHistory }>(`/webhooks/${id}/trigger`, {
-      method: 'POST',
-      body: JSON.stringify(payload || {}),
-    }),
-
-  history: (id: number, limit = 20) =>
-    request<{ data: WebhookHistory[] }>(`/webhooks/${id}/history?limit=${limit}`),
 }
 
 // Datasets API

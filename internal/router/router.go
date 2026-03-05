@@ -17,9 +17,7 @@ func Setup(r *gin.Engine, handlers *handler.Handlers, mode string, apiKey string
 	api.Use(middleware.AutheliaAuth(mode, apiKey))
 
 	registerTagRoutes(api, handlers.Tag)
-	registerDataSourceRoutes(api, handlers.DataSource)
 	registerRSSRoutes(api, handlers.RSS)
-	registerWebhookRoutes(api, handlers.Webhook)
 	registerDatasetRoutes(api, handlers.Dataset)
 	registerRagFlowRoutes(api, handlers.RagFlow)
 	registerSettingRoutes(api, handlers.Setting)
@@ -41,30 +39,12 @@ func registerTagRoutes(api *gin.RouterGroup, h *handler.TagHandler) {
 	api.POST("/tags/by-names", h.GetByNames)
 }
 
-func registerDataSourceRoutes(api *gin.RouterGroup, h *handler.DataSourceHandler) {
-	api.GET("/datasources", h.List)
-	api.POST("/datasources", h.Create)
-	api.GET("/datasources/:id", h.Get)
-	api.PUT("/datasources/:id", h.Update)
-	api.DELETE("/datasources/:id", h.Delete)
-}
-
 func registerRSSRoutes(api *gin.RouterGroup, h *handler.RSSHandler) {
 	api.GET("/rss", h.List)
 	api.POST("/rss", h.Create)
 	api.GET("/rss/:id", h.Get)
 	api.PUT("/rss/:id", h.Update)
 	api.DELETE("/rss/:id", h.Delete)
-}
-
-func registerWebhookRoutes(api *gin.RouterGroup, h *handler.WebhookHandler) {
-	api.GET("/webhooks", h.List)
-	api.POST("/webhooks", h.Create)
-	api.GET("/webhooks/:id", h.Get)
-	api.PUT("/webhooks/:id", h.Update)
-	api.DELETE("/webhooks/:id", h.Delete)
-	api.POST("/webhooks/:id/trigger", h.Trigger)
-	api.GET("/webhooks/:id/history", h.History)
 }
 
 func registerDatasetRoutes(api *gin.RouterGroup, h *handler.DatasetHandler) {

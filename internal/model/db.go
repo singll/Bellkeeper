@@ -35,10 +35,7 @@ func InitDB(cfg config.DatabaseConfig) (*gorm.DB, error) {
 func AutoMigrate(db *gorm.DB) error {
 	if err := db.AutoMigrate(
 		&Tag{},
-		&DataSource{},
 		&RSSFeed{},
-		&WebhookConfig{},
-		&WebhookHistory{},
 		&DatasetMapping{},
 		&ArticleTag{},
 		&Setting{},

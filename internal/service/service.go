@@ -7,16 +7,14 @@ import (
 
 // Services holds all service instances
 type Services struct {
-	Tag        *TagService
-	DataSource *DataSourceService
-	RSS        *RSSService
-	Webhook    *WebhookService
-	Dataset    *DatasetService
-	Setting    *SettingService
-	RagFlow    *RagFlowService
-	Health     *HealthService
-	Workflow   *WorkflowService
-	LLMProxy   *LLMProxyService
+	Tag      *TagService
+	RSS      *RSSService
+	Dataset  *DatasetService
+	Setting  *SettingService
+	RagFlow  *RagFlowService
+	Health   *HealthService
+	Workflow *WorkflowService
+	LLMProxy *LLMProxyService
 }
 
 // NewServices creates all service instances
@@ -28,15 +26,13 @@ func NewServices(repos *repository.Repositories, cfg *config.Config, version str
 	datasetSvc.SetDocumentVerifier(ragFlowSvc.DocumentExistsInRagFlow)
 
 	return &Services{
-		Tag:        NewTagService(repos.Tag),
-		DataSource: NewDataSourceService(repos.DataSource, repos.Tag),
-		RSS:        NewRSSService(repos.RSS, repos.Tag),
-		Webhook:    NewWebhookService(repos.Webhook),
-		Dataset:    datasetSvc,
-		Setting:    NewSettingService(repos.Setting),
-		RagFlow:    ragFlowSvc,
-		Health:     NewHealthService(cfg, version, repos.Tag, repos.DataSource, repos.RSS, repos.DatasetMapping),
-		Workflow:   NewWorkflowService(cfg.N8N, repos.Setting),
-		LLMProxy:   NewLLMProxyService(cfg.LLMProxy, repos.LLMProxy),
+		Tag:      NewTagService(repos.Tag),
+		RSS:      NewRSSService(repos.RSS, repos.Tag),
+		Dataset:  datasetSvc,
+		Setting:  NewSettingService(repos.Setting),
+		RagFlow:  ragFlowSvc,
+		Health:   NewHealthService(cfg, version, repos.Tag, repos.RSS, repos.DatasetMapping),
+		Workflow: NewWorkflowService(cfg.N8N, repos.Setting),
+		LLMProxy: NewLLMProxyService(cfg.LLMProxy, repos.LLMProxy),
 	}
 }

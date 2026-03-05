@@ -17,7 +17,6 @@ type Tag struct {
 	DeletedAt   gorm.DeletedAt `gorm:"index" json:"-"`
 
 	// Relations
-	DataSources     []DataSource     `gorm:"many2many:datasource_tags;" json:"data_sources,omitempty"`
 	RSSFeeds        []RSSFeed        `gorm:"many2many:rss_tags;" json:"rss_feeds,omitempty"`
 	DatasetMappings []DatasetMapping `gorm:"many2many:dataset_mapping_tags;" json:"dataset_mappings,omitempty"`
 }

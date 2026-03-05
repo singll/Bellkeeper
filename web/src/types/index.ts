@@ -9,19 +9,6 @@ export interface Tag {
   updated_at: string
 }
 
-export interface DataSource {
-  id: number
-  name: string
-  url: string
-  type: string
-  category: string
-  description: string
-  is_active: boolean
-  tags: Tag[]
-  created_at: string
-  updated_at: string
-}
-
 export interface RSSFeed {
   id: number
   name: string
@@ -34,35 +21,6 @@ export interface RSSFeed {
   tags: Tag[]
   created_at: string
   updated_at: string
-}
-
-export interface WebhookConfig {
-  id: number
-  name: string
-  url: string
-  method: string
-  content_type: string
-  headers: Record<string, string>
-  body_template: string
-  timeout_seconds: number
-  description: string
-  is_active: boolean
-  created_at: string
-  updated_at: string
-}
-
-export interface WebhookHistory {
-  id: number
-  webhook_id: number
-  request_url: string
-  request_method: string
-  request_body: string
-  status: string
-  response_code: number
-  response_body: string
-  duration_ms: number
-  error_message: string
-  created_at: string
 }
 
 export interface DatasetMapping {

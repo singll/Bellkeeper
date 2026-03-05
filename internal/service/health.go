@@ -14,7 +14,6 @@ type HealthService struct {
 	cfg      *config.Config
 	version  string
 	tagRepo  *repository.TagRepository
-	dsRepo   *repository.DataSourceRepository
 	rssRepo  *repository.RSSRepository
 	dataRepo *repository.DatasetMappingRepository
 }
@@ -23,7 +22,6 @@ func NewHealthService(
 	cfg *config.Config,
 	version string,
 	tagRepo *repository.TagRepository,
-	dsRepo *repository.DataSourceRepository,
 	rssRepo *repository.RSSRepository,
 	dataRepo *repository.DatasetMappingRepository,
 ) *HealthService {
@@ -31,7 +29,6 @@ func NewHealthService(
 		cfg:      cfg,
 		version:  version,
 		tagRepo:  tagRepo,
-		dsRepo:   dsRepo,
 		rssRepo:  rssRepo,
 		dataRepo: dataRepo,
 	}
@@ -83,12 +80,6 @@ func (s *HealthService) Detailed() *DetailedHealth {
 	if s.tagRepo != nil {
 		if tags, total, _ := s.tagRepo.List(1, 1, ""); total > 0 || len(tags) >= 0 {
 			metrics["tags_count"] = total
-		}
-	}
-
-	if s.dsRepo != nil {
-		if _, total, _ := s.dsRepo.List(1, 1, "", ""); total > 0 {
-			metrics["datasources_count"] = total
 		}
 	}
 
