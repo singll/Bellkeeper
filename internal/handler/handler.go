@@ -15,6 +15,7 @@ type Handlers struct {
 	Workflow *WorkflowHandler
 	System   *SystemHandler
 	LLMProxy *LLMProxyHandler
+	Classify *ClassifyHandler
 }
 
 // NewHandlers creates all handler instances
@@ -29,5 +30,6 @@ func NewHandlers(services *service.Services, shutdownChan chan struct{}) *Handle
 		Workflow: NewWorkflowHandler(services.Workflow),
 		System:   NewSystemHandler(shutdownChan),
 		LLMProxy: NewLLMProxyHandler(services.LLMProxy),
+		Classify: NewClassifyHandler(services.Classify),
 	}
 }

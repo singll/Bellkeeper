@@ -24,6 +24,7 @@ func Setup(r *gin.Engine, handlers *handler.Handlers, mode string, apiKey string
 	registerWorkflowRoutes(api, handlers.Workflow)
 	registerSystemRoutes(api, handlers.System)
 	registerLLMProxyRoutes(api, handlers.LLMProxy)
+	registerClassifyRoutes(api, handlers.Classify)
 }
 
 func registerTagRoutes(api *gin.RouterGroup, h *handler.TagHandler) {
@@ -117,4 +118,8 @@ func registerLLMProxyRoutes(api *gin.RouterGroup, h *handler.LLMProxyHandler) {
 	llm.GET("/stats", h.Stats)
 	llm.GET("/logs", h.Logs)
 	llm.GET("/rate-limit-events", h.RateLimitEvents)
+}
+
+func registerClassifyRoutes(api *gin.RouterGroup, h *handler.ClassifyHandler) {
+	api.POST("/classify/article", h.ClassifyArticle)
 }
