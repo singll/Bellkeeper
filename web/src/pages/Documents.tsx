@@ -26,6 +26,7 @@ const Documents: Component = () => {
   })
   const [uploading, setUploading] = createSignal(false)
   const [urlCheckResult, setUrlCheckResult] = createSignal<{ checked: boolean; exists: boolean } | null>(null)
+  const [selectedDocs, setSelectedDocs] = createSignal<Set<string>>(new Set())
 
   createEffect(async () => {
     try {
@@ -52,6 +53,7 @@ const Documents: Component = () => {
 
     setLoading(true)
     setError('')
+    setSelectedDocs(new Set())
     try {
       const res = await ragflowApi.listDocuments(dsId, page(), 20)
       if (res.code === 0 && res.data) {
@@ -75,9 +77,43 @@ const Documents: Component = () => {
     try {
       await ragflowApi.deleteDocument(docId, selectedDataset())
       toast.success('文档删除成功')
+      setSelectedDocs(new Set())
       await loadDocuments()
     } catch (err) {
       toast.error('删除失败: ' + (err as Error).message)
+    }
+  }
+
+  const handleBatchDelete = async () => {
+    const ids = Array.from(selectedDocs())
+    if (ids.length === 0) return
+    if (!confirm(`确定要删除选中的 ${ids.length} 个文档吗？`)) return
+
+    try {
+      await ragflowApi.batchDeleteDocuments(selectedDataset(), ids)
+      toast.success(`成功删除 ${ids.length} 个文档`)
+      setSelectedDocs(new Set())
+      await loadDocuments()
+    } catch (err) {
+      toast.error('批量删除失败: ' + (err as Error).message)
+    }
+  }
+
+  const toggleSelect = (docId: string) => {
+    setSelectedDocs(prev => {
+      const next = new Set(prev)
+      if (next.has(docId)) next.delete(docId)
+      else next.add(docId)
+      return next
+    })
+  }
+
+  const toggleSelectAll = () => {
+    const docs = documents()
+    if (selectedDocs().size === docs.length) {
+      setSelectedDocs(new Set())
+    } else {
+      setSelectedDocs(new Set(docs.map(d => d.id)))
     }
   }
 
@@ -190,12 +226,22 @@ const Documents: Component = () => {
           <h1 class="text-2xl font-bold text-white">文档管理</h1>
           <p class="text-sm text-dark-400 mt-1">管理 RagFlow 知识库中的文档</p>
         </div>
-        <button class="btn btn-primary" onClick={() => setShowUploadModal(true)}>
-          <svg class="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-            <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M4 16v1a3 3 0 003 3h10a3 3 0 003-3v-1m-4-8l-4-4m0 0L8 8m4-4v12" />
-          </svg>
-          上传文档
-        </button>
+        <div class="flex gap-2">
+          <Show when={selectedDocs().size > 0}>
+            <button class="btn btn-sm bg-red-600 hover:bg-red-500 text-white" onClick={handleBatchDelete}>
+              <svg class="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M19 7l-.867 12.142A2 2 0 0116.138 21H7.862a2 2 0 01-1.995-1.858L5 7m5 4v6m4-6v6m1-10V4a1 1 0 00-1-1h-4a1 1 0 00-1 1v3M4 7h16" />
+              </svg>
+              删除选中 ({selectedDocs().size})
+            </button>
+          </Show>
+          <button class="btn btn-primary" onClick={() => setShowUploadModal(true)}>
+            <svg class="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+              <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M4 16v1a3 3 0 003 3h10a3 3 0 003-3v-1m-4-8l-4-4m0 0L8 8m4-4v12" />
+            </svg>
+            上传文档
+          </button>
+        </div>
       </div>
 
       {/* Dataset Selector */}
@@ -245,6 +291,14 @@ const Documents: Component = () => {
           <table class="table">
             <thead>
               <tr>
+                <th class="w-10">
+                  <input
+                    type="checkbox"
+                    class="rounded border-dark-500 bg-dark-700 text-primary-500 focus:ring-primary-500"
+                    checked={documents().length > 0 && selectedDocs().size === documents().length}
+                    onChange={toggleSelectAll}
+                  />
+                </th>
                 <th>文件名</th>
                 <th>状态</th>
                 <th>分块数</th>
@@ -257,7 +311,7 @@ const Documents: Component = () => {
                 when={!loading()}
                 fallback={
                   <tr>
-                    <td colspan="5" class="text-center py-12">
+                    <td colspan="6" class="text-center py-12">
                       <div class="loading-spinner mx-auto" />
                       <p class="mt-3 text-dark-400">加载中...</p>
                     </td>
@@ -268,7 +322,7 @@ const Documents: Component = () => {
                   when={documents().length > 0}
                   fallback={
                     <tr>
-                      <td colspan="5">
+                      <td colspan="6">
                         <div class="empty-state">
                           <svg class="empty-state-icon" fill="none" stroke="currentColor" viewBox="0 0 24 24">
                             <path stroke-linecap="round" stroke-linejoin="round" stroke-width="1.5" d="M9 12h6m-6 4h6m2 5H7a2 2 0 01-2-2V5a2 2 0 012-2h5.586a1 1 0 01.707.293l5.414 5.414a1 1 0 01.293.707V19a2 2 0 01-2 2z" />
@@ -283,6 +337,14 @@ const Documents: Component = () => {
                   <For each={documents()}>
                     {(doc) => (
                       <tr class="group">
+                        <td>
+                          <input
+                            type="checkbox"
+                            class="rounded border-dark-500 bg-dark-700 text-primary-500 focus:ring-primary-500"
+                            checked={selectedDocs().has(doc.id)}
+                            onChange={() => toggleSelect(doc.id)}
+                          />
+                        </td>
                         <td>
                           <div class="flex items-center gap-2">
                             <svg class="w-5 h-5 text-dark-500" fill="none" stroke="currentColor" viewBox="0 0 24 24">

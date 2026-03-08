@@ -283,24 +283,11 @@ func (s *RagFlowService) ListDocuments(datasetID string, page, limit int) (map[s
 
 // DeleteDocument deletes a document from RagFlow and cleans up local article_tags
 func (s *RagFlowService) DeleteDocument(datasetID, documentID string) error {
-	url := fmt.Sprintf("%s/api/v1/datasets/%s/documents/%s", s.cfg.BaseURL, datasetID, documentID)
-
-	req, err := http.NewRequest("DELETE", url, nil)
+	url := fmt.Sprintf("%s/api/v1/datasets/%s/documents", s.cfg.BaseURL, datasetID)
+	payload := map[string]interface{}{"ids": []string{documentID}}
+	_, err := s.doRequestJSON("DELETE", url, payload)
 	if err != nil {
 		return err
-	}
-
-	req.Header.Set("Authorization", "Bearer "+s.cfg.APIKey)
-
-	resp, err := s.client.Do(req)
-	if err != nil {
-		return err
-	}
-	defer resp.Body.Close()
-
-	if resp.StatusCode >= 400 {
-		body, _ := io.ReadAll(resp.Body)
-		return fmt.Errorf("delete failed: %s", string(body))
 	}
 
 	// Clean up local article_tags so the URL can be re-uploaded
@@ -530,8 +517,10 @@ func (s *RagFlowService) UpdateDataset(datasetID string, params map[string]inter
 
 // DeleteDataset deletes a RagFlow dataset
 func (s *RagFlowService) DeleteDataset(datasetID string) error {
-	url := fmt.Sprintf("%s/api/v1/datasets/%s", s.cfg.BaseURL, datasetID)
-	return s.doDelete(url)
+	url := fmt.Sprintf("%s/api/v1/datasets", s.cfg.BaseURL)
+	payload := map[string]interface{}{"ids": []string{datasetID}}
+	_, err := s.doRequestJSON("DELETE", url, payload)
+	return err
 }
 
 // RunParsing triggers document parsing
@@ -609,20 +598,21 @@ func (s *RagFlowService) BatchUpload(datasetID string, documents []UploadRequest
 	return results, errors
 }
 
-// BatchDeleteDocuments deletes multiple documents from a dataset
-func (s *RagFlowService) BatchDeleteDocuments(datasetID string, documentIDs []string) ([]string, []string) {
-	var deleted []string
-	var errors []string
-
-	for _, docID := range documentIDs {
-		if err := s.DeleteDocument(datasetID, docID); err != nil {
-			errors = append(errors, fmt.Sprintf("%s: %v", docID, err))
-		} else {
-			deleted = append(deleted, docID)
-		}
+// BatchDeleteDocuments deletes multiple documents from a dataset in a single API call
+func (s *RagFlowService) BatchDeleteDocuments(datasetID string, documentIDs []string) error {
+	url := fmt.Sprintf("%s/api/v1/datasets/%s/documents", s.cfg.BaseURL, datasetID)
+	payload := map[string]interface{}{"ids": documentIDs}
+	_, err := s.doRequestJSON("DELETE", url, payload)
+	if err != nil {
+		return err
 	}
 
-	return deleted, errors
+	// Clean up local article_tags
+	if err := s.datasetRepo.DeleteArticleTagsByDocumentIDs(documentIDs); err != nil {
+		log.Printf("warn: failed to clean up article_tags for %d documents: %v", len(documentIDs), err)
+	}
+
+	return nil
 }
 
 // TransferDocument transfers a document from one dataset to another

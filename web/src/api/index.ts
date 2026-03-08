@@ -222,4 +222,11 @@ export const ragflowApi = {
       `/ragflow/documents/${encodeURIComponent(documentId)}?dataset_id=${encodeURIComponent(datasetId)}`,
       { method: 'DELETE' }
     ),
+
+  // Batch delete documents
+  batchDeleteDocuments: (datasetId: string, documentIds: string[]) =>
+    request<{ message: string }>('/ragflow/documents/batch-delete', {
+      method: 'POST',
+      body: JSON.stringify({ dataset_id: datasetId, document_ids: documentIds }),
+    }),
 }

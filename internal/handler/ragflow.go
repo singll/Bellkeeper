@@ -1,6 +1,7 @@
 package handler
 
 import (
+	"fmt"
 	"net/http"
 	"strconv"
 
@@ -289,10 +290,12 @@ func (h *RagFlowHandler) BatchDeleteDocuments(c *gin.Context) {
 		return
 	}
 
-	deleted, errors := h.svc.BatchDeleteDocuments(req.DatasetID, req.DocumentIDs)
+	if err := h.svc.BatchDeleteDocuments(req.DatasetID, req.DocumentIDs); err != nil {
+		response.InternalError(c, err.Error())
+		return
+	}
 	c.JSON(http.StatusOK, gin.H{
-		"deleted": deleted,
-		"errors":  errors,
+		"message": fmt.Sprintf("deleted %d documents", len(req.DocumentIDs)),
 	})
 }
 
