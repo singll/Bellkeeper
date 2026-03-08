@@ -35,6 +35,6 @@ func NewServices(repos *repository.Repositories, cfg *config.Config, version str
 		Health:   NewHealthService(cfg, version, repos.Tag, repos.RSS, repos.DatasetMapping),
 		Workflow: NewWorkflowService(cfg.N8N, repos.Setting),
 		LLMProxy: NewLLMProxyService(cfg.LLMProxy, repos.LLMProxy),
-		Classify: NewClassifyService("http://localhost:8080/api/llm/v1"),
+		Classify: NewClassifyService(cfg.Classify),
 	}
 }

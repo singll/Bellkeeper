@@ -16,13 +16,18 @@ type Config struct {
 	Logging  LoggingConfig  `mapstructure:"logging"`
 	Features FeatureConfig  `mapstructure:"features"`
 	LLMProxy LLMProxyConfig `mapstructure:"llm_proxy"`
+	Classify ClassifyConfig `mapstructure:"classify"`
 }
 
 type LLMProxyConfig struct {
-	Enabled        bool            `mapstructure:"enabled"`
-	DefaultTimeout int             `mapstructure:"default_timeout"`
-	MaxRetries     int             `mapstructure:"max_retries"`
-	Channels       []ChannelConfig `mapstructure:"channels"`
+	Enabled           bool            `mapstructure:"enabled"`
+	DefaultTimeout    int             `mapstructure:"default_timeout"`
+	MaxRetries        int             `mapstructure:"max_retries"`
+	MaxWaitSeconds    int             `mapstructure:"max_wait_seconds"`
+	BackoffCapSeconds int             `mapstructure:"backoff_cap_seconds"`
+	BackoffJitter     float64         `mapstructure:"backoff_jitter"`
+	DefaultBucketRPM  int             `mapstructure:"default_bucket_rpm"`
+	Channels          []ChannelConfig `mapstructure:"channels"`
 }
 
 type ChannelConfig struct {
@@ -37,20 +42,24 @@ type ChannelConfig struct {
 }
 
 type ServerConfig struct {
-	Host   string `mapstructure:"host"`
-	Port   int    `mapstructure:"port"`
-	Mode   string `mapstructure:"mode"`    // debug, release
-	APIKey string `mapstructure:"api_key"` // API Key for internal service auth
+	Host            string `mapstructure:"host"`
+	Port            int    `mapstructure:"port"`
+	Mode            string `mapstructure:"mode"`             // debug, release
+	APIKey          string `mapstructure:"api_key"`          // API Key for internal service auth
+	ShutdownTimeout int    `mapstructure:"shutdown_timeout"` // graceful shutdown timeout in seconds
 }
 
 type DatabaseConfig struct {
-	Driver   string `mapstructure:"driver"`
-	Host     string `mapstructure:"host"`
-	Port     int    `mapstructure:"port"`
-	Name     string `mapstructure:"name"`
-	User     string `mapstructure:"user"`
-	Password string `mapstructure:"password"`
-	SSLMode  string `mapstructure:"sslmode"`
+	Driver          string `mapstructure:"driver"`
+	Host            string `mapstructure:"host"`
+	Port            int    `mapstructure:"port"`
+	Name            string `mapstructure:"name"`
+	User            string `mapstructure:"user"`
+	Password        string `mapstructure:"password"`
+	SSLMode         string `mapstructure:"sslmode"`
+	MaxIdleConns    int    `mapstructure:"max_idle_conns"`
+	MaxOpenConns    int    `mapstructure:"max_open_conns"`
+	ConnMaxLifetime int    `mapstructure:"conn_max_lifetime"` // minutes
 }
 
 func (d DatabaseConfig) DSN() string {
@@ -68,6 +77,7 @@ type N8NConfig struct {
 	WebhookBaseURL string `mapstructure:"webhook_base_url"`
 	APIBaseURL     string `mapstructure:"api_base_url"`
 	APIKey         string `mapstructure:"api_key"`
+	Timeout        int    `mapstructure:"timeout"` // HTTP client timeout in seconds
 }
 
 type LoggingConfig struct {
@@ -80,6 +90,16 @@ type FeatureConfig struct {
 	AutoParse bool `mapstructure:"auto_parse"`
 	URLDedup  bool `mapstructure:"url_dedup"`
 	AISummary bool `mapstructure:"ai_summary"`
+}
+
+type ClassifyConfig struct {
+	Enabled       bool    `mapstructure:"enabled"`
+	LLMProxyURL   string  `mapstructure:"llm_proxy_url"`
+	Model         string  `mapstructure:"model"`
+	Temperature   float64 `mapstructure:"temperature"`
+	MaxContentLen int     `mapstructure:"max_content_len"`
+	Timeout       int     `mapstructure:"timeout"` // HTTP client timeout in seconds
+	Prompt        string  `mapstructure:"prompt"`  // empty = use built-in default
 }
 
 func Load(cfgFile string) (*Config, error) {
@@ -132,6 +152,7 @@ func setDefaults(v *viper.Viper) {
 	v.SetDefault("server.port", 8080)
 	v.SetDefault("server.mode", "debug")
 	v.SetDefault("server.api_key", "")
+	v.SetDefault("server.shutdown_timeout", 10)
 
 	// Database
 	v.SetDefault("database.driver", "postgres")
@@ -141,15 +162,19 @@ func setDefaults(v *viper.Viper) {
 	v.SetDefault("database.user", "bellkeeper")
 	v.SetDefault("database.password", "")
 	v.SetDefault("database.sslmode", "disable")
+	v.SetDefault("database.max_idle_conns", 10)
+	v.SetDefault("database.max_open_conns", 100)
+	v.SetDefault("database.conn_max_lifetime", 60)
 
 	// RagFlow
 	v.SetDefault("ragflow.base_url", "http://ragflow:9380")
 	v.SetDefault("ragflow.timeout", 30)
 
-	// N8N
-	v.SetDefault("n8n.webhook_base_url", "http://n8n:5678")
-	v.SetDefault("n8n.api_base_url", "http://n8n:5678/api/v1")
+	// N8N — URL defaults left empty so workflow.go can fall back to DB settings
+	v.SetDefault("n8n.webhook_base_url", "")
+	v.SetDefault("n8n.api_base_url", "")
 	v.SetDefault("n8n.api_key", "")
+	v.SetDefault("n8n.timeout", 30)
 
 	// Logging
 	v.SetDefault("logging.level", "info")
@@ -165,4 +190,17 @@ func setDefaults(v *viper.Viper) {
 	v.SetDefault("llm_proxy.enabled", false)
 	v.SetDefault("llm_proxy.default_timeout", 60)
 	v.SetDefault("llm_proxy.max_retries", 3)
+	v.SetDefault("llm_proxy.max_wait_seconds", 30)
+	v.SetDefault("llm_proxy.backoff_cap_seconds", 60)
+	v.SetDefault("llm_proxy.backoff_jitter", 0.5)
+	v.SetDefault("llm_proxy.default_bucket_rpm", 1000)
+
+	// Classify
+	v.SetDefault("classify.enabled", false)
+	v.SetDefault("classify.llm_proxy_url", "http://localhost:8080/api/llm/v1")
+	v.SetDefault("classify.model", "glm-4-flash")
+	v.SetDefault("classify.temperature", 0.3)
+	v.SetDefault("classify.max_content_len", 1000)
+	v.SetDefault("classify.timeout", 5)
+	v.SetDefault("classify.prompt", "")
 }

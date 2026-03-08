@@ -36,10 +36,10 @@ type TokenBucket struct {
 	dayStart   time.Time
 }
 
-func NewTokenBucket(rpm, rpd int) *TokenBucket {
+func NewTokenBucket(rpm, rpd, defaultBucketRPM int) *TokenBucket {
 	maxTokens := float64(rpm)
 	if maxTokens == 0 {
-		maxTokens = 1000 // effectively unlimited
+		maxTokens = float64(defaultBucketRPM)
 	}
 	refillRate := maxTokens / 60.0
 
@@ -150,7 +150,7 @@ func NewLLMProxyService(cfg config.LLMProxyConfig, repo *repository.LLMProxyRepo
 		}
 		ch := &Channel{
 			Config: chCfg,
-			Bucket: NewTokenBucket(chCfg.RPM, chCfg.RPD),
+			Bucket: NewTokenBucket(chCfg.RPM, chCfg.RPD, cfg.DefaultBucketRPM),
 			Client: &http.Client{
 				Timeout: time.Duration(cfg.DefaultTimeout) * time.Second,
 			},
@@ -221,8 +221,9 @@ func (s *LLMProxyService) tryChannel(
 		allowed, waitTime := ch.Bucket.TryAcquire()
 		if !allowed {
 			if attempt < maxRetries {
-				if waitTime > 30*time.Second {
-					waitTime = 30 * time.Second
+				maxWait := time.Duration(s.cfg.MaxWaitSeconds) * time.Second
+				if waitTime > maxWait {
+					waitTime = maxWait
 				}
 				log.Printf("llm-proxy: bucket throttle on %s, wait %v (attempt %d/%d)",
 					ch.Config.Name, waitTime, attempt+1, maxRetries)
@@ -273,7 +274,7 @@ func (s *LLMProxyService) tryChannel(
 			attempt, durationMs, promptTokens, compTokens, "", callerID)
 
 		if resp.StatusCode == 429 && attempt < maxRetries {
-			backoff := calculateBackoff(attempt)
+			backoff := s.calculateBackoff(attempt)
 			log.Printf("llm-proxy: upstream 429 on %s, backoff %v (attempt %d/%d)",
 				ch.Config.Name, backoff, attempt+1, maxRetries)
 			time.Sleep(backoff)
@@ -286,13 +287,14 @@ func (s *LLMProxyService) tryChannel(
 	return lastStatusCode, lastBody, lastHeaders, nil
 }
 
-// calculateBackoff returns exponential backoff with jitter: 2^(attempt+1) * (1 + 0~50% jitter), capped at 60s.
-func calculateBackoff(attempt int) time.Duration {
+// calculateBackoff returns exponential backoff with jitter, using configured cap and jitter factor.
+func (s *LLMProxyService) calculateBackoff(attempt int) time.Duration {
 	base := math.Pow(2, float64(attempt+1))
-	if base > 60 {
-		base = 60
+	cap := float64(s.cfg.BackoffCapSeconds)
+	if base > cap {
+		base = cap
 	}
-	jitter := base * 0.5 * rand.Float64()
+	jitter := base * s.cfg.BackoffJitter * rand.Float64()
 	return time.Duration((base + jitter) * float64(time.Second))
 }
 

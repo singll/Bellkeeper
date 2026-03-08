@@ -145,8 +145,12 @@ func runServer(cmd *cobra.Command, args []string) {
 		log.Println("Restart requested, shutting down gracefully...")
 	}
 
-	// Graceful shutdown with 10 second timeout
-	ctx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
+	// Graceful shutdown with configured timeout
+	shutdownTimeout := cfg.Server.ShutdownTimeout
+	if shutdownTimeout <= 0 {
+		shutdownTimeout = 10
+	}
+	ctx, cancel := context.WithTimeout(context.Background(), time.Duration(shutdownTimeout)*time.Second)
 	defer cancel()
 
 	if err := srv.Shutdown(ctx); err != nil {

@@ -3,6 +3,7 @@ server:
   port: 8080
   mode: release  # debug, release
   api_key: ${BELLKEEPER_SERVER_API_KEY}
+  # shutdown_timeout: 10  # 优雅关机超时（秒）
 
 database:
   driver: postgres
@@ -12,6 +13,9 @@ database:
   user: ${BELLKEEPER_DATABASE_USER}
   password: ${BELLKEEPER_DATABASE_PASSWORD}
   sslmode: disable
+  # max_idle_conns: 10      # 连接池最大空闲连接
+  # max_open_conns: 100     # 连接池最大打开连接
+  # conn_max_lifetime: 60   # 连接最大生命周期（分钟）
 
 ragflow:
   base_url: ${BELLKEEPER_RAGFLOW_BASE_URL}
@@ -22,6 +26,7 @@ n8n:
   webhook_base_url: ${BELLKEEPER_N8N_WEBHOOK_BASE_URL}
   api_base_url: ${BELLKEEPER_N8N_API_BASE_URL}
   api_key: ${BELLKEEPER_N8N_API_KEY}
+  # timeout: 30  # HTTP 客户端超时（秒）
 
 logging:
   level: info
@@ -33,10 +38,23 @@ features:
   url_dedup: true
   ai_summary: false
 
+classify:
+  enabled: false
+  llm_proxy_url: "http://localhost:8080/api/llm/v1"
+  model: "glm-4-flash"
+  temperature: 0.3
+  max_content_len: 1000
+  timeout: 5
+  # prompt: ""  # 留空使用内置默认提示词，可自定义 LLM 分类提示词
+
 llm_proxy:
   enabled: true
   default_timeout: 60
   max_retries: 3
+  # max_wait_seconds: 30       # 令牌桶等待上限（秒）
+  # backoff_cap_seconds: 60    # 指数退避上限（秒）
+  # backoff_jitter: 0.5        # 退避抖动因子
+  # default_bucket_rpm: 1000   # 无 RPM 配置时的兜底值
   channels:
     - name: glm-flash-via-newapi
       base_url: ${LLM_NEWAPI_BASE_URL}

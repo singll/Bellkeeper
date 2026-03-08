@@ -8,20 +8,22 @@ import (
 	"net/http"
 	"strings"
 	"time"
+
+	"github.com/singll/bellkeeper/internal/config"
 )
 
 // ClassifyService handles article classification using LLM
 type ClassifyService struct {
-	llmProxyURL string
-	httpClient  *http.Client
+	cfg        config.ClassifyConfig
+	httpClient *http.Client
 }
 
 // NewClassifyService creates a new classify service
-func NewClassifyService(llmProxyURL string) *ClassifyService {
+func NewClassifyService(cfg config.ClassifyConfig) *ClassifyService {
 	return &ClassifyService{
-		llmProxyURL: llmProxyURL,
+		cfg: cfg,
 		httpClient: &http.Client{
-			Timeout: 5 * time.Second,
+			Timeout: time.Duration(cfg.Timeout) * time.Second,
 		},
 	}
 }
@@ -42,7 +44,7 @@ type ClassifyResponse struct {
 	Reasoning     string   `json:"reasoning"`
 }
 
-const classifyPrompt = `你是一个内容分类专家。请分析以下文章，返回分类结果。
+const defaultClassifyPrompt = `你是一个内容分类专家。请分析以下文章，返回分类结果。
 
 文章标题：%s
 文章URL：%s
@@ -71,14 +73,18 @@ const classifyPrompt = `你是一个内容分类专家。请分析以下文章�
 
 // ClassifyArticle classifies an article using LLM
 func (s *ClassifyService) ClassifyArticle(req *ClassifyRequest) (*ClassifyResponse, error) {
-	// Truncate content to 1000 chars
+	// Truncate content to configured max length
 	content := req.Content
-	if len(content) > 1000 {
-		content = content[:1000]
+	if len(content) > s.cfg.MaxContentLen {
+		content = content[:s.cfg.MaxContentLen]
 	}
 
-	// Build prompt
-	prompt := fmt.Sprintf(classifyPrompt, req.Title, req.URL, content)
+	// Build prompt — use configured prompt if set, otherwise built-in default
+	promptTemplate := defaultClassifyPrompt
+	if s.cfg.Prompt != "" {
+		promptTemplate = s.cfg.Prompt
+	}
+	prompt := fmt.Sprintf(promptTemplate, req.Title, req.URL, content)
 
 	// Call LLM
 	llmResp, err := s.callLLM(prompt)
@@ -97,15 +103,15 @@ func (s *ClassifyService) ClassifyArticle(req *ClassifyRequest) (*ClassifyRespon
 
 func (s *ClassifyService) callLLM(prompt string) (string, error) {
 	reqBody := map[string]interface{}{
-		"model": "glm-4-flash",
+		"model": s.cfg.Model,
 		"messages": []map[string]string{
 			{"role": "user", "content": prompt},
 		},
-		"temperature": 0.3,
+		"temperature": s.cfg.Temperature,
 	}
 
 	jsonData, _ := json.Marshal(reqBody)
-	req, err := http.NewRequest("POST", s.llmProxyURL+"/chat/completions", bytes.NewBuffer(jsonData))
+	req, err := http.NewRequest("POST", s.cfg.LLMProxyURL+"/chat/completions", bytes.NewBuffer(jsonData))
 	if err != nil {
 		return "", err
 	}

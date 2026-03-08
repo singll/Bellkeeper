@@ -19,10 +19,14 @@ type WorkflowService struct {
 }
 
 func NewWorkflowService(cfg config.N8NConfig, settingRepo *repository.SettingRepository) *WorkflowService {
+	timeout := cfg.Timeout
+	if timeout <= 0 {
+		timeout = 30
+	}
 	return &WorkflowService{
 		cfg:         cfg,
 		settingRepo: settingRepo,
-		client:      &http.Client{Timeout: 30 * time.Second},
+		client:      &http.Client{Timeout: time.Duration(timeout) * time.Second},
 	}
 }
 
@@ -37,12 +41,12 @@ func (s *WorkflowService) getEffectiveConfig() (apiKey, apiBaseURL, webhookBaseU
 			apiKey = setting.Value
 		}
 	}
-	if apiBaseURL == "" || apiBaseURL == "http://n8n:5678/api/v1" {
+	if apiBaseURL == "" {
 		if setting, err := s.settingRepo.GetByKey("n8n_api_base_url"); err == nil && setting.Value != "" {
 			apiBaseURL = setting.Value
 		}
 	}
-	if webhookBaseURL == "" || webhookBaseURL == "http://n8n:5678" {
+	if webhookBaseURL == "" {
 		if setting, err := s.settingRepo.GetByKey("n8n_webhook_base_url"); err == nil && setting.Value != "" {
 			webhookBaseURL = setting.Value
 		}
