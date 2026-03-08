@@ -47,6 +47,14 @@ func (r *DatasetMappingRepository) GetByName(name string) (*model.DatasetMapping
 	return &mapping, nil
 }
 
+func (r *DatasetMappingRepository) GetByDisplayName(displayName string) (*model.DatasetMapping, error) {
+	var mapping model.DatasetMapping
+	if err := r.db.Preload("Tags").Where("display_name = ?", displayName).First(&mapping).Error; err != nil {
+		return nil, err
+	}
+	return &mapping, nil
+}
+
 func (r *DatasetMappingRepository) GetDefault() (*model.DatasetMapping, error) {
 	var mapping model.DatasetMapping
 	if err := r.db.Preload("Tags").Where("is_default = ?", true).First(&mapping).Error; err != nil {

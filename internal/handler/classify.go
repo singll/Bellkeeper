@@ -39,5 +39,12 @@ func (h *ClassifyHandler) ClassifyArticle(c *gin.Context) {
 		return
 	}
 
-	response.Success(c, result)
+	// Return flat JSON (not wrapped in "data") so n8n can read fields directly
+	c.JSON(http.StatusOK, gin.H{
+		"primary_domain": result.PrimaryDomain,
+		"tags":           result.Tags,
+		"dataset_id":     result.DatasetID,
+		"confidence":     result.Confidence,
+		"reasoning":      result.Reasoning,
+	})
 }

@@ -1,6 +1,7 @@
 package model
 
 import (
+	"log"
 	"time"
 
 	"github.com/singll/bellkeeper/internal/config"
@@ -44,7 +45,11 @@ func AutoMigrate(db *gorm.DB) error {
 		return err
 	}
 
-	return SeedSettings(db)
+	if err := SeedSettings(db); err != nil {
+		return err
+	}
+
+	return SeedDatasetMappings(db)
 }
 
 // SeedSettings creates default settings if they don't exist
@@ -71,6 +76,71 @@ func SeedSettings(db *gorm.DB) error {
 		if count == 0 {
 			if err := db.Create(&s).Error; err != nil {
 				return err
+			}
+		}
+	}
+
+	return nil
+}
+
+// SeedDatasetMappings creates default dataset mappings and tag associations if they don't exist.
+// DatasetID is left empty as a placeholder — must be filled with real RAGFlow dataset UUIDs
+// via the Web UI or API after deployment.
+func SeedDatasetMappings(db *gorm.DB) error {
+	type mappingSeed struct {
+		Name        string
+		DisplayName string
+		IsDefault   bool
+		TagName     string
+		TagColor    string
+	}
+
+	seeds := []mappingSeed{
+		{Name: "security-tech", DisplayName: "网络安全知识库", IsDefault: false, TagName: "security", TagColor: "#F56C6C"},
+		{Name: "ai-tech", DisplayName: "人工智能知识库", IsDefault: false, TagName: "ai", TagColor: "#409EFF"},
+		{Name: "dev-tech", DisplayName: "编程开发知识库", IsDefault: false, TagName: "programming", TagColor: "#67C23A"},
+		{Name: "daily-digest", DisplayName: "综合资讯", IsDefault: true, TagName: "general", TagColor: "#909399"},
+	}
+
+	for _, s := range seeds {
+		// Ensure tag exists
+		var tag Tag
+		result := db.Where("name = ?", s.TagName).First(&tag)
+		if result.Error != nil {
+			tag = Tag{Name: s.TagName, Color: s.TagColor}
+			if err := db.Create(&tag).Error; err != nil {
+				log.Printf("warn: failed to seed tag %q: %v", s.TagName, err)
+				continue
+			}
+		}
+
+		// Ensure dataset mapping exists (don't overwrite existing records)
+		var mapping DatasetMapping
+		result = db.Where("name = ?", s.Name).First(&mapping)
+		if result.Error != nil {
+			mapping = DatasetMapping{
+				Name:        s.Name,
+				DisplayName: s.DisplayName,
+				DatasetID:   "", // placeholder — fill via UI/API
+				IsDefault:   s.IsDefault,
+				IsActive:    true,
+				ParserID:    "naive",
+			}
+			if err := db.Create(&mapping).Error; err != nil {
+				log.Printf("warn: failed to seed dataset mapping %q: %v", s.Name, err)
+				continue
+			}
+			log.Printf("info: seeded dataset mapping %q (display: %s)", s.Name, s.DisplayName)
+		}
+
+		// Ensure tag-dataset association exists
+		var count int64
+		db.Table("dataset_mapping_tags").
+			Where("mapping_id = ? AND tag_id = ?", mapping.ID, tag.ID).
+			Count(&count)
+		if count == 0 {
+			if err := db.Model(&mapping).Association("Tags").Append(&tag); err != nil {
+				log.Printf("warn: failed to associate tag %q with dataset %q: %v", s.TagName, s.Name, err)
 			}
 		}
 	}

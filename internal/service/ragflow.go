@@ -97,11 +97,18 @@ func (s *RagFlowService) UploadWithRouting(req *UploadRequest) (*UploadResponse,
 		}
 	}
 
-	// 3. Try to find dataset by category
+	// 3. Try to find dataset by category (by name, then by display_name for Chinese aliases)
 	if datasetID == "" && req.Category != "" {
 		mapping, err := s.datasetRepo.GetByName(req.Category)
 		if err == nil {
 			datasetID = mapping.DatasetID
+			log.Printf("info: dataset routed by category name %q -> %s", req.Category, datasetID)
+		} else {
+			mapping, err = s.datasetRepo.GetByDisplayName(req.Category)
+			if err == nil {
+				datasetID = mapping.DatasetID
+				log.Printf("info: dataset routed by category display_name %q -> %s", req.Category, datasetID)
+			}
 		}
 	}
 
