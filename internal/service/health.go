@@ -57,11 +57,13 @@ func (s *HealthService) Check() map[string]string {
 func (s *HealthService) Detailed() *DetailedHealth {
 	services := make(map[string]ServiceStatus)
 
-	// Check RagFlow
-	services["ragflow"] = s.checkHTTPService(s.cfg.RagFlow.BaseURL + "/api/v1/version")
+	// Check RagFlow (requires API key auth)
+	services["ragflow"] = s.checkRagFlow()
 
-	// Check n8n
-	services["n8n"] = s.checkHTTPService(s.cfg.N8N.WebhookBaseURL + "/healthz")
+	// Check n8n (only if URL is configured)
+	if s.cfg.N8N.WebhookBaseURL != "" {
+		services["n8n"] = s.checkHTTPService(s.cfg.N8N.WebhookBaseURL + "/healthz")
+	}
 
 	// Determine overall status
 	overallStatus := "healthy"
@@ -100,6 +102,37 @@ func (s *HealthService) Detailed() *DetailedHealth {
 		Version:  s.version,
 		Services: services,
 		Metrics:  metrics,
+	}
+}
+
+// checkRagFlow checks RagFlow health with API key authentication.
+func (s *HealthService) checkRagFlow() ServiceStatus {
+	url := s.cfg.RagFlow.BaseURL + "/api/v1/datasets?page=1&limit=1"
+	client := &http.Client{Timeout: time.Duration(defaults.HealthCheckTimeout) * time.Second}
+
+	req, err := http.NewRequest("GET", url, nil)
+	if err != nil {
+		return ServiceStatus{Status: "down", Error: err.Error()}
+	}
+	req.Header.Set("Authorization", "Bearer "+s.cfg.RagFlow.APIKey)
+
+	start := time.Now()
+	resp, err := client.Do(req)
+	latency := time.Since(start).Milliseconds()
+
+	if err != nil {
+		return ServiceStatus{Status: "down", LatencyMs: latency, Error: err.Error()}
+	}
+	defer resp.Body.Close()
+
+	if resp.StatusCode >= 200 && resp.StatusCode < 400 {
+		return ServiceStatus{Status: "up", LatencyMs: latency}
+	}
+
+	return ServiceStatus{
+		Status:    "unhealthy",
+		LatencyMs: latency,
+		Error:     fmt.Sprintf("HTTP %d", resp.StatusCode),
 	}
 }
 
