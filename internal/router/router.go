@@ -78,6 +78,8 @@ func registerRagFlowRoutes(api *gin.RouterGroup, h *handler.RagFlowHandler) {
 	api.DELETE("/ragflow/datasets/:dataset_id", h.DeleteDataset)
 	api.POST("/ragflow/documents/parse", h.RunParsing)
 	api.POST("/ragflow/documents/parse/throttled", h.RunParsingThrottled)
+	api.POST("/ragflow/documents/parse/smart", h.RunParsingSmart)
+	api.GET("/ragflow/documents/parse/smart/:task_id", h.GetParseTaskStatus)
 	api.POST("/ragflow/documents/parse/stop", h.StopParsing)
 	api.GET("/ragflow/documents/parse/status", h.GetParsingStatus)
 	api.POST("/ragflow/upload/batch", h.BatchUpload)

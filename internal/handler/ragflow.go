@@ -225,6 +225,42 @@ func (h *RagFlowHandler) RunParsingThrottled(c *gin.Context) {
 	})
 }
 
+// RunParsingSmart starts a smart parsing queue with adaptive batching and retry.
+func (h *RagFlowHandler) RunParsingSmart(c *gin.Context) {
+	var req struct {
+		Items  []service.ParseQueueItem  `json:"items" binding:"required"`
+		Config service.ParseQueueConfig `json:"config"`
+	}
+	if err := c.ShouldBindJSON(&req); err != nil {
+		response.BadRequest(c, err.Error())
+		return
+	}
+
+	total := 0
+	for _, item := range req.Items {
+		total += len(item.DocumentIDs)
+	}
+
+	taskID := h.svc.RunParsingQueue(req.Items, req.Config)
+
+	c.JSON(http.StatusOK, gin.H{
+		"task_id":         taskID,
+		"message":         "smart parsing started",
+		"total_documents": total,
+	})
+}
+
+// GetParseTaskStatus returns the status of a smart parsing task.
+func (h *RagFlowHandler) GetParseTaskStatus(c *gin.Context) {
+	taskID := c.Param("task_id")
+	task := h.svc.GetParseTask(taskID)
+	if task == nil {
+		response.NotFound(c, "task not found")
+		return
+	}
+	c.JSON(http.StatusOK, task)
+}
+
 // StopParsing stops document parsing (proxy passthrough)
 func (h *RagFlowHandler) StopParsing(c *gin.Context) {
 	var req struct {
