@@ -52,7 +52,7 @@ const classifyPrompt = `你是一个内容分类专家。请分析以下文章�
 {
   "primary_domain": "security|ai|programming|general",
   "tags": ["domain-subdomain", ...],
-  "dataset": "security-tech|ai-tech|programming|daily-digest",
+  "dataset": "security-tech|ai-tech|dev-tech|daily-digest",
   "confidence": 0.0-1.0,
   "reasoning": "简短说明分类依据"
 }
@@ -67,7 +67,7 @@ const classifyPrompt = `你是一个内容分类专家。请分析以下文章�
 示例：
 - 关于SQL注入的文章 → {"primary_domain": "security", "tags": ["security-web", "security-vulnerability"], "dataset": "security-tech"}
 - 关于GPT-4的论文 → {"primary_domain": "ai", "tags": ["ai-nlp", "ai-paper"], "dataset": "ai-tech"}
-- 关于Python异步编程 → {"primary_domain": "programming", "tags": ["programming-python", "programming-web"], "dataset": "programming"}`
+- 关于Python异步编程 → {"primary_domain": "programming", "tags": ["programming-python", "programming-web"], "dataset": "dev-tech"}`
 
 // ClassifyArticle classifies an article using LLM
 func (s *ClassifyService) ClassifyArticle(req *ClassifyRequest) (*ClassifyResponse, error) {

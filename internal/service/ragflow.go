@@ -69,8 +69,17 @@ func (s *RagFlowService) Upload(req *UploadRequest) (*UploadResponse, error) {
 func (s *RagFlowService) UploadWithRouting(req *UploadRequest) (*UploadResponse, string, error) {
 	var datasetID string
 
-	// 1. Try to find dataset by tags
-	if len(req.Tags) > 0 && req.AutoCreateTags {
+	// 1. Use LLM-recommended dataset name (lookup by name to get real RAGFlow ID)
+	if req.DatasetID != "" {
+		mapping, err := s.datasetRepo.GetByName(req.DatasetID)
+		if err == nil {
+			datasetID = mapping.DatasetID
+			log.Printf("info: dataset routed by LLM recommendation %q -> %s", req.DatasetID, datasetID)
+		}
+	}
+
+	// 2. Try to find dataset by tags
+	if datasetID == "" && len(req.Tags) > 0 && req.AutoCreateTags {
 		var tagIDs []uint
 		for _, tagName := range req.Tags {
 			tag, err := s.tagRepo.FindOrCreate(tagName, defaults.DefaultTagColor)
@@ -88,7 +97,7 @@ func (s *RagFlowService) UploadWithRouting(req *UploadRequest) (*UploadResponse,
 		}
 	}
 
-	// 2. Try to find dataset by category
+	// 3. Try to find dataset by category
 	if datasetID == "" && req.Category != "" {
 		mapping, err := s.datasetRepo.GetByName(req.Category)
 		if err == nil {
@@ -96,7 +105,7 @@ func (s *RagFlowService) UploadWithRouting(req *UploadRequest) (*UploadResponse,
 		}
 	}
 
-	// 3. Use default dataset
+	// 4. Use default dataset
 	if datasetID == "" {
 		defaultMapping, err := s.datasetRepo.GetDefault()
 		if err != nil {
