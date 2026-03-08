@@ -395,3 +395,17 @@ func (h *RagFlowHandler) BatchTransferDocuments(c *gin.Context) {
 	}
 	c.JSON(http.StatusOK, result)
 }
+
+// SyncDatasets synchronizes local dataset mappings with RAGFlow,
+// auto-matching or auto-creating datasets to fill in missing UUIDs.
+func (h *RagFlowHandler) SyncDatasets(c *gin.Context) {
+	result, err := h.svc.SyncDatasetMappings()
+	if err != nil {
+		response.InternalError(c, err.Error())
+		return
+	}
+	c.JSON(http.StatusOK, gin.H{
+		"message": "dataset sync completed",
+		"result":  result,
+	})
+}

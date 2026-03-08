@@ -90,6 +90,16 @@ func runServer(cmd *cobra.Command, args []string) {
 	services := service.NewServices(repos, cfg, version)
 	handlers := handler.NewHandlers(services, shutdownChan)
 
+	// Auto-sync dataset mappings with RAGFlow in background
+	go func() {
+		if result, err := services.RagFlow.SyncDatasetMappings(); err != nil {
+			log.Printf("warn: dataset sync failed (will retry on next restart): %v", err)
+		} else {
+			log.Printf("info: dataset sync done — matched:%d created:%d skipped:%d failed:%d",
+				result.Matched, result.Created, result.Skipped, result.Failed)
+		}
+	}()
+
 	// Setup Gin
 	if cfg.Server.Mode == "release" {
 		gin.SetMode(gin.ReleaseMode)

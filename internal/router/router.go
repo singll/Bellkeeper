@@ -87,6 +87,7 @@ func registerRagFlowRoutes(api *gin.RouterGroup, h *handler.RagFlowHandler) {
 	api.GET("/ragflow/chunks", h.ListChunks)
 	api.DELETE("/ragflow/chunks", h.DeleteChunks)
 	api.POST("/ragflow/documents/batch-transfer", h.BatchTransferDocuments)
+	api.POST("/ragflow/datasets/sync", h.SyncDatasets)
 }
 
 func registerSettingRoutes(api *gin.RouterGroup, h *handler.SettingHandler) {

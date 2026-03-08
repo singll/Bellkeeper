@@ -169,6 +169,12 @@ func (r *DatasetMappingRepository) FindArticleTagsByURLs(urls []string) ([]model
 	return ats, nil
 }
 
+// UpdateDatasetID updates only the DatasetID field for a given mapping
+func (r *DatasetMappingRepository) UpdateDatasetID(id uint, datasetID string) error {
+	return r.db.Model(&model.DatasetMapping{}).Where("id = ?", id).
+		Update("dataset_id", datasetID).Error
+}
+
 // GetAllArticleURLs returns all article URLs (for normalized matching)
 func (r *DatasetMappingRepository) GetAllArticleURLs() ([]model.ArticleTag, error) {
 	var ats []model.ArticleTag
