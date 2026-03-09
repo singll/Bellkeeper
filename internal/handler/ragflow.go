@@ -245,7 +245,7 @@ func (h *RagFlowHandler) RunParsingSmart(c *gin.Context) {
 
 	c.JSON(http.StatusOK, gin.H{
 		"task_id":         taskID,
-		"message":         "smart parsing started",
+		"message":         "smart parsing accepted and tracked until terminal result",
 		"total_documents": total,
 	})
 }
