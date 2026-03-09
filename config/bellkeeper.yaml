@@ -39,12 +39,12 @@ features:
   ai_summary: false
 
 classify:
-  enabled: false
+  enabled: true
   llm_proxy_url: "http://localhost:8080/api/llm/v1"
-  model: "glm-4-flash"
+  model: "qwen3.5-flash"
   temperature: 0.3
   max_content_len: 1000
-  timeout: 5
+  timeout: 10
   # prompt: ""  # 留空使用内置默认提示词，可自定义 LLM 分类提示词
 
 llm_proxy:
@@ -56,15 +56,25 @@ llm_proxy:
   # backoff_jitter: 0.5        # 退避抖动因子
   # default_bucket_rpm: 1000   # 无 RPM 配置时的兜底值
   channels:
-    - name: glm-flash-via-newapi
-      base_url: ${LLM_NEWAPI_BASE_URL}
-      api_key: ${LLM_NEWAPI_API_KEY}
-      rpm: 30
-      rpd: 1500
+    - name: qwen-plus-direct
+      base_url: https://dashscope.aliyuncs.com/compatible-mode/v1
+      api_key: ${LLM_QWEN_API_KEY}
+      rpm: 500
+      rpd: 20000
       priority: 1
       models:
-        - glm-4-flash
-        - GLM-4.7-Flash
+        - qwen3.5-plus
+        - qwen-plus
+      is_enabled: true
+    - name: qwen-flash-direct
+      base_url: https://dashscope.aliyuncs.com/compatible-mode/v1
+      api_key: ${LLM_QWEN_API_KEY}
+      rpm: 1000
+      rpd: 50000
+      priority: 1
+      models:
+        - qwen3.5-flash
+        - qwen-turbo
       is_enabled: true
     - name: deepseek-direct
       base_url: https://api.deepseek.com
@@ -75,12 +85,22 @@ llm_proxy:
       models:
         - deepseek-chat
       is_enabled: true
+    - name: glm-flash-via-newapi
+      base_url: ${LLM_NEWAPI_BASE_URL}
+      api_key: ${LLM_NEWAPI_API_KEY}
+      rpm: 30
+      rpd: 1500
+      priority: 2
+      models:
+        - glm-4-flash
+        - GLM-4.7-Flash
+      is_enabled: true
     - name: kimi-direct
       base_url: https://api.moonshot.cn
       api_key: ${LLM_KIMI_API_KEY}
       rpm: 3
       rpd: 50
-      priority: 1
+      priority: 3
       models:
         - moonshot-v1-128k
       is_enabled: true
