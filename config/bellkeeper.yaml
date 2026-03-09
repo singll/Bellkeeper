@@ -41,7 +41,7 @@ features:
 classify:
   enabled: true
   llm_proxy_url: "http://localhost:8080/api/llm/v1"
-  model: "qwen3.5-flash"
+  model: "Qwen/Qwen3-8B"
   temperature: 0.3
   max_content_len: 1000
   timeout: 10
@@ -56,6 +56,24 @@ llm_proxy:
   # backoff_jitter: 0.5        # 退避抖动因子
   # default_bucket_rpm: 1000   # 无 RPM 配置时的兜底值
   channels:
+    - name: siliconflow-qwen3-8b
+      base_url: https://api.siliconflow.cn/v1
+      api_key: ${LLM_SILICONFLOW_API_KEY}
+      rpm: 500
+      rpd: 50000
+      priority: 1
+      models:
+        - Qwen/Qwen3-8B
+      is_enabled: true
+    - name: siliconflow-qwen25-7b
+      base_url: https://api.siliconflow.cn/v1
+      api_key: ${LLM_SILICONFLOW_API_KEY}
+      rpm: 500
+      rpd: 50000
+      priority: 1
+      models:
+        - Qwen/Qwen2.5-7B-Instruct
+      is_enabled: true
     - name: qwen-plus-direct
       base_url: https://dashscope.aliyuncs.com/compatible-mode/v1
       api_key: ${LLM_QWEN_API_KEY}
