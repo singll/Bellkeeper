@@ -15,13 +15,15 @@ import (
 // ClassifyService handles article classification using LLM
 type ClassifyService struct {
 	cfg        config.ClassifyConfig
+	apiKey     string
 	httpClient *http.Client
 }
 
 // NewClassifyService creates a new classify service
-func NewClassifyService(cfg config.ClassifyConfig) *ClassifyService {
+func NewClassifyService(cfg config.ClassifyConfig, apiKey string) *ClassifyService {
 	return &ClassifyService{
-		cfg: cfg,
+		cfg:    cfg,
+		apiKey: apiKey,
 		httpClient: &http.Client{
 			Timeout: time.Duration(cfg.Timeout) * time.Second,
 		},
@@ -117,6 +119,9 @@ func (s *ClassifyService) callLLM(prompt string) (string, error) {
 	}
 
 	req.Header.Set("Content-Type", "application/json")
+	if s.apiKey != "" {
+		req.Header.Set("X-API-Key", s.apiKey)
+	}
 
 	resp, err := s.httpClient.Do(req)
 	if err != nil {
