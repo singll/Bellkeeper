@@ -97,3 +97,34 @@ func (h *LLMProxyHandler) RateLimitEvents(c *gin.Context) {
 	}
 	response.Success(c, events)
 }
+
+// HealthStatus returns health status of all channels including circuit breaker state.
+func (h *LLMProxyHandler) HealthStatus(c *gin.Context) {
+	response.Success(c, h.svc.GetHealthStatus())
+}
+
+// GroupsStatus returns status of all virtual model groups.
+func (h *LLMProxyHandler) GroupsStatus(c *gin.Context) {
+	response.Success(c, h.svc.GetGroupsStatus())
+}
+
+// ClearGroupSticky clears all sticky bindings for the named model group.
+func (h *LLMProxyHandler) ClearGroupSticky(c *gin.Context) {
+	name := c.Param("name")
+	cleared := h.svc.ClearGroupSticky(name)
+	if cleared < 0 {
+		response.NotFound(c, "model group not found: "+name)
+		return
+	}
+	response.Success(c, gin.H{"cleared": cleared})
+}
+
+// ResetChannelCircuit resets the circuit breaker for the named channel.
+func (h *LLMProxyHandler) ResetChannelCircuit(c *gin.Context) {
+	name := c.Param("name")
+	if ok := h.svc.ResetChannelCircuit(name); !ok {
+		response.NotFound(c, "channel not found: "+name)
+		return
+	}
+	response.Message(c, "circuit breaker reset for channel: "+name)
+}

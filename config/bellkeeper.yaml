@@ -55,6 +55,58 @@ llm_proxy:
   # backoff_cap_seconds: 60    # 指数退避上限（秒）
   # backoff_jitter: 0.5        # 退避抖动因子
   # default_bucket_rpm: 1000   # 无 RPM 配置时的兜底值
+
+  # 熔断器配置
+  circuit_breaker:
+    failure_threshold: 5       # 连续失败 N 次后熔断
+    cooldown_seconds: 120      # 熔断冷却时间（秒）
+    half_open_max: 1           # 半开状态最多放行请求数
+    error_window_seconds: 300  # 错误统计滑动窗口（秒）
+
+  # 虚拟模型组
+  model_groups:
+    - name: "pool-chat-free"
+      description: "免费 Chat 模型池（分类/解析增强）"
+      strategy: "priority-health"
+      sticky_ttl_seconds: 600
+      members:
+        - channel: "siliconflow-qwen3-8b"
+          model: "Qwen/Qwen3-8B"
+          weight: 3
+        - channel: "siliconflow-qwen25-7b"
+          model: "Qwen/Qwen2.5-7B-Instruct"
+          weight: 2
+        - channel: "glm-flash-via-newapi"
+          model: "GLM-4.7-Flash"
+          weight: 1
+
+    - name: "pool-chat-balanced"
+      description: "均衡 Chat 模型池（QA 问答，付费主力 + 免费兜底）"
+      strategy: "priority-health"
+      sticky_ttl_seconds: 300
+      members:
+        - channel: "qwen-plus-direct"
+          model: "qwen3.5-plus"
+          weight: 5
+        - channel: "siliconflow-qwen3-8b"
+          model: "Qwen/Qwen3-8B"
+          weight: 1
+        - channel: "glm-flash-via-newapi"
+          model: "GLM-4.7-Flash"
+          weight: 1
+
+    - name: "pool-summary"
+      description: "AI 总结池（DeepSeek 主力 + Qwen 备用）"
+      strategy: "priority-health"
+      sticky_ttl_seconds: 900
+      members:
+        - channel: "deepseek-direct"
+          model: "deepseek-chat"
+          weight: 5
+        - channel: "qwen-plus-direct"
+          model: "qwen3.5-plus"
+          weight: 2
+
   channels:
     - name: siliconflow-qwen3-8b
       base_url: https://api.siliconflow.cn/v1
@@ -62,6 +114,7 @@ llm_proxy:
       rpm: 500
       rpd: 50000
       priority: 1
+      is_free: true
       models:
         - Qwen/Qwen3-8B
       is_enabled: true
@@ -71,6 +124,7 @@ llm_proxy:
       rpm: 500
       rpd: 50000
       priority: 1
+      is_free: true
       models:
         - Qwen/Qwen2.5-7B-Instruct
       is_enabled: true
@@ -109,6 +163,7 @@ llm_proxy:
       rpm: 30
       rpd: 1500
       priority: 2
+      is_free: true
       models:
         - glm-4-flash
         - GLM-4.7-Flash

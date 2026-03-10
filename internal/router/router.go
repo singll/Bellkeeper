@@ -121,6 +121,12 @@ func registerLLMProxyRoutes(api *gin.RouterGroup, h *handler.LLMProxyHandler) {
 	llm.GET("/stats", h.Stats)
 	llm.GET("/logs", h.Logs)
 	llm.GET("/rate-limit-events", h.RateLimitEvents)
+
+	// Health & model group management
+	llm.GET("/health", h.HealthStatus)
+	llm.GET("/groups/status", h.GroupsStatus)
+	llm.DELETE("/groups/:name/sticky", h.ClearGroupSticky)
+	llm.POST("/channels/:name/reset", h.ResetChannelCircuit)
 }
 
 func registerClassifyRoutes(api *gin.RouterGroup, h *handler.ClassifyHandler) {

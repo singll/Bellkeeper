@@ -20,14 +20,37 @@ type Config struct {
 }
 
 type LLMProxyConfig struct {
-	Enabled           bool            `mapstructure:"enabled"`
-	DefaultTimeout    int             `mapstructure:"default_timeout"`
-	MaxRetries        int             `mapstructure:"max_retries"`
-	MaxWaitSeconds    int             `mapstructure:"max_wait_seconds"`
-	BackoffCapSeconds int             `mapstructure:"backoff_cap_seconds"`
-	BackoffJitter     float64         `mapstructure:"backoff_jitter"`
-	DefaultBucketRPM  int             `mapstructure:"default_bucket_rpm"`
-	Channels          []ChannelConfig `mapstructure:"channels"`
+	Enabled           bool                 `mapstructure:"enabled"`
+	DefaultTimeout    int                  `mapstructure:"default_timeout"`
+	MaxRetries        int                  `mapstructure:"max_retries"`
+	MaxWaitSeconds    int                  `mapstructure:"max_wait_seconds"`
+	BackoffCapSeconds int                  `mapstructure:"backoff_cap_seconds"`
+	BackoffJitter     float64              `mapstructure:"backoff_jitter"`
+	DefaultBucketRPM  int                  `mapstructure:"default_bucket_rpm"`
+	CircuitBreaker    CircuitBreakerConfig `mapstructure:"circuit_breaker"`
+	ModelGroups       []ModelGroupConfig   `mapstructure:"model_groups"`
+	Channels          []ChannelConfig      `mapstructure:"channels"`
+}
+
+type CircuitBreakerConfig struct {
+	FailureThreshold   int `mapstructure:"failure_threshold"`
+	CooldownSeconds    int `mapstructure:"cooldown_seconds"`
+	HalfOpenMax        int `mapstructure:"half_open_max"`
+	ErrorWindowSeconds int `mapstructure:"error_window_seconds"`
+}
+
+type ModelGroupConfig struct {
+	Name             string             `mapstructure:"name"`
+	Description      string             `mapstructure:"description"`
+	Strategy         string             `mapstructure:"strategy"`
+	StickyTTLSeconds int                `mapstructure:"sticky_ttl_seconds"`
+	Members          []ModelGroupMember `mapstructure:"members"`
+}
+
+type ModelGroupMember struct {
+	Channel string `mapstructure:"channel"`
+	Model   string `mapstructure:"model"`
+	Weight  int    `mapstructure:"weight"`
 }
 
 type ChannelConfig struct {
@@ -39,6 +62,7 @@ type ChannelConfig struct {
 	Priority  int      `mapstructure:"priority"`
 	Models    []string `mapstructure:"models"`
 	IsEnabled bool     `mapstructure:"is_enabled"`
+	IsFree    bool     `mapstructure:"is_free"`
 }
 
 type ServerConfig struct {
@@ -194,6 +218,10 @@ func setDefaults(v *viper.Viper) {
 	v.SetDefault("llm_proxy.backoff_cap_seconds", 60)
 	v.SetDefault("llm_proxy.backoff_jitter", 0.5)
 	v.SetDefault("llm_proxy.default_bucket_rpm", 1000)
+	v.SetDefault("llm_proxy.circuit_breaker.failure_threshold", 5)
+	v.SetDefault("llm_proxy.circuit_breaker.cooldown_seconds", 120)
+	v.SetDefault("llm_proxy.circuit_breaker.half_open_max", 1)
+	v.SetDefault("llm_proxy.circuit_breaker.error_window_seconds", 300)
 
 	// Classify
 	v.SetDefault("classify.enabled", false)
