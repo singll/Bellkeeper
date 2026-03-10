@@ -109,7 +109,7 @@ llm_proxy:
 
   channels:
     - name: siliconflow-qwen3-8b
-      base_url: https://api.siliconflow.cn/v1
+      base_url: https://api.siliconflow.cn
       api_key: ${LLM_SILICONFLOW_API_KEY}
       rpm: 500
       rpd: 50000
@@ -119,7 +119,7 @@ llm_proxy:
         - Qwen/Qwen3-8B
       is_enabled: true
     - name: siliconflow-qwen25-7b
-      base_url: https://api.siliconflow.cn/v1
+      base_url: https://api.siliconflow.cn
       api_key: ${LLM_SILICONFLOW_API_KEY}
       rpm: 500
       rpd: 50000
@@ -129,7 +129,7 @@ llm_proxy:
         - Qwen/Qwen2.5-7B-Instruct
       is_enabled: true
     - name: qwen-plus-direct
-      base_url: https://dashscope.aliyuncs.com/compatible-mode/v1
+      base_url: https://dashscope.aliyuncs.com/compatible-mode
       api_key: ${LLM_QWEN_API_KEY}
       rpm: 500
       rpd: 20000
@@ -139,7 +139,7 @@ llm_proxy:
         - qwen-plus
       is_enabled: true
     - name: qwen-flash-direct
-      base_url: https://dashscope.aliyuncs.com/compatible-mode/v1
+      base_url: https://dashscope.aliyuncs.com/compatible-mode
       api_key: ${LLM_QWEN_API_KEY}
       rpm: 1000
       rpd: 50000
