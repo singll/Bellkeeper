@@ -267,10 +267,15 @@ func (s *LLMProxyService) Reload() error {
 }
 
 func dbChannelToConfig(ch model.LLMChannel) config.ChannelConfig {
+	// Resolve API key: try as env var name first, fallback to direct value
+	apiKey := os.Getenv(ch.APIKeyEnv)
+	if apiKey == "" {
+		apiKey = ch.APIKeyEnv
+	}
 	return config.ChannelConfig{
 		Name:      ch.Name,
 		BaseURL:   ch.BaseURL,
-		APIKey:    os.Getenv(ch.APIKeyEnv),
+		APIKey:    apiKey,
 		RPM:       ch.RPM,
 		RPD:       ch.RPD,
 		Priority:  ch.Priority,

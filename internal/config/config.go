@@ -57,6 +57,7 @@ type ChannelConfig struct {
 	Name      string   `mapstructure:"name"`
 	BaseURL   string   `mapstructure:"base_url"`
 	APIKey    string   `mapstructure:"api_key"`
+	RawAPIKey string   `mapstructure:"-"` // Pre-expansion value, set by Load()
 	RPM       int      `mapstructure:"rpm"`
 	RPD       int      `mapstructure:"rpd"`
 	Priority  int      `mapstructure:"priority"`
@@ -163,6 +164,7 @@ func Load(cfgFile string) (*Config, error) {
 
 	// Expand ${VAR} references in LLM proxy channel configs
 	for i := range cfg.LLMProxy.Channels {
+		cfg.LLMProxy.Channels[i].RawAPIKey = cfg.LLMProxy.Channels[i].APIKey
 		cfg.LLMProxy.Channels[i].BaseURL = os.ExpandEnv(cfg.LLMProxy.Channels[i].BaseURL)
 		cfg.LLMProxy.Channels[i].APIKey = os.ExpandEnv(cfg.LLMProxy.Channels[i].APIKey)
 	}

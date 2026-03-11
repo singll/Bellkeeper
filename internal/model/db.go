@@ -78,8 +78,8 @@ func SeedLLMProxyConfig(db *gorm.DB, cfg config.LLMProxyConfig) error {
 
 	// Seed channels
 	for _, ch := range cfg.Channels {
-		// Extract env var name from "${VAR_NAME}" pattern
-		apiKeyEnv := ch.APIKey
+		// Extract env var name from "${VAR_NAME}" pattern (pre-expansion)
+		apiKeyEnv := ch.RawAPIKey
 		if strings.HasPrefix(apiKeyEnv, "${") && strings.HasSuffix(apiKeyEnv, "}") {
 			apiKeyEnv = apiKeyEnv[2 : len(apiKeyEnv)-1]
 		}
