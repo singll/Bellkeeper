@@ -1,7 +1,9 @@
 package model
 
 import (
+	"encoding/json"
 	"log"
+	"strings"
 	"time"
 
 	"github.com/singll/bellkeeper/internal/config"
@@ -41,6 +43,9 @@ func AutoMigrate(db *gorm.DB) error {
 		&ArticleTag{},
 		&Setting{},
 		&LLMProxyLog{},
+		&LLMChannel{},
+		&LLMModelGroup{},
+		&LLMModelGroupMember{},
 	); err != nil {
 		return err
 	}
@@ -50,6 +55,81 @@ func AutoMigrate(db *gorm.DB) error {
 	}
 
 	return SeedDatasetMappings(db)
+}
+
+// AutoMigrateWithLLMSeed runs migrations and seeds LLM proxy config from YAML if DB is empty.
+func AutoMigrateWithLLMSeed(db *gorm.DB, cfg *config.Config) error {
+	if err := AutoMigrate(db); err != nil {
+		return err
+	}
+	return SeedLLMProxyConfig(db, cfg.LLMProxy)
+}
+
+// SeedLLMProxyConfig imports channels and model groups from YAML config into DB
+// on first startup (when tables are empty). Subsequent runs are no-ops.
+func SeedLLMProxyConfig(db *gorm.DB, cfg config.LLMProxyConfig) error {
+	var channelCount int64
+	db.Model(&LLMChannel{}).Count(&channelCount)
+	if channelCount > 0 {
+		return nil // DB already has data, skip seeding
+	}
+
+	log.Println("info: seeding LLM proxy config from YAML (first-time migration)...")
+
+	// Seed channels
+	for _, ch := range cfg.Channels {
+		// Extract env var name from "${VAR_NAME}" pattern
+		apiKeyEnv := ch.APIKey
+		if strings.HasPrefix(apiKeyEnv, "${") && strings.HasSuffix(apiKeyEnv, "}") {
+			apiKeyEnv = apiKeyEnv[2 : len(apiKeyEnv)-1]
+		}
+
+		modelsJSON, _ := json.Marshal(ch.Models)
+		channel := LLMChannel{
+			Name:      ch.Name,
+			BaseURL:   ch.BaseURL,
+			APIKeyEnv: apiKeyEnv,
+			RPM:       ch.RPM,
+			RPD:       ch.RPD,
+			Priority:  ch.Priority,
+			IsFree:    ch.IsFree,
+			IsEnabled: ch.IsEnabled,
+			Models:    string(modelsJSON),
+		}
+		if err := db.Create(&channel).Error; err != nil {
+			log.Printf("warn: failed to seed LLM channel %q: %v", ch.Name, err)
+			continue
+		}
+		log.Printf("info: seeded LLM channel %q (%d models)", ch.Name, len(ch.Models))
+	}
+
+	// Seed model groups
+	for _, g := range cfg.ModelGroups {
+		group := LLMModelGroup{
+			Name:             g.Name,
+			Description:      g.Description,
+			Strategy:         g.Strategy,
+			StickyTTLSeconds: g.StickyTTLSeconds,
+		}
+		for _, m := range g.Members {
+			weight := m.Weight
+			if weight <= 0 {
+				weight = 1
+			}
+			group.Members = append(group.Members, LLMModelGroupMember{
+				ChannelName: m.Channel,
+				Model:       m.Model,
+				Weight:      weight,
+			})
+		}
+		if err := db.Create(&group).Error; err != nil {
+			log.Printf("warn: failed to seed LLM model group %q: %v", g.Name, err)
+			continue
+		}
+		log.Printf("info: seeded LLM model group %q (%d members)", g.Name, len(g.Members))
+	}
+
+	return nil
 }
 
 // SeedSettings creates default settings if they don't exist

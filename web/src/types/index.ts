@@ -135,3 +135,39 @@ export interface LLMGroupStatus {
   sticky_bindings: number
   members: LLMGroupMemberStatus[]
 }
+
+// LLM Proxy Config Types (DB-backed)
+
+export interface LLMChannelConfig {
+  id: number
+  name: string
+  base_url: string
+  api_key_env: string
+  rpm: number
+  rpd: number
+  priority: number
+  is_free: boolean
+  is_enabled: boolean
+  models: string // JSON array string
+  created_at: string
+  updated_at: string
+}
+
+export interface LLMModelGroupConfig {
+  id: number
+  name: string
+  description: string
+  strategy: string
+  sticky_ttl_seconds: number
+  members: LLMModelGroupMemberConfig[]
+  created_at: string
+  updated_at: string
+}
+
+export interface LLMModelGroupMemberConfig {
+  id?: number
+  group_id?: number
+  channel_name: string
+  model: string
+  weight: number
+}

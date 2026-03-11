@@ -77,8 +77,8 @@ func runServer(cmd *cobra.Command, args []string) {
 		log.Fatalf("Failed to connect to database: %v", err)
 	}
 
-	// Run auto-migration and seed defaults
-	if err := model.AutoMigrate(db); err != nil {
+	// Run auto-migration and seed defaults (including LLM proxy config from YAML)
+	if err := model.AutoMigrateWithLLMSeed(db, cfg); err != nil {
 		log.Fatalf("Failed to run migrations: %v", err)
 	}
 

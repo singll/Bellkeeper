@@ -11,6 +11,8 @@ type Repositories struct {
 	DatasetMapping *DatasetMappingRepository
 	Setting        *SettingRepository
 	LLMProxy       *LLMProxyRepository
+	LLMChannel     *LLMChannelRepository
+	LLMModelGroup  *LLMModelGroupRepository
 }
 
 // NewRepositories creates all repository instances
@@ -21,5 +23,7 @@ func NewRepositories(db *gorm.DB) *Repositories {
 		DatasetMapping: NewDatasetMappingRepository(db),
 		Setting:        NewSettingRepository(db),
 		LLMProxy:       NewLLMProxyRepository(db),
+		LLMChannel:     NewLLMChannelRepository(db),
+		LLMModelGroup:  NewLLMModelGroupRepository(db),
 	}
 }

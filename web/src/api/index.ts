@@ -9,6 +9,8 @@ import type {
   WorkflowExecution,
   LLMChannelStatus,
   LLMGroupStatus,
+  LLMChannelConfig,
+  LLMModelGroupConfig,
 } from '@/types'
 
 const API_BASE = '/api'
@@ -184,6 +186,46 @@ export const llmProxyApi = {
     request<{ data: { cleared: number } }>(`/llm/groups/${encodeURIComponent(name)}/sticky`, {
       method: 'DELETE',
     }),
+
+  // Config CRUD
+  listChannels: () =>
+    request<{ data: LLMChannelConfig[] }>('/llm/channels'),
+
+  createChannel: (data: Partial<LLMChannelConfig>) =>
+    request<{ data: LLMChannelConfig }>('/llm/channels', {
+      method: 'POST',
+      body: JSON.stringify(data),
+    }),
+
+  updateChannel: (id: number, data: Partial<LLMChannelConfig>) =>
+    request<{ data: LLMChannelConfig }>(`/llm/channels/${id}`, {
+      method: 'PUT',
+      body: JSON.stringify(data),
+    }),
+
+  deleteChannel: (id: number) =>
+    request<{ message: string }>(`/llm/channels/${id}`, { method: 'DELETE' }),
+
+  listGroups: () =>
+    request<{ data: LLMModelGroupConfig[] }>('/llm/groups'),
+
+  createGroup: (data: Partial<LLMModelGroupConfig>) =>
+    request<{ data: LLMModelGroupConfig }>('/llm/groups', {
+      method: 'POST',
+      body: JSON.stringify(data),
+    }),
+
+  updateGroup: (id: number, data: Partial<LLMModelGroupConfig>) =>
+    request<{ data: LLMModelGroupConfig }>(`/llm/groups/${id}`, {
+      method: 'PUT',
+      body: JSON.stringify(data),
+    }),
+
+  deleteGroup: (id: number) =>
+    request<{ message: string }>(`/llm/groups/${id}`, { method: 'DELETE' }),
+
+  reload: () =>
+    request<{ message: string }>('/llm/reload', { method: 'POST' }),
 }
 
 // RagFlow API

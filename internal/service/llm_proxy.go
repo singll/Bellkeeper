@@ -9,6 +9,7 @@ import (
 	"math"
 	"math/rand"
 	"net/http"
+	"os"
 	"sort"
 	"strings"
 	"sync"
@@ -133,54 +134,82 @@ type Channel struct {
 // LLMProxyService provides a rate-limited, multi-channel OpenAI-compatible proxy
 // with virtual model groups, sticky routing, and circuit breaker support.
 type LLMProxyService struct {
+	mu          sync.RWMutex
 	cfg         config.LLMProxyConfig
 	channels    map[string]*Channel      // name -> channel
 	modelMap    map[string][]*Channel    // model -> sorted channels (by priority)
 	modelGroups map[string]*ModelGroup   // group name -> model group
 	repo        *repository.LLMProxyRepository
+	channelRepo *repository.LLMChannelRepository
+	groupRepo   *repository.LLMModelGroupRepository
 	stopChans   []chan struct{}           // cleanup goroutine stop channels
 }
 
-func NewLLMProxyService(cfg config.LLMProxyConfig, repo *repository.LLMProxyRepository) *LLMProxyService {
+func NewLLMProxyService(cfg config.LLMProxyConfig, repo *repository.LLMProxyRepository, channelRepo *repository.LLMChannelRepository, groupRepo *repository.LLMModelGroupRepository) *LLMProxyService {
 	svc := &LLMProxyService{
 		cfg:         cfg,
 		channels:    make(map[string]*Channel),
 		modelMap:    make(map[string][]*Channel),
 		modelGroups: make(map[string]*ModelGroup),
 		repo:        repo,
+		channelRepo: channelRepo,
+		groupRepo:   groupRepo,
 	}
 
-	// Initialize channels with health trackers
-	for _, chCfg := range cfg.Channels {
-		if !chCfg.IsEnabled {
-			continue
-		}
+	if err := svc.loadFromDB(); err != nil {
+		log.Printf("llm-proxy: failed to load config from DB: %v", err)
+	}
+
+	return svc
+}
+
+// loadFromDB loads channel and model group configuration from the database.
+func (s *LLMProxyService) loadFromDB() error {
+	dbChannels, err := s.channelRepo.ListEnabled()
+	if err != nil {
+		return fmt.Errorf("load channels: %w", err)
+	}
+
+	channels := make(map[string]*Channel)
+	modelMap := make(map[string][]*Channel)
+
+	for _, dbCh := range dbChannels {
+		chCfg := dbChannelToConfig(dbCh)
 		ch := &Channel{
 			Config: chCfg,
-			Bucket: NewTokenBucket(chCfg.RPM, chCfg.RPD, cfg.DefaultBucketRPM),
+			Bucket: NewTokenBucket(chCfg.RPM, chCfg.RPD, s.cfg.DefaultBucketRPM),
 			Client: &http.Client{
-				Timeout: time.Duration(cfg.DefaultTimeout) * time.Second,
+				Timeout: time.Duration(s.cfg.DefaultTimeout) * time.Second,
 			},
-			Health: NewChannelHealth(cfg.CircuitBreaker),
+			Health: NewChannelHealth(s.cfg.CircuitBreaker),
 		}
-		svc.channels[chCfg.Name] = ch
+		channels[chCfg.Name] = ch
 
 		for _, m := range chCfg.Models {
-			svc.modelMap[m] = append(svc.modelMap[m], ch)
+			modelMap[m] = append(modelMap[m], ch)
 		}
 	}
 
 	// Sort channels per model by priority (lower = higher priority)
-	for m := range svc.modelMap {
-		chs := svc.modelMap[m]
+	for m := range modelMap {
+		chs := modelMap[m]
 		sort.Slice(chs, func(i, j int) bool {
 			return chs[i].Config.Priority < chs[j].Config.Priority
 		})
 	}
 
-	// Initialize model groups
-	for _, gCfg := range cfg.ModelGroups {
-		group, err := NewModelGroup(gCfg, svc.channels)
+	// Load model groups
+	dbGroups, err := s.groupRepo.List()
+	if err != nil {
+		return fmt.Errorf("load groups: %w", err)
+	}
+
+	modelGroups := make(map[string]*ModelGroup)
+	var stopChans []chan struct{}
+
+	for _, dbGroup := range dbGroups {
+		gCfg := dbGroupToConfig(dbGroup)
+		group, err := NewModelGroup(gCfg, channels)
 		if err != nil {
 			log.Printf("llm-proxy: error initializing model group %q: %v", gCfg.Name, err)
 			continue
@@ -189,19 +218,144 @@ func NewLLMProxyService(cfg config.LLMProxyConfig, repo *repository.LLMProxyRepo
 			log.Printf("llm-proxy: warning: model group %q has no valid members, skipping", gCfg.Name)
 			continue
 		}
-		svc.modelGroups[gCfg.Name] = group
+		modelGroups[gCfg.Name] = group
 
-		// Start sticky binding cleanup goroutine
 		stop := group.StartCleanup(1 * time.Minute)
-		svc.stopChans = append(svc.stopChans, stop)
+		stopChans = append(stopChans, stop)
 
 		log.Printf("llm-proxy: initialized model group %q with %d members (strategy=%s, sticky_ttl=%ds)",
 			gCfg.Name, len(group.Members), gCfg.Strategy, gCfg.StickyTTLSeconds)
 	}
 
-	log.Printf("llm-proxy: initialized %d channels for %d models, %d model groups",
-		len(svc.channels), len(svc.modelMap), len(svc.modelGroups))
-	return svc
+	s.channels = channels
+	s.modelMap = modelMap
+	s.modelGroups = modelGroups
+	s.stopChans = stopChans
+
+	log.Printf("llm-proxy: loaded %d channels for %d models, %d model groups from DB",
+		len(channels), len(modelMap), len(modelGroups))
+	return nil
+}
+
+// Reload reloads all channels and model groups from the database,
+// preserving health and rate-limiter state for unchanged channels.
+func (s *LLMProxyService) Reload() error {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+
+	// Stop old cleanup goroutines
+	for _, stop := range s.stopChans {
+		close(stop)
+	}
+
+	// Preserve existing channel state
+	oldChannels := s.channels
+
+	if err := s.loadFromDB(); err != nil {
+		return err
+	}
+
+	// Restore health + bucket state for channels that still exist
+	for name, newCh := range s.channels {
+		if oldCh, ok := oldChannels[name]; ok {
+			newCh.Health = oldCh.Health
+			newCh.Bucket = oldCh.Bucket
+		}
+	}
+
+	return nil
+}
+
+func dbChannelToConfig(ch model.LLMChannel) config.ChannelConfig {
+	return config.ChannelConfig{
+		Name:      ch.Name,
+		BaseURL:   ch.BaseURL,
+		APIKey:    os.Getenv(ch.APIKeyEnv),
+		RPM:       ch.RPM,
+		RPD:       ch.RPD,
+		Priority:  ch.Priority,
+		Models:    ch.GetModels(),
+		IsEnabled: ch.IsEnabled,
+		IsFree:    ch.IsFree,
+	}
+}
+
+func dbGroupToConfig(g model.LLMModelGroup) config.ModelGroupConfig {
+	members := make([]config.ModelGroupMember, len(g.Members))
+	for i, m := range g.Members {
+		members[i] = config.ModelGroupMember{
+			Channel: m.ChannelName,
+			Model:   m.Model,
+			Weight:  m.Weight,
+		}
+	}
+	return config.ModelGroupConfig{
+		Name:             g.Name,
+		Description:      g.Description,
+		Strategy:         g.Strategy,
+		StickyTTLSeconds: g.StickyTTLSeconds,
+		Members:          members,
+	}
+}
+
+// --- Channel & Group CRUD (delegates to repo, auto-reloads) ---
+
+func (s *LLMProxyService) ListChannelConfigs() ([]model.LLMChannel, error) {
+	return s.channelRepo.List()
+}
+
+func (s *LLMProxyService) GetChannelConfig(id uint) (*model.LLMChannel, error) {
+	return s.channelRepo.Get(id)
+}
+
+func (s *LLMProxyService) CreateChannel(ch *model.LLMChannel) error {
+	if err := s.channelRepo.Create(ch); err != nil {
+		return err
+	}
+	return s.Reload()
+}
+
+func (s *LLMProxyService) UpdateChannel(ch *model.LLMChannel) error {
+	if err := s.channelRepo.Update(ch); err != nil {
+		return err
+	}
+	return s.Reload()
+}
+
+func (s *LLMProxyService) DeleteChannel(id uint) error {
+	if err := s.channelRepo.Delete(id); err != nil {
+		return err
+	}
+	return s.Reload()
+}
+
+func (s *LLMProxyService) ListGroupConfigs() ([]model.LLMModelGroup, error) {
+	return s.groupRepo.List()
+}
+
+func (s *LLMProxyService) GetGroupConfig(id uint) (*model.LLMModelGroup, error) {
+	return s.groupRepo.Get(id)
+}
+
+func (s *LLMProxyService) CreateGroup(g *model.LLMModelGroup) error {
+	if err := s.groupRepo.Create(g); err != nil {
+		return err
+	}
+	return s.Reload()
+}
+
+func (s *LLMProxyService) UpdateGroup(g *model.LLMModelGroup) error {
+	if err := s.groupRepo.Update(g); err != nil {
+		return err
+	}
+	return s.Reload()
+}
+
+func (s *LLMProxyService) DeleteGroup(id uint) error {
+	if err := s.groupRepo.Delete(id); err != nil {
+		return err
+	}
+	return s.Reload()
 }
 
 // ProxyRequest forwards an OpenAI-compatible request through rate-limited channels.
@@ -213,6 +367,12 @@ func (s *LLMProxyService) ProxyRequest(
 ) (statusCode int, respBody []byte, respHeaders http.Header, err error) {
 	modelName := extractModelFromBody(body)
 
+	// Snapshot current routing state for lock-free proxy operation
+	s.mu.RLock()
+	modelGroups := s.modelGroups
+	modelMap := s.modelMap
+	s.mu.RUnlock()
+
 	// Derive task key for sticky routing
 	taskKey := headers.Get("X-Task-Key")
 	if taskKey == "" && callerID != "" && callerID != "unknown" {
@@ -220,12 +380,12 @@ func (s *LLMProxyService) ProxyRequest(
 	}
 
 	// Check if model matches a virtual model group
-	if group, ok := s.modelGroups[modelName]; ok {
+	if group, ok := modelGroups[modelName]; ok {
 		return s.proxyViaGroup(group, taskKey, method, path, headers, body, callerID)
 	}
 
 	// Direct channel matching (existing logic)
-	channels := s.findChannels(modelName)
+	channels := findChannelsInMap(modelMap, modelName)
 	if len(channels) == 0 {
 		errMsg := fmt.Sprintf("no channel available for model: %s", modelName)
 		return 400, []byte(`{"error":"` + errMsg + `"}`), nil, fmt.Errorf("%s", errMsg)
@@ -415,20 +575,20 @@ func (s *LLMProxyService) calculateBackoff(attempt int) time.Duration {
 	return time.Duration((base + jitter) * float64(time.Second))
 }
 
-func (s *LLMProxyService) findChannels(modelName string) []*Channel {
+func findChannelsInMap(modelMap map[string][]*Channel, modelName string) []*Channel {
 	// Exact match
-	if chs, ok := s.modelMap[modelName]; ok {
+	if chs, ok := modelMap[modelName]; ok {
 		return chs
 	}
 	// Case-insensitive match
 	lower := strings.ToLower(modelName)
-	for m, chs := range s.modelMap {
+	for m, chs := range modelMap {
 		if strings.ToLower(m) == lower {
 			return chs
 		}
 	}
 	// Substring match
-	for m, chs := range s.modelMap {
+	for m, chs := range modelMap {
 		if strings.Contains(strings.ToLower(m), lower) || strings.Contains(lower, strings.ToLower(m)) {
 			return chs
 		}
@@ -499,8 +659,12 @@ func (s *LLMProxyService) logGroupRequest(channelName, virtualModel, realModel, 
 
 // GetChannelsStatus returns current status of all channels including bucket state and health.
 func (s *LLMProxyService) GetChannelsStatus() []map[string]interface{} {
+	s.mu.RLock()
+	channels := s.channels
+	s.mu.RUnlock()
+
 	var result []map[string]interface{}
-	for name, ch := range s.channels {
+	for name, ch := range channels {
 		status := ch.Bucket.Status()
 		status["name"] = name
 		status["base_url"] = ch.Config.BaseURL
@@ -517,8 +681,12 @@ func (s *LLMProxyService) GetChannelsStatus() []map[string]interface{} {
 
 // GetHealthStatus returns health status of all channels.
 func (s *LLMProxyService) GetHealthStatus() []map[string]interface{} {
+	s.mu.RLock()
+	channels := s.channels
+	s.mu.RUnlock()
+
 	var result []map[string]interface{}
-	for name, ch := range s.channels {
+	for name, ch := range channels {
 		entry := map[string]interface{}{
 			"name":     name,
 			"models":   ch.Config.Models,
@@ -533,8 +701,12 @@ func (s *LLMProxyService) GetHealthStatus() []map[string]interface{} {
 
 // GetGroupsStatus returns status of all virtual model groups.
 func (s *LLMProxyService) GetGroupsStatus() []map[string]interface{} {
+	s.mu.RLock()
+	modelGroups := s.modelGroups
+	s.mu.RUnlock()
+
 	var result []map[string]interface{}
-	for _, group := range s.modelGroups {
+	for _, group := range modelGroups {
 		result = append(result, group.Status())
 	}
 	return result
@@ -543,7 +715,10 @@ func (s *LLMProxyService) GetGroupsStatus() []map[string]interface{} {
 // ClearGroupSticky clears all sticky bindings for the named model group.
 // Returns the number of bindings cleared, or -1 if the group doesn't exist.
 func (s *LLMProxyService) ClearGroupSticky(groupName string) int {
+	s.mu.RLock()
 	group, ok := s.modelGroups[groupName]
+	s.mu.RUnlock()
+
 	if !ok {
 		return -1
 	}
@@ -556,7 +731,10 @@ func (s *LLMProxyService) ClearGroupSticky(groupName string) int {
 // ResetChannelCircuit resets the circuit breaker for the named channel.
 // Returns false if the channel doesn't exist.
 func (s *LLMProxyService) ResetChannelCircuit(channelName string) bool {
+	s.mu.RLock()
 	ch, ok := s.channels[channelName]
+	s.mu.RUnlock()
+
 	if !ok {
 		return false
 	}

@@ -5,6 +5,7 @@ import (
 	"strconv"
 
 	"github.com/gin-gonic/gin"
+	"github.com/singll/bellkeeper/internal/model"
 	"github.com/singll/bellkeeper/internal/pkg/response"
 	"github.com/singll/bellkeeper/internal/service"
 )
@@ -127,4 +128,122 @@ func (h *LLMProxyHandler) ResetChannelCircuit(c *gin.Context) {
 		return
 	}
 	response.Message(c, "circuit breaker reset for channel: "+name)
+}
+
+// --- Channel & Group Config CRUD ---
+
+func (h *LLMProxyHandler) ListChannels(c *gin.Context) {
+	channels, err := h.svc.ListChannelConfigs()
+	if err != nil {
+		response.InternalError(c, err.Error())
+		return
+	}
+	response.Success(c, channels)
+}
+
+func (h *LLMProxyHandler) CreateChannel(c *gin.Context) {
+	var ch model.LLMChannel
+	if err := c.ShouldBindJSON(&ch); err != nil {
+		response.BadRequest(c, err.Error())
+		return
+	}
+	if err := h.svc.CreateChannel(&ch); err != nil {
+		response.InternalError(c, err.Error())
+		return
+	}
+	response.Success(c, ch)
+}
+
+func (h *LLMProxyHandler) UpdateChannel(c *gin.Context) {
+	id, err := strconv.ParseUint(c.Param("id"), 10, 32)
+	if err != nil {
+		response.BadRequest(c, "invalid id")
+		return
+	}
+	var ch model.LLMChannel
+	if err := c.ShouldBindJSON(&ch); err != nil {
+		response.BadRequest(c, err.Error())
+		return
+	}
+	ch.ID = uint(id)
+	if err := h.svc.UpdateChannel(&ch); err != nil {
+		response.InternalError(c, err.Error())
+		return
+	}
+	response.Success(c, ch)
+}
+
+func (h *LLMProxyHandler) DeleteChannel(c *gin.Context) {
+	id, err := strconv.ParseUint(c.Param("id"), 10, 32)
+	if err != nil {
+		response.BadRequest(c, "invalid id")
+		return
+	}
+	if err := h.svc.DeleteChannel(uint(id)); err != nil {
+		response.InternalError(c, err.Error())
+		return
+	}
+	response.Message(c, "channel deleted")
+}
+
+func (h *LLMProxyHandler) ListGroups(c *gin.Context) {
+	groups, err := h.svc.ListGroupConfigs()
+	if err != nil {
+		response.InternalError(c, err.Error())
+		return
+	}
+	response.Success(c, groups)
+}
+
+func (h *LLMProxyHandler) CreateGroup(c *gin.Context) {
+	var g model.LLMModelGroup
+	if err := c.ShouldBindJSON(&g); err != nil {
+		response.BadRequest(c, err.Error())
+		return
+	}
+	if err := h.svc.CreateGroup(&g); err != nil {
+		response.InternalError(c, err.Error())
+		return
+	}
+	response.Success(c, g)
+}
+
+func (h *LLMProxyHandler) UpdateGroup(c *gin.Context) {
+	id, err := strconv.ParseUint(c.Param("id"), 10, 32)
+	if err != nil {
+		response.BadRequest(c, "invalid id")
+		return
+	}
+	var g model.LLMModelGroup
+	if err := c.ShouldBindJSON(&g); err != nil {
+		response.BadRequest(c, err.Error())
+		return
+	}
+	g.ID = uint(id)
+	if err := h.svc.UpdateGroup(&g); err != nil {
+		response.InternalError(c, err.Error())
+		return
+	}
+	response.Success(c, g)
+}
+
+func (h *LLMProxyHandler) DeleteGroup(c *gin.Context) {
+	id, err := strconv.ParseUint(c.Param("id"), 10, 32)
+	if err != nil {
+		response.BadRequest(c, "invalid id")
+		return
+	}
+	if err := h.svc.DeleteGroup(uint(id)); err != nil {
+		response.InternalError(c, err.Error())
+		return
+	}
+	response.Message(c, "group deleted")
+}
+
+func (h *LLMProxyHandler) ReloadConfig(c *gin.Context) {
+	if err := h.svc.Reload(); err != nil {
+		response.InternalError(c, err.Error())
+		return
+	}
+	response.Message(c, "configuration reloaded")
 }

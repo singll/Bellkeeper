@@ -34,7 +34,7 @@ func NewServices(repos *repository.Repositories, cfg *config.Config, version str
 		RagFlow:  ragFlowSvc,
 		Health:   NewHealthService(cfg, version, repos.Tag, repos.RSS, repos.DatasetMapping),
 		Workflow: NewWorkflowService(cfg.N8N, repos.Setting),
-		LLMProxy: NewLLMProxyService(cfg.LLMProxy, repos.LLMProxy),
+		LLMProxy: NewLLMProxyService(cfg.LLMProxy, repos.LLMProxy, repos.LLMChannel, repos.LLMModelGroup),
 		Classify: NewClassifyService(cfg.Classify, cfg.Server.APIKey),
 	}
 }
