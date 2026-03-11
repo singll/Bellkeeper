@@ -9,6 +9,7 @@ import RSSFeeds from './pages/RSSFeeds'
 import Datasets from './pages/Datasets'
 import Documents from './pages/Documents'
 import Workflows from './pages/Workflows'
+import LLMProxy from './pages/LLMProxy'
 import Settings from './pages/Settings'
 import './index.css'
 
@@ -23,7 +24,9 @@ render(() => (
       <Route path="/datasets" component={Datasets} />
       <Route path="/documents" component={Documents} />
       <Route path="/workflows" component={Workflows} />
+      <Route path="/llm-proxy" component={LLMProxy} />
       <Route path="/settings" component={Settings} />
     </Router>
   </ToastProvider>
 ), root!)
+

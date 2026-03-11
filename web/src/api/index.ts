@@ -7,6 +7,8 @@ import type {
   HealthStatus,
   Workflow,
   WorkflowExecution,
+  LLMChannelStatus,
+  LLMGroupStatus,
 } from '@/types'
 
 const API_BASE = '/api'
@@ -162,6 +164,25 @@ export const workflowsApi = {
     request<{ data: unknown }>(`/workflows/trigger/${encodeURIComponent(name)}`, {
       method: 'POST',
       body: JSON.stringify(payload || {}),
+    }),
+}
+
+// LLM Proxy API
+export const llmProxyApi = {
+  channelsStatus: () =>
+    request<{ data: LLMChannelStatus[] }>('/llm/channels/status'),
+
+  groupsStatus: () =>
+    request<{ data: LLMGroupStatus[] }>('/llm/groups/status'),
+
+  resetChannelCircuit: (name: string) =>
+    request<{ message: string }>(`/llm/channels/${encodeURIComponent(name)}/reset`, {
+      method: 'POST',
+    }),
+
+  clearGroupSticky: (name: string) =>
+    request<{ data: { cleared: number } }>(`/llm/groups/${encodeURIComponent(name)}/sticky`, {
+      method: 'DELETE',
     }),
 }
 

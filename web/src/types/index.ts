@@ -90,3 +90,48 @@ export interface WorkflowExecution {
   started_at: string
   stopped_at?: string
 }
+
+// LLM Proxy Types
+
+export interface LLMChannelHealth {
+  state: 'closed' | 'open' | 'half_open'
+  consecutive_fails: number
+  last_error_type: string
+  recent_success_rate: number
+  last_success_at?: string
+  last_error_at?: string
+  circuit_open_until?: string
+}
+
+export interface LLMChannelStatus {
+  name: string
+  base_url: string
+  models: string[]
+  priority: number
+  rpm_limit: number
+  rpd_limit: number
+  is_free: boolean
+  available_tokens: number
+  max_tokens: number
+  daily_used: number
+  daily_limit: number
+  refill_rate_per_s: string
+  health: LLMChannelHealth
+}
+
+export interface LLMGroupMemberStatus {
+  channel: string
+  model: string
+  weight: number
+  available: boolean
+  health: LLMChannelHealth
+}
+
+export interface LLMGroupStatus {
+  name: string
+  description: string
+  strategy: string
+  sticky_ttl_seconds: number
+  sticky_bindings: number
+  members: LLMGroupMemberStatus[]
+}

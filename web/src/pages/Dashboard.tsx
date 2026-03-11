@@ -1,12 +1,13 @@
 import { Component, createSignal, createResource, Show, For } from 'solid-js'
 import { A } from '@solidjs/router'
-import { healthApi, workflowsApi } from '@/api'
+import { healthApi, workflowsApi, llmProxyApi } from '@/api'
 import { useToast } from '@/components/Toast'
 
 const Dashboard: Component = () => {
   const toast = useToast()
   const [health, { refetch: refetchHealth }] = createResource(() => healthApi.detailed())
   const [workflows] = createResource(() => workflowsApi.list())
+  const [llmChannels] = createResource(() => llmProxyApi.channelsStatus())
   const [triggeringWorkflow, setTriggeringWorkflow] = createSignal<string | null>(null)
 
   const getMetric = (key: string): number | string => {
@@ -15,6 +16,14 @@ const Dashboard: Component = () => {
     const value = metrics[key]
     return typeof value === 'number' ? value : '--'
   }
+
+  const healthyLLMChannels = () =>
+    llmChannels()?.data.filter((channel) => channel.health.state === 'closed').length ?? 0
+
+  const brokenLLMChannels = () =>
+    llmChannels()?.data.filter((channel) => channel.health.state === 'open').length ?? 0
+
+  const totalLLMChannels = () => llmChannels()?.data.length ?? 0
 
   const handleTriggerWorkflow = async (name: string) => {
     setTriggeringWorkflow(name)
@@ -106,7 +115,7 @@ const Dashboard: Component = () => {
         </For>
       </div>
 
-      <div class="grid grid-cols-1 lg:grid-cols-2 gap-6">
+      <div class="grid grid-cols-1 lg:grid-cols-2 gap-6 mb-6">
         {/* Service Status */}
         <div class="card">
           <h2 class="text-lg font-semibold text-white mb-4">服务状态</h2>
@@ -193,6 +202,59 @@ const Dashboard: Component = () => {
             </div>
           </Show>
         </div>
+      </div>
+
+      <div class="card mb-6">
+        <div class="flex items-center justify-between mb-4">
+          <div>
+            <h2 class="text-lg font-semibold text-white">LLM Proxy 状态</h2>
+            <p class="text-sm text-dark-400 mt-1">渠道健康与熔断概览</p>
+          </div>
+          <A href="/llm-proxy" class="text-sm text-primary-400 hover:text-primary-300">
+            查看详情 →
+          </A>
+        </div>
+        <Show
+          when={!llmChannels.loading}
+          fallback={
+            <div class="flex items-center justify-center py-8">
+              <div class="loading-spinner" />
+              <span class="ml-3 text-dark-400">加载中...</span>
+            </div>
+          }
+        >
+          <Show
+            when={!llmChannels.error}
+            fallback={
+              <div class="empty-state py-8">
+                <svg class="empty-state-icon w-12 h-12 text-red-400" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                  <path stroke-linecap="round" stroke-linejoin="round" stroke-width="1.5" d="M12 8v4m0 4h.01M21 12a9 9 0 11-18 0 9 9 0 0118 0z" />
+                </svg>
+                <p class="empty-state-title">LLM Proxy 加载失败</p>
+                <p class="empty-state-description">{(llmChannels.error as Error)?.message || '请检查后端服务状态'}</p>
+              </div>
+            }
+          >
+            <div class="grid grid-cols-1 sm:grid-cols-3 gap-4">
+              <div class="p-4 bg-dark-700/50 rounded-xl">
+                <div class="text-sm text-dark-400 mb-1">健康渠道</div>
+                <div class="text-2xl font-bold text-emerald-400">
+                  {healthyLLMChannels()} / {totalLLMChannels()}
+                </div>
+              </div>
+              <div class="p-4 bg-dark-700/50 rounded-xl">
+                <div class="text-sm text-dark-400 mb-1">熔断渠道</div>
+                <div class="text-2xl font-bold text-red-400">{brokenLLMChannels()}</div>
+              </div>
+              <div class="p-4 bg-dark-700/50 rounded-xl">
+                <div class="text-sm text-dark-400 mb-1">运行结论</div>
+                <div class={`text-2xl font-bold ${brokenLLMChannels() > 0 ? 'text-amber-400' : 'text-primary-300'}`}>
+                  {totalLLMChannels() === 0 ? '未配置' : brokenLLMChannels() > 0 ? '需关注' : '正常'}
+                </div>
+              </div>
+            </div>
+          </Show>
+        </Show>
       </div>
 
       {/* Last Update */}
