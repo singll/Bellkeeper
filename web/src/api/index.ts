@@ -189,40 +189,40 @@ export const llmProxyApi = {
 
   // Config CRUD
   listChannels: () =>
-    request<{ data: LLMChannelConfig[] }>('/llm/channels'),
+    request<{ data: LLMChannelConfig[] }>('/llm/config/channels'),
 
   createChannel: (data: Partial<LLMChannelConfig>) =>
-    request<{ data: LLMChannelConfig }>('/llm/channels', {
+    request<{ data: LLMChannelConfig }>('/llm/config/channels', {
       method: 'POST',
       body: JSON.stringify(data),
     }),
 
   updateChannel: (id: number, data: Partial<LLMChannelConfig>) =>
-    request<{ data: LLMChannelConfig }>(`/llm/channels/${id}`, {
+    request<{ data: LLMChannelConfig }>(`/llm/config/channels/${id}`, {
       method: 'PUT',
       body: JSON.stringify(data),
     }),
 
   deleteChannel: (id: number) =>
-    request<{ message: string }>(`/llm/channels/${id}`, { method: 'DELETE' }),
+    request<{ message: string }>(`/llm/config/channels/${id}`, { method: 'DELETE' }),
 
   listGroups: () =>
-    request<{ data: LLMModelGroupConfig[] }>('/llm/groups'),
+    request<{ data: LLMModelGroupConfig[] }>('/llm/config/groups'),
 
   createGroup: (data: Partial<LLMModelGroupConfig>) =>
-    request<{ data: LLMModelGroupConfig }>('/llm/groups', {
+    request<{ data: LLMModelGroupConfig }>('/llm/config/groups', {
       method: 'POST',
       body: JSON.stringify(data),
     }),
 
   updateGroup: (id: number, data: Partial<LLMModelGroupConfig>) =>
-    request<{ data: LLMModelGroupConfig }>(`/llm/groups/${id}`, {
+    request<{ data: LLMModelGroupConfig }>(`/llm/config/groups/${id}`, {
       method: 'PUT',
       body: JSON.stringify(data),
     }),
 
   deleteGroup: (id: number) =>
-    request<{ message: string }>(`/llm/groups/${id}`, { method: 'DELETE' }),
+    request<{ message: string }>(`/llm/config/groups/${id}`, { method: 'DELETE' }),
 
   reload: () =>
     request<{ message: string }>('/llm/reload', { method: 'POST' }),

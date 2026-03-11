@@ -128,16 +128,17 @@ func registerLLMProxyRoutes(api *gin.RouterGroup, h *handler.LLMProxyHandler) {
 	llm.DELETE("/groups/:name/sticky", h.ClearGroupSticky)
 	llm.POST("/channels/:name/reset", h.ResetChannelCircuit)
 
-	// Config CRUD (DB-backed)
-	llm.GET("/channels", h.ListChannels)
-	llm.POST("/channels", h.CreateChannel)
-	llm.PUT("/channels/:id", h.UpdateChannel)
-	llm.DELETE("/channels/:id", h.DeleteChannel)
+	// Config CRUD (DB-backed, under /config/ to avoid wildcard conflicts)
+	cfg := llm.Group("/config")
+	cfg.GET("/channels", h.ListChannels)
+	cfg.POST("/channels", h.CreateChannel)
+	cfg.PUT("/channels/:id", h.UpdateChannel)
+	cfg.DELETE("/channels/:id", h.DeleteChannel)
 
-	llm.GET("/groups", h.ListGroups)
-	llm.POST("/groups", h.CreateGroup)
-	llm.PUT("/groups/:id", h.UpdateGroup)
-	llm.DELETE("/groups/:id", h.DeleteGroup)
+	cfg.GET("/groups", h.ListGroups)
+	cfg.POST("/groups", h.CreateGroup)
+	cfg.PUT("/groups/:id", h.UpdateGroup)
+	cfg.DELETE("/groups/:id", h.DeleteGroup)
 
 	llm.POST("/reload", h.ReloadConfig)
 }
