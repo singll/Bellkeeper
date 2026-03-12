@@ -800,6 +800,11 @@ func extractDocStatus(result map[string]interface{}) string {
 		return "unknown"
 	}
 
+	// Prefer "run" field — it reflects the actual parse execution state.
+	// The "status" field is the document's general status (1=normal), not parse state.
+	if run, ok := doc["run"].(string); ok && run != "" {
+		return normalizeDocStatus(run)
+	}
 	if status, ok := doc["status"].(string); ok {
 		return normalizeDocStatus(status)
 	}
@@ -815,9 +820,6 @@ func extractDocStatus(result map[string]interface{}) string {
 			return "error"
 		}
 	}
-	if run, ok := doc["run"].(string); ok {
-		return normalizeDocStatus(run)
-	}
 	return "unknown"
 }
 
@@ -829,7 +831,7 @@ func normalizeDocStatus(s string) string {
 		return "parsing"
 	case "2", "parsed", "done", "success":
 		return "parsed"
-	case "3", "error", "fail", "failed":
+	case "3", "error", "fail", "failed", "cancel":
 		return "error"
 	default:
 		return strings.ToLower(s)

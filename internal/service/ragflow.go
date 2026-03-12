@@ -559,11 +559,11 @@ func (s *RagFlowService) DeleteDataset(datasetID string) error {
 	return err
 }
 
-// RunParsing triggers document parsing
+// RunParsing triggers document parsing (RAGFlow uses PUT for this endpoint)
 func (s *RagFlowService) RunParsing(datasetID string, documentIDs []string) (map[string]interface{}, error) {
 	url := fmt.Sprintf("%s/api/v1/datasets/%s/documents/parse", s.cfg.BaseURL, datasetID)
 	payload := map[string]interface{}{"document_ids": documentIDs}
-	return s.doPost(url, payload)
+	return s.doPut(url, payload)
 }
 
 // RunParsingThrottled submits documents for parsing in small batches with delays
@@ -601,11 +601,11 @@ func (s *RagFlowService) RunParsingThrottled(datasetID string, documentIDs []str
 	}()
 }
 
-// StopParsing stops document parsing
+// StopParsing stops document parsing (RAGFlow uses PUT on stop_parse endpoint)
 func (s *RagFlowService) StopParsing(datasetID string, documentIDs []string) (map[string]interface{}, error) {
-	url := fmt.Sprintf("%s/api/v1/datasets/%s/documents/parse", s.cfg.BaseURL, datasetID)
+	url := fmt.Sprintf("%s/api/v1/datasets/%s/documents/stop_parse", s.cfg.BaseURL, datasetID)
 	payload := map[string]interface{}{"document_ids": documentIDs}
-	return s.doRequestJSON("DELETE", url, payload)
+	return s.doPut(url, payload)
 }
 
 // GetParsingStatus gets document parsing status
