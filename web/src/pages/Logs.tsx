@@ -56,6 +56,7 @@ const moduleColor = (module: string) => {
 const parseTaskStatusBadge = (status: string) => {
   switch (status) {
     case 'running': return 'badge-primary'
+    case 'recovering': return 'badge-warning'
     case 'completed': return 'badge-success'
     default: return 'badge-gray'
   }
@@ -64,7 +65,7 @@ const parseTaskStatusBadge = (status: string) => {
 const parseResultBadge = (result?: string) => {
   switch (result) {
     case 'success': return 'badge-success'
-    case 'partial': return 'badge-warning'
+    case 'partial_failed': return 'badge-warning'
     case 'failed': return 'badge-danger'
     default: return 'badge-gray'
   }
@@ -246,11 +247,11 @@ const Logs: Component = () => {
                 <div class="flex items-center gap-2">
                   <span class="font-mono text-sm text-dark-200">{task.id}</span>
                   <span class={`badge badge-sm ${parseTaskStatusBadge(task.status)}`}>
-                    {task.status === 'running' ? '运行中' : '已完成'}
+                    {task.status === 'running' ? '运行中' : task.status === 'recovering' ? '恢复中' : '已完成'}
                   </span>
                   <Show when={task.result_status}>
                     <span class={`badge badge-sm ${parseResultBadge(task.result_status)}`}>
-                      {task.result_status}
+                      {task.result_status === 'success' ? '全部成功' : task.result_status === 'partial_failed' ? '部分失败' : task.result_status === 'failed' ? '全部失败' : task.result_status}
                     </span>
                   </Show>
                 </div>
@@ -278,7 +279,7 @@ const Logs: Component = () => {
               </div>
 
               {/* Current stage */}
-              <Show when={task.current_stage && task.status === 'running'}>
+              <Show when={task.current_stage && task.status !== 'completed'}>
                 <div class="flex items-center gap-2 text-xs text-dark-400">
                   <div class="status-dot status-dot-primary animate-pulse" />
                   <span>阶段: {task.current_stage}</span>
