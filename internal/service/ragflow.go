@@ -277,7 +277,7 @@ func (s *RagFlowService) uploadToRagFlow(datasetID, filename, content string) (*
 
 // ListDocuments lists documents in a dataset
 func (s *RagFlowService) ListDocuments(datasetID string, page, limit int) (map[string]interface{}, error) {
-	url := fmt.Sprintf("%s/api/v1/datasets/%s/documents?page=%d&limit=%d", s.cfg.BaseURL, datasetID, page, limit)
+	url := fmt.Sprintf("%s/api/v1/datasets/%s/documents?page=%d&page_size=%d", s.cfg.BaseURL, datasetID, page, limit)
 	return s.doGet(url)
 }
 
@@ -487,9 +487,108 @@ func extractDatasetID(resp map[string]interface{}) string {
 
 // --- Batch B: RagFlow 高级操作 ---
 
+// ParseOverviewDataset holds per-dataset parse stats.
+type ParseOverviewDataset struct {
+	ID       string `json:"id"`
+	Name     string `json:"name"`
+	Total    int    `json:"total"`
+	Parsed   int    `json:"parsed"`
+	Unparsed int    `json:"unparsed"`
+	Running  int    `json:"running"`
+	Failed   int    `json:"failed"`
+}
+
+// ParseOverview holds the overall parse status across all datasets.
+type ParseOverview struct {
+	TotalDocuments int                    `json:"total_documents"`
+	TotalParsed    int                    `json:"total_parsed"`
+	TotalUnparsed  int                    `json:"total_unparsed"`
+	TotalRunning   int                    `json:"total_running"`
+	TotalFailed    int                    `json:"total_failed"`
+	Datasets       []ParseOverviewDataset `json:"datasets"`
+}
+
+// GetParseOverview returns an overview of parsing status across all datasets.
+func (s *RagFlowService) GetParseOverview() (*ParseOverview, error) {
+	dsResult, err := s.ListDatasets(1, 100)
+	if err != nil {
+		return nil, fmt.Errorf("list datasets: %w", err)
+	}
+
+	datasets, ok := dsResult["data"].([]interface{})
+	if !ok {
+		return nil, fmt.Errorf("unexpected datasets response format")
+	}
+
+	overview := &ParseOverview{}
+
+	for _, dsRaw := range datasets {
+		ds, ok := dsRaw.(map[string]interface{})
+		if !ok {
+			continue
+		}
+		dsID, _ := ds["id"].(string)
+		dsName, _ := ds["name"].(string)
+		if dsID == "" {
+			continue
+		}
+
+		docResult, err := s.ListDocuments(dsID, 1, 200)
+		if err != nil {
+			log.Printf("warn: failed to list documents for dataset %s: %v", dsName, err)
+			continue
+		}
+
+		docData, _ := docResult["data"].(map[string]interface{})
+		docs, _ := docData["docs"].([]interface{})
+		total, _ := docData["total"].(float64)
+
+		dsStat := ParseOverviewDataset{
+			ID:   dsID,
+			Name: dsName,
+		}
+		if total > 0 {
+			dsStat.Total = int(total)
+		} else {
+			dsStat.Total = len(docs)
+		}
+
+		for _, docRaw := range docs {
+			doc, ok := docRaw.(map[string]interface{})
+			if !ok {
+				continue
+			}
+			run := fmt.Sprintf("%v", doc["run"])
+			switch run {
+			case "UNSTART", "0":
+				dsStat.Unparsed++
+			case "RUNNING", "1":
+				dsStat.Running++
+			case "CANCEL", "2":
+				dsStat.Unparsed++
+			case "DONE", "3":
+				dsStat.Parsed++
+			case "FAIL", "4":
+				dsStat.Failed++
+			default:
+				dsStat.Unparsed++
+			}
+		}
+
+		overview.Datasets = append(overview.Datasets, dsStat)
+		overview.TotalDocuments += dsStat.Total
+		overview.TotalParsed += dsStat.Parsed
+		overview.TotalUnparsed += dsStat.Unparsed
+		overview.TotalRunning += dsStat.Running
+		overview.TotalFailed += dsStat.Failed
+	}
+
+	return overview, nil
+}
+
 // ListDatasets lists all RagFlow datasets (knowledge bases)
 func (s *RagFlowService) ListDatasets(page, limit int) (map[string]interface{}, error) {
-	url := fmt.Sprintf("%s/api/v1/datasets?page=%d&limit=%d", s.cfg.BaseURL, page, limit)
+	url := fmt.Sprintf("%s/api/v1/datasets?page=%d&page_size=%d", s.cfg.BaseURL, page, limit)
 	return s.doGet(url)
 }
 

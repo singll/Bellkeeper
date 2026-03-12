@@ -448,3 +448,13 @@ func (h *RagFlowHandler) SyncDatasets(c *gin.Context) {
 		"result":  result,
 	})
 }
+
+// GetParseOverview returns an overview of parsing status across all datasets.
+func (h *RagFlowHandler) GetParseOverview(c *gin.Context) {
+	overview, err := h.svc.GetParseOverview()
+	if err != nil {
+		response.InternalError(c, err.Error())
+		return
+	}
+	c.JSON(http.StatusOK, overview)
+}
