@@ -23,6 +23,7 @@ type RagFlowService struct {
 	datasetRepo *repository.DatasetMappingRepository
 	tagRepo     *repository.TagRepository
 	client      *http.Client
+	activityLog *ActivityLogService
 }
 
 func NewRagFlowService(cfg config.RagFlowConfig, datasetRepo *repository.DatasetMappingRepository, tagRepo *repository.TagRepository) *RagFlowService {
@@ -32,6 +33,11 @@ func NewRagFlowService(cfg config.RagFlowConfig, datasetRepo *repository.Dataset
 		tagRepo:     tagRepo,
 		client:      &http.Client{Timeout: time.Duration(cfg.Timeout) * time.Second},
 	}
+}
+
+// SetActivityLog injects the activity log service for instrumentation.
+func (s *RagFlowService) SetActivityLog(al *ActivityLogService) {
+	s.activityLog = al
 }
 
 type UploadRequest struct {
@@ -53,6 +59,7 @@ type UploadResponse struct {
 
 // Upload uploads a document to RagFlow
 func (s *RagFlowService) Upload(req *UploadRequest) (*UploadResponse, error) {
+	start := time.Now()
 	datasetID := req.DatasetID
 	if datasetID == "" {
 		defaultMapping, err := s.datasetRepo.GetDefault()
@@ -62,11 +69,23 @@ func (s *RagFlowService) Upload(req *UploadRequest) (*UploadResponse, error) {
 		datasetID = defaultMapping.DatasetID
 	}
 
-	return s.uploadToRagFlow(datasetID, req.Filename, req.Content)
+	resp, err := s.uploadToRagFlow(datasetID, req.Filename, req.Content)
+	if s.activityLog != nil {
+		status, summary := "success", fmt.Sprintf("上传 %s 到 %s", req.Filename, datasetID)
+		if err != nil {
+			status, summary = "error", fmt.Sprintf("上传 %s 失败: %v", req.Filename, err)
+		}
+		s.activityLog.LogActivity(LogActivityParams{
+			Module: "ragflow_upload", Action: "upload", Status: status,
+			Summary: summary, RefID: datasetID, DurationMs: int(time.Since(start).Milliseconds()),
+		})
+	}
+	return resp, err
 }
 
 // UploadWithRouting uploads with intelligent dataset routing based on tags/category
 func (s *RagFlowService) UploadWithRouting(req *UploadRequest) (*UploadResponse, string, error) {
+	start := time.Now()
 	var datasetID string
 
 	// 1. Use LLM-recommended dataset name (lookup by name to get real RAGFlow ID)
@@ -127,6 +146,7 @@ func (s *RagFlowService) UploadWithRouting(req *UploadRequest) (*UploadResponse,
 	// Upload to RagFlow
 	resp, err := s.uploadToRagFlow(datasetID, req.Filename, req.Content)
 	if err != nil {
+		s.logUploadWithRouting(req, datasetID, nil, err, start)
 		return nil, datasetID, err
 	}
 
@@ -162,7 +182,23 @@ func (s *RagFlowService) UploadWithRouting(req *UploadRequest) (*UploadResponse,
 		}
 	}
 
+	s.logUploadWithRouting(req, datasetID, resp, nil, start)
 	return resp, datasetID, nil
+}
+
+// logUploadWithRouting logs the upload result to activity log.
+func (s *RagFlowService) logUploadWithRouting(req *UploadRequest, datasetID string, resp *UploadResponse, err error, start time.Time) {
+	if s.activityLog == nil {
+		return
+	}
+	status, summary := "success", fmt.Sprintf("路由上传 %s 到 %s", req.Filename, datasetID)
+	if err != nil {
+		status, summary = "error", fmt.Sprintf("路由上传 %s 失败: %v", req.Filename, err)
+	}
+	s.activityLog.LogActivity(LogActivityParams{
+		Module: "ragflow_upload", Action: "upload_with_routing", Status: status,
+		Summary: summary, RefID: datasetID, DurationMs: int(time.Since(start).Milliseconds()),
+	})
 }
 
 // CheckURL checks if a URL has been uploaded before
@@ -486,105 +522,6 @@ func extractDatasetID(resp map[string]interface{}) string {
 }
 
 // --- Batch B: RagFlow 高级操作 ---
-
-// ParseOverviewDataset holds per-dataset parse stats.
-type ParseOverviewDataset struct {
-	ID       string `json:"id"`
-	Name     string `json:"name"`
-	Total    int    `json:"total"`
-	Parsed   int    `json:"parsed"`
-	Unparsed int    `json:"unparsed"`
-	Running  int    `json:"running"`
-	Failed   int    `json:"failed"`
-}
-
-// ParseOverview holds the overall parse status across all datasets.
-type ParseOverview struct {
-	TotalDocuments int                    `json:"total_documents"`
-	TotalParsed    int                    `json:"total_parsed"`
-	TotalUnparsed  int                    `json:"total_unparsed"`
-	TotalRunning   int                    `json:"total_running"`
-	TotalFailed    int                    `json:"total_failed"`
-	Datasets       []ParseOverviewDataset `json:"datasets"`
-}
-
-// GetParseOverview returns an overview of parsing status across all datasets.
-func (s *RagFlowService) GetParseOverview() (*ParseOverview, error) {
-	dsResult, err := s.ListDatasets(1, 100)
-	if err != nil {
-		return nil, fmt.Errorf("list datasets: %w", err)
-	}
-
-	datasets, ok := dsResult["data"].([]interface{})
-	if !ok {
-		return nil, fmt.Errorf("unexpected datasets response format")
-	}
-
-	overview := &ParseOverview{}
-
-	for _, dsRaw := range datasets {
-		ds, ok := dsRaw.(map[string]interface{})
-		if !ok {
-			continue
-		}
-		dsID, _ := ds["id"].(string)
-		dsName, _ := ds["name"].(string)
-		if dsID == "" {
-			continue
-		}
-
-		docResult, err := s.ListDocuments(dsID, 1, 200)
-		if err != nil {
-			log.Printf("warn: failed to list documents for dataset %s: %v", dsName, err)
-			continue
-		}
-
-		docData, _ := docResult["data"].(map[string]interface{})
-		docs, _ := docData["docs"].([]interface{})
-		total, _ := docData["total"].(float64)
-
-		dsStat := ParseOverviewDataset{
-			ID:   dsID,
-			Name: dsName,
-		}
-		if total > 0 {
-			dsStat.Total = int(total)
-		} else {
-			dsStat.Total = len(docs)
-		}
-
-		for _, docRaw := range docs {
-			doc, ok := docRaw.(map[string]interface{})
-			if !ok {
-				continue
-			}
-			run := fmt.Sprintf("%v", doc["run"])
-			switch run {
-			case "UNSTART", "0":
-				dsStat.Unparsed++
-			case "RUNNING", "1":
-				dsStat.Running++
-			case "CANCEL", "2":
-				dsStat.Unparsed++
-			case "DONE", "3":
-				dsStat.Parsed++
-			case "FAIL", "4":
-				dsStat.Failed++
-			default:
-				dsStat.Unparsed++
-			}
-		}
-
-		overview.Datasets = append(overview.Datasets, dsStat)
-		overview.TotalDocuments += dsStat.Total
-		overview.TotalParsed += dsStat.Parsed
-		overview.TotalUnparsed += dsStat.Unparsed
-		overview.TotalRunning += dsStat.Running
-		overview.TotalFailed += dsStat.Failed
-	}
-
-	return overview, nil
-}
 
 // ListDatasets lists all RagFlow datasets (knowledge bases)
 func (s *RagFlowService) ListDatasets(page, limit int) (map[string]interface{}, error) {

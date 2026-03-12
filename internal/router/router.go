@@ -25,6 +25,7 @@ func Setup(r *gin.Engine, handlers *handler.Handlers, mode string, apiKey string
 	registerSystemRoutes(api, handlers.System)
 	registerLLMProxyRoutes(api, handlers.LLMProxy)
 	registerClassifyRoutes(api, handlers.Classify)
+	registerActivityLogRoutes(api, handlers.ActivityLog)
 }
 
 func registerTagRoutes(api *gin.RouterGroup, h *handler.TagHandler) {
@@ -80,9 +81,9 @@ func registerRagFlowRoutes(api *gin.RouterGroup, h *handler.RagFlowHandler) {
 	api.POST("/ragflow/documents/parse/throttled", h.RunParsingThrottled)
 	api.POST("/ragflow/documents/parse/smart", h.RunParsingSmart)
 	api.GET("/ragflow/documents/parse/smart/:task_id", h.GetParseTaskStatus)
+	api.GET("/ragflow/documents/parse/tasks", h.ListParseTasks)
 	api.POST("/ragflow/documents/parse/stop", h.StopParsing)
 	api.GET("/ragflow/documents/parse/status", h.GetParsingStatus)
-	api.GET("/ragflow/documents/parse/overview", h.GetParseOverview)
 	api.POST("/ragflow/upload/batch", h.BatchUpload)
 	api.POST("/ragflow/documents/batch-delete", h.BatchDeleteDocuments)
 	api.POST("/ragflow/documents/transfer", h.TransferDocument)
@@ -146,4 +147,10 @@ func registerLLMProxyRoutes(api *gin.RouterGroup, h *handler.LLMProxyHandler) {
 
 func registerClassifyRoutes(api *gin.RouterGroup, h *handler.ClassifyHandler) {
 	api.POST("/classify/article", h.ClassifyArticle)
+}
+
+func registerActivityLogRoutes(api *gin.RouterGroup, h *handler.ActivityLogHandler) {
+	api.GET("/logs", h.List)
+	api.GET("/logs/modules", h.Modules)
+	api.GET("/logs/stats", h.Stats)
 }

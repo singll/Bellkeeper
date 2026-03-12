@@ -14,9 +14,10 @@ import (
 
 // ClassifyService handles article classification using LLM
 type ClassifyService struct {
-	cfg        config.ClassifyConfig
-	apiKey     string
-	httpClient *http.Client
+	cfg         config.ClassifyConfig
+	apiKey      string
+	httpClient  *http.Client
+	activityLog *ActivityLogService
 }
 
 // NewClassifyService creates a new classify service
@@ -28,6 +29,11 @@ func NewClassifyService(cfg config.ClassifyConfig, apiKey string) *ClassifyServi
 			Timeout: time.Duration(cfg.Timeout) * time.Second,
 		},
 	}
+}
+
+// SetActivityLog injects the activity log service for instrumentation.
+func (s *ClassifyService) SetActivityLog(al *ActivityLogService) {
+	s.activityLog = al
 }
 
 // ClassifyRequest represents the classification request
@@ -75,6 +81,7 @@ const defaultClassifyPrompt = `你是一个内容分类专家。请分析以下�
 
 // ClassifyArticle classifies an article using LLM
 func (s *ClassifyService) ClassifyArticle(req *ClassifyRequest) (*ClassifyResponse, error) {
+	start := time.Now()
 	// Truncate content to configured max length
 	content := req.Content
 	if len(content) > s.cfg.MaxContentLen {
@@ -91,13 +98,36 @@ func (s *ClassifyService) ClassifyArticle(req *ClassifyRequest) (*ClassifyRespon
 	// Call LLM
 	llmResp, err := s.callLLM(prompt)
 	if err != nil {
+		if s.activityLog != nil {
+			s.activityLog.LogActivity(LogActivityParams{
+				Module: "classify", Action: "classify_article", Status: "error",
+				Summary:    fmt.Sprintf("分类失败: %s - %v", req.Title, err),
+				DurationMs: int(time.Since(start).Milliseconds()),
+			})
+		}
 		return nil, fmt.Errorf("LLM call failed: %w", err)
 	}
 
 	// Parse response
 	result, err := s.parseClassifyResponse(llmResp)
 	if err != nil {
+		if s.activityLog != nil {
+			s.activityLog.LogActivity(LogActivityParams{
+				Module: "classify", Action: "classify_article", Status: "error",
+				Summary:    fmt.Sprintf("分类解析失败: %s - %v", req.Title, err),
+				DurationMs: int(time.Since(start).Milliseconds()),
+			})
+		}
 		return nil, fmt.Errorf("failed to parse LLM response: %w", err)
+	}
+
+	if s.activityLog != nil {
+		s.activityLog.LogActivity(LogActivityParams{
+			Module: "classify", Action: "classify_article", Status: "success",
+			Summary:    fmt.Sprintf("分类完成: %s → %s (%.0f%%)", req.Title, result.DatasetID, result.Confidence*100),
+			DurationMs: int(time.Since(start).Milliseconds()),
+			Detail:     map[string]any{"domain": result.PrimaryDomain, "tags": result.Tags, "dataset": result.DatasetID},
+		})
 	}
 
 	return result, nil

@@ -103,10 +103,16 @@ type FailedDoc struct {
 
 func (t *ParseTask) addLog(msg string) {
 	t.mu.Lock()
-	defer t.mu.Unlock()
+	id := t.ID
+	t.mu.Unlock()
+
 	entry := fmt.Sprintf("[%s] %s", time.Now().Format("15:04:05"), msg)
+
+	t.mu.Lock()
 	t.Log = append(t.Log, entry)
-	log.Printf("info: [parse-queue %s] %s", t.ID, msg)
+	t.mu.Unlock()
+
+	log.Printf("info: [parse-queue %s] %s", id, msg)
 }
 
 func (t *ParseTask) snapshot() ParseTask {
@@ -403,6 +409,16 @@ func (s *RagFlowService) RunParsingQueue(items []ParseQueueItem, cfg ParseQueueC
 	task.initDocStates(items)
 	parseTasks.Store(taskID, task)
 
+	if s.activityLog != nil {
+		s.activityLog.LogActivity(LogActivityParams{
+			Module:  "ragflow_parse",
+			Action:  "task_start",
+			Status:  "info",
+			Summary: fmt.Sprintf("解析任务开始: %s (%d docs)", taskID, totalDocs),
+			RefID:   taskID,
+		})
+	}
+
 	go s.executeParsingQueue(task, items, cfg)
 	return taskID
 }
@@ -418,6 +434,18 @@ func (s *RagFlowService) GetParseTask(taskID string) *ParseTask {
 	return &snap
 }
 
+// ListParseTasks returns snapshots of all parse tasks currently tracked in memory.
+func (s *RagFlowService) ListParseTasks() []ParseTask {
+	var out []ParseTask
+	parseTasks.Range(func(_, v any) bool {
+		task := v.(*ParseTask)
+		snap := task.snapshot()
+		out = append(out, snap)
+		return true
+	})
+	return out
+}
+
 func (s *RagFlowService) executeParsingQueue(task *ParseTask, items []ParseQueueItem, cfg ParseQueueConfig) {
 	defer func() {
 		now := time.Now()
@@ -427,8 +455,25 @@ func (s *RagFlowService) executeParsingQueue(task *ParseTask, items []ParseQueue
 		task.CompletedAt = &now
 		task.ResultStatus = deriveResultStatus(task.Completed, task.Failed, task.Total)
 		task.refreshCountsLocked()
+		resultStatus := task.ResultStatus
+		completed := task.Completed
+		failed := task.Failed
+		total := task.Total
 		task.mu.Unlock()
-		task.addLog(fmt.Sprintf("完成: 总计 %d, 成功 %d, 失败 %d", task.Total, task.Completed, task.Failed))
+		task.addLog(fmt.Sprintf("完成: 总计 %d, 成功 %d, 失败 %d", total, completed, failed))
+
+		if s.activityLog != nil {
+			status := "success"
+			if resultStatus != "success" {
+				status = "error"
+			}
+			s.activityLog.LogActivity(LogActivityParams{
+				Module: "ragflow_parse", Action: "task_complete", Status: status,
+				Summary: fmt.Sprintf("解析任务完成: %s (%s) 成功 %d / 失败 %d / 总计 %d", task.ID, resultStatus, completed, failed, total),
+				RefID: task.ID,
+				DurationMs: int(time.Since(task.StartedAt).Milliseconds()),
+			})
+		}
 
 		if cfg.NotifyWebhook != "" {
 			s.sendParseNotification(task, cfg.NotifyWebhook, cfg.NotifyRoom)
@@ -443,6 +488,16 @@ func (s *RagFlowService) executeParsingQueue(task *ParseTask, items []ParseQueue
 		if len(item.DocumentIDs) == 0 {
 			continue
 		}
+		if s.activityLog != nil {
+			s.activityLog.LogActivity(LogActivityParams{
+				Module:  "ragflow_parse",
+				Action:  "dataset_start",
+				Status:  "info",
+				Summary: fmt.Sprintf("开始处理 dataset %s (%d docs)", item.DatasetID, len(item.DocumentIDs)),
+				RefID:   task.ID,
+				Detail: map[string]any{"dataset_id": item.DatasetID, "docs": len(item.DocumentIDs)},
+			})
+		}
 		task.addLog(fmt.Sprintf("开始处理 dataset %s (%d 个文档)", item.DatasetID, len(item.DocumentIDs)))
 
 		batchIndex := 0
@@ -456,9 +511,29 @@ func (s *RagFlowService) executeParsingQueue(task *ParseTask, items []ParseQueue
 
 			task.markBatch(item.DatasetID, batchIndex, currentBatchSize, "submitting")
 			task.addLog(fmt.Sprintf("提交批次 %d (%d 个文档, batch_size=%d)", batchIndex, len(batch), currentBatchSize))
+			if s.activityLog != nil {
+				s.activityLog.LogActivity(LogActivityParams{
+					Module:  "ragflow_parse",
+					Action:  "batch_submit",
+					Status:  "info",
+					Summary: fmt.Sprintf("提交批次 %d (%d docs) dataset=%s", batchIndex, len(batch), item.DatasetID),
+					RefID:   task.ID,
+					Detail: map[string]any{"dataset_id": item.DatasetID, "batch_index": batchIndex, "batch_size": currentBatchSize, "docs": len(batch)},
+				})
+			}
 			_, err := s.RunParsing(item.DatasetID, batch)
 			if err != nil {
 				task.addLog(fmt.Sprintf("批次 %d 提交失败: %v", batchIndex, err))
+				if s.activityLog != nil {
+					s.activityLog.LogActivity(LogActivityParams{
+						Module:  "ragflow_parse",
+						Action:  "batch_submit",
+						Status:  "error",
+						Summary: fmt.Sprintf("批次 %d 提交失败: %v", batchIndex, err),
+						RefID:   task.ID,
+						Detail: map[string]any{"dataset_id": item.DatasetID, "batch_index": batchIndex, "error": err.Error()},
+					})
+				}
 				if isRateLimitError(err.Error()) {
 					currentBatchSize = maxInt(currentBatchSize/2, 1)
 					currentDelay = currentDelay * 2

@@ -171,3 +171,67 @@ export interface LLMModelGroupMemberConfig {
   model: string
   weight: number
 }
+
+// Activity Log Types
+
+export interface ActivityLog {
+  id: number
+  module: string
+  action: string
+  status: string
+  summary: string
+  detail?: string
+  ref_id?: string
+  duration_ms?: number
+  created_at: string
+}
+
+export interface ActivityLogsPage {
+  items: ActivityLog[]
+  total: number
+  page: number
+  limit: number
+}
+
+export interface ModuleStat {
+  module: string
+  count: number
+}
+
+// Parse Task Types
+
+export interface ParseDocState {
+  dataset_id: string
+  document_id: string
+  current_status: string
+  stage: string
+  submitted_at?: string
+  last_progress_at?: string
+  recovery_attempts: number
+  last_error?: string
+}
+
+export interface ParseTask {
+  id: string
+  status: string
+  total: number
+  completed: number
+  failed: number
+  pending: number
+  batch_size: number
+  running_count: number
+  recovering_count: number
+  succeeded_count: number
+  final_failed_count: number
+  current_dataset_id?: string
+  current_batch_index?: number
+  current_stage?: string
+  result_status?: string
+  failed_docs?: { dataset_id: string; document_id: string; error: string; retries: number }[]
+  suspected_stuck_docs?: string[]
+  doc_states?: ParseDocState[]
+  started_at: string
+  last_progress_at?: string
+  completed_at?: string
+  log?: string[]
+}

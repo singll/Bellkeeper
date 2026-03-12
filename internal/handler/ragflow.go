@@ -261,6 +261,12 @@ func (h *RagFlowHandler) GetParseTaskStatus(c *gin.Context) {
 	c.JSON(http.StatusOK, task)
 }
 
+// ListParseTasks returns all tracked parse tasks.
+func (h *RagFlowHandler) ListParseTasks(c *gin.Context) {
+	tasks := h.svc.ListParseTasks()
+	response.Success(c, tasks)
+}
+
 // StopParsing stops document parsing (proxy passthrough)
 func (h *RagFlowHandler) StopParsing(c *gin.Context) {
 	var req struct {
@@ -449,12 +455,3 @@ func (h *RagFlowHandler) SyncDatasets(c *gin.Context) {
 	})
 }
 
-// GetParseOverview returns an overview of parsing status across all datasets.
-func (h *RagFlowHandler) GetParseOverview(c *gin.Context) {
-	overview, err := h.svc.GetParseOverview()
-	if err != nil {
-		response.InternalError(c, err.Error())
-		return
-	}
-	c.JSON(http.StatusOK, overview)
-}

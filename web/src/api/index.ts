@@ -11,6 +11,9 @@ import type {
   LLMGroupStatus,
   LLMChannelConfig,
   LLMModelGroupConfig,
+  ActivityLogsPage,
+  ModuleStat,
+  ParseTask,
 } from '@/types'
 
 const API_BASE = '/api'
@@ -292,4 +295,30 @@ export const ragflowApi = {
       method: 'POST',
       body: JSON.stringify({ dataset_id: datasetId, document_ids: documentIds }),
     }),
+
+  // List parse tasks
+  listParseTasks: () =>
+    request<{ data: ParseTask[] }>('/ragflow/documents/parse/tasks'),
+}
+
+// Activity Logs API
+export const logsApi = {
+  list: (params: { module?: string; status?: string; ref_id?: string; since?: string; page?: number; limit?: number } = {}) => {
+    const p = new URLSearchParams()
+    if (params.module) p.set('module', params.module)
+    if (params.status) p.set('status', params.status)
+    if (params.ref_id) p.set('ref_id', params.ref_id)
+    if (params.since) p.set('since', params.since)
+    if (params.page) p.set('page', String(params.page))
+    if (params.limit) p.set('limit', String(params.limit))
+    return request<{ data: ActivityLogsPage }>(`/logs?${p}`)
+  },
+
+  modules: () =>
+    request<{ data: string[] }>('/logs/modules'),
+
+  stats: (since?: string) => {
+    const p = since ? `?since=${encodeURIComponent(since)}` : ''
+    return request<{ data: ModuleStat[] }>(`/logs/stats${p}`)
+  },
 }

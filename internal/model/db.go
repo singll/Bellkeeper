@@ -46,6 +46,7 @@ func AutoMigrate(db *gorm.DB) error {
 		&LLMChannel{},
 		&LLMModelGroup{},
 		&LLMModelGroupMember{},
+		&ActivityLog{},
 	); err != nil {
 		return err
 	}
