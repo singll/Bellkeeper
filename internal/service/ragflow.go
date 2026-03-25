@@ -709,10 +709,82 @@ func (s *RagFlowService) BatchTransferDocuments(sourceDatasetID, targetDatasetID
 	}, nil
 }
 
+// GetDocument gets a single document's details from RagFlow.
+func (s *RagFlowService) GetDocument(datasetID, documentID string) (map[string]interface{}, error) {
+	url := fmt.Sprintf("%s/api/v1/datasets/%s/documents?id=%s", s.cfg.BaseURL, datasetID, documentID)
+	return s.doGet(url)
+}
+
 // UpdateDocumentMetadata updates document metadata
 func (s *RagFlowService) UpdateDocumentMetadata(datasetID, documentID string, metadata map[string]interface{}) (map[string]interface{}, error) {
 	url := fmt.Sprintf("%s/api/v1/datasets/%s/documents/%s", s.cfg.BaseURL, datasetID, documentID)
 	return s.doPut(url, metadata)
+}
+
+// UpdateDocumentParserConfig updates a document's parser method and parser_config.
+func (s *RagFlowService) UpdateDocumentParserConfig(datasetID, documentID, parserID string, parserConfig map[string]interface{}) (map[string]interface{}, error) {
+	payload := map[string]interface{}{}
+	if parserID != "" {
+		payload["chunk_method"] = parserID
+	}
+	if len(parserConfig) > 0 {
+		payload["parser_config"] = parserConfig
+	}
+	if len(payload) == 0 {
+		return nil, fmt.Errorf("parser_id or parser_config required")
+	}
+	return s.UpdateDocumentMetadata(datasetID, documentID, payload)
+}
+
+func (s *RagFlowService) buildSafeParserProfile(filename string) (string, map[string]interface{}, bool) {
+	lower := strings.ToLower(strings.TrimSpace(filename))
+	if lower != "" && !strings.HasSuffix(lower, ".md") && !strings.HasSuffix(lower, ".markdown") && !strings.HasSuffix(lower, ".txt") {
+		return "", nil, false
+	}
+
+	return defaults.DefaultParserID, map[string]interface{}{
+		"layout_recognize":   "DeepDOC",
+		"chunk_token_num":    256,
+		"delimiter":          "\n",
+		"auto_keywords":      0,
+		"auto_questions":     0,
+		"html4excel":         false,
+		"topn_tags":          3,
+		"table_context_size": 0,
+		"image_context_size": 0,
+		"raptor": map[string]interface{}{
+			"use_raptor": false,
+		},
+		"graphrag": map[string]interface{}{
+			"use_graphrag": false,
+		},
+	}, true
+}
+
+func (s *RagFlowService) getDocumentFilename(datasetID, documentID string) (string, error) {
+	result, err := s.GetDocument(datasetID, documentID)
+	if err != nil {
+		return "", err
+	}
+
+	data, ok := result["data"].(map[string]interface{})
+	if !ok {
+		return "", fmt.Errorf("unexpected document response format")
+	}
+	docs, ok := data["docs"].([]interface{})
+	if !ok || len(docs) == 0 {
+		return "", fmt.Errorf("document not found")
+	}
+	doc, ok := docs[0].(map[string]interface{})
+	if !ok {
+		return "", fmt.Errorf("unexpected document item format")
+	}
+	for _, key := range []string{"name", "filename", "file_name", "title"} {
+		if value, ok := doc[key].(string); ok && strings.TrimSpace(value) != "" {
+			return strings.TrimSpace(value), nil
+		}
+	}
+	return "", fmt.Errorf("document filename not found")
 }
 
 // ListChunks lists chunks for a document

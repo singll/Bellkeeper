@@ -63,6 +63,7 @@ type ParseDocState struct {
 	RecoveryAttempts  int        `json:"recovery_attempts"`
 	LastError         string     `json:"last_error,omitempty"`
 	lastProgressText  string     `json:"-"`
+	safeParserApplied bool       `json:"-"`
 }
 
 // ParseTask tracks the progress of a smart parsing queue.
@@ -270,6 +271,16 @@ func (t *ParseTask) recordRecoveryAttempt(datasetID, docID string) int {
 	return state.RecoveryAttempts
 }
 
+func (t *ParseTask) getDocLastError(datasetID, docID string) string {
+	t.mu.Lock()
+	defer t.mu.Unlock()
+	state, ok := t.docStates[taskDocKey(datasetID, docID)]
+	if !ok {
+		return ""
+	}
+	return state.LastError
+}
+
 func (t *ParseTask) markResubmitted(datasetID, docID string) {
 	now := time.Now()
 	t.mu.Lock()
@@ -285,6 +296,25 @@ func (t *ParseTask) markResubmitted(datasetID, docID string) {
 	t.refreshCountsLocked()
 }
 
+func (t *ParseTask) ensureDocState(datasetID, docID string) *ParseDocState {
+	t.mu.Lock()
+	defer t.mu.Unlock()
+	return t.ensureDocStateLocked(datasetID, docID)
+}
+
+func (t *ParseTask) markSafeParserApplied(datasetID, docID, errMsg string) {
+	now := time.Now()
+	t.mu.Lock()
+	defer t.mu.Unlock()
+	state := t.ensureDocStateLocked(datasetID, docID)
+	state.safeParserApplied = true
+	state.LastError = errMsg
+	state.LastStateChangeAt = &now
+	if state.LastProgressAt == nil {
+		state.LastProgressAt = &now
+	}
+}
+
 func (t *ParseTask) finalizeDoc(datasetID, docID, finalStatus, errMsg string, retries int) {
 	now := time.Now()
 	t.mu.Lock()
@@ -296,6 +326,7 @@ func (t *ParseTask) finalizeDoc(datasetID, docID, finalStatus, errMsg string, re
 	state.LastProgressAt = &now
 	if finalStatus == "parsed" {
 		state.Stage = "succeeded"
+		state.safeParserApplied = false
 		t.FailedDocs = removeFailedDoc(t.FailedDocs, datasetID, docID)
 	} else {
 		state.Stage = "final_failed"
@@ -334,6 +365,7 @@ func (t *ParseTask) refreshCountsLocked() {
 	recovering := 0
 	succeeded := 0
 	finalFailed := 0
+	pending := 0
 	for _, state := range t.docStates {
 		switch state.Stage {
 		case "succeeded":
@@ -342,7 +374,8 @@ func (t *ParseTask) refreshCountsLocked() {
 			finalFailed++
 		case "recovering":
 			recovering++
-			running++
+		case "queued", "submitted":
+			pending++
 		default:
 			running++
 		}
@@ -353,7 +386,7 @@ func (t *ParseTask) refreshCountsLocked() {
 	t.FinalFailedCount = finalFailed
 	t.Completed = succeeded
 	t.Failed = finalFailed
-	t.Pending = t.Total - succeeded - finalFailed
+	t.Pending = pending + recovering + running
 	if t.Pending < 0 {
 		t.Pending = 0
 	}
@@ -632,10 +665,17 @@ func (s *RagFlowService) waitBatchUntilSettled(task *ParseTask, datasetID string
 				resolution.Succeeded = append(resolution.Succeeded, docID)
 			case "error":
 				delete(pending, docID)
+				errMsg := firstNonEmpty(snap.Error, "parse error")
+				if isOversizeDocError(errMsg) {
+					resolution.Suspected = append(resolution.Suspected, docID)
+					task.markRecovering(datasetID, docID, errMsg)
+					task.addLog(fmt.Sprintf("文档 %s 命中 413/token 超限，进入恢复流程", shortDocID(docID)))
+					continue
+				}
 				resolution.FinalFailed = append(resolution.FinalFailed, FailedDoc{
 					DatasetID:  datasetID,
 					DocumentID: docID,
-					Error:      firstNonEmpty(snap.Error, "parse error"),
+					Error:      errMsg,
 				})
 			}
 		}
@@ -653,7 +693,7 @@ func (s *RagFlowService) waitBatchUntilSettled(task *ParseTask, datasetID string
 }
 
 func shouldEnterRecovery(task *ParseTask, datasetID, docID string, snap docStatusSnapshot, stallWindow time.Duration) bool {
-	if snap.Status == "parsed" || snap.Status == "error" {
+	if isTerminalDocStatus(snap.Status) || isQueueingDocStatus(snap.Status) {
 		return false
 	}
 	if stallWindow <= 0 {
@@ -681,12 +721,24 @@ func (s *RagFlowService) resolveSingleDocTerminalState(task *ParseTask, datasetI
 		task.addLog(fmt.Sprintf("开始恢复文档 %s (第 %d 次)", shortDocID(documentID), recordedAttempt))
 
 		status, errMsg := s.recheckDocStatus(task, datasetID, documentID, cfg, 3)
+		safeApplied := false
 		switch status {
 		case "parsed":
 			task.addLog(fmt.Sprintf("文档 %s 复查后确认已完成", shortDocID(documentID)))
 			return nil
 		case "error":
-			return &FailedDoc{DatasetID: datasetID, DocumentID: documentID, Error: errMsg, Retries: recordedAttempt - 1}
+			if isOversizeDocError(errMsg) {
+				applied, applyErr := s.applySafeParserRecovery(task, datasetID, documentID, errMsg)
+				if applyErr != nil {
+					return &FailedDoc{DatasetID: datasetID, DocumentID: documentID, Error: applyErr.Error(), Retries: recordedAttempt - 1}
+				}
+				safeApplied = applied
+				if !applied {
+					return &FailedDoc{DatasetID: datasetID, DocumentID: documentID, Error: errMsg, Retries: recordedAttempt - 1}
+				}
+			} else {
+				return &FailedDoc{DatasetID: datasetID, DocumentID: documentID, Error: errMsg, Retries: recordedAttempt - 1}
+			}
 		}
 
 		task.addLog(fmt.Sprintf("停止文档 %s 的解析任务", shortDocID(documentID)))
@@ -704,6 +756,16 @@ func (s *RagFlowService) resolveSingleDocTerminalState(task *ParseTask, datasetI
 			task.addLog(fmt.Sprintf("文档 %s 在 stop 后确认已完成", shortDocID(documentID)))
 			return nil
 		case "error":
+			if isOversizeDocError(errMsg) && !safeApplied {
+				applied, applyErr := s.applySafeParserRecovery(task, datasetID, documentID, errMsg)
+				if applyErr != nil {
+					return &FailedDoc{DatasetID: datasetID, DocumentID: documentID, Error: applyErr.Error(), Retries: recordedAttempt}
+				}
+				safeApplied = applied
+				if applied {
+					break
+				}
+			}
 			return &FailedDoc{DatasetID: datasetID, DocumentID: documentID, Error: errMsg, Retries: recordedAttempt}
 		}
 
@@ -723,10 +785,64 @@ func (s *RagFlowService) resolveSingleDocTerminalState(task *ParseTask, datasetI
 			task.addLog(fmt.Sprintf("文档 %s 恢复成功", shortDocID(documentID)))
 			return nil
 		case "error":
+			if isOversizeDocError(errMsg) && !safeApplied {
+				applied, applyErr := s.applySafeParserRecovery(task, datasetID, documentID, errMsg)
+				if applyErr != nil {
+					return &FailedDoc{DatasetID: datasetID, DocumentID: documentID, Error: applyErr.Error(), Retries: recordedAttempt}
+				}
+				if applied {
+					continue
+				}
+			}
 			return &FailedDoc{DatasetID: datasetID, DocumentID: documentID, Error: errMsg, Retries: recordedAttempt}
 		}
 	}
 	return &FailedDoc{DatasetID: datasetID, DocumentID: documentID, Error: "recovery exhausted", Retries: cfg.MaxRecoveryAttempts}
+}
+
+func (s *RagFlowService) applySafeParserRecovery(task *ParseTask, datasetID, documentID, errMsg string) (bool, error) {
+	filename, err := s.getDocumentFilename(datasetID, documentID)
+	if err != nil {
+		task.addLog(fmt.Sprintf("获取文档 %s 文件名失败，无法应用安全解析配置: %v", shortDocID(documentID), err))
+		return false, fmt.Errorf("get document filename failed: %w", err)
+	}
+	parserID, parserConfig, ok := s.buildSafeParserProfile(filename)
+	if !ok {
+		task.addLog(fmt.Sprintf("文档 %s 不是 Markdown/TXT，保持原解析失败: %s", shortDocID(documentID), errMsg))
+		return false, nil
+	}
+
+	state := task.ensureDocState(datasetID, documentID)
+	if state.safeParserApplied {
+		task.addLog(fmt.Sprintf("文档 %s 已应用过安全解析配置，保持失败结果", shortDocID(documentID)))
+		return false, nil
+	}
+
+	task.addLog(fmt.Sprintf("文档 %s 命中超长 token，应用安全解析配置后重试", shortDocID(documentID)))
+	if _, err := s.UpdateDocumentParserConfig(datasetID, documentID, parserID, parserConfig); err != nil {
+		task.addLog(fmt.Sprintf("更新文档 %s 安全解析配置失败: %v", shortDocID(documentID), err))
+		return false, fmt.Errorf("update document parser config failed: %w", err)
+	}
+	task.markSafeParserApplied(datasetID, documentID, errMsg)
+
+	if s.activityLog != nil {
+		s.activityLog.LogActivity(LogActivityParams{
+			Module:  "ragflow_parse",
+			Action:  "apply_safe_parser",
+			Status:  "info",
+			Summary: fmt.Sprintf("文档 %s 命中 413/token 超限，已切换安全解析配置", shortDocID(documentID)),
+			RefID:   task.ID,
+			Detail: map[string]any{
+				"dataset_id":    datasetID,
+				"document_id":   documentID,
+				"filename":      filename,
+				"parser_id":     parserID,
+				"parser_config": parserConfig,
+				"error":         errMsg,
+			},
+		})
+	}
+	return true, nil
 }
 
 func (s *RagFlowService) recheckDocStatus(task *ParseTask, datasetID, documentID string, cfg ParseQueueConfig, checks int) (string, string) {
@@ -800,19 +916,28 @@ func extractDocStatus(result map[string]interface{}) string {
 		return "unknown"
 	}
 
-	// Prefer "run" field — it reflects the actual parse execution state.
-	// The "status" field is the document's general status (1=normal), not parse state.
-	if run, ok := doc["run"].(string); ok && run != "" {
-		return normalizeDocStatus(run)
+	runStatus := ""
+	if run, ok := doc["run"].(string); ok {
+		runStatus = normalizeDocStatus(run)
 	}
-	if status, ok := doc["status"].(string); ok {
-		return normalizeDocStatus(status)
+	if isTerminalDocStatus(runStatus) || runStatus == "parsing" || runStatus == "unstart" {
+		return runStatus
 	}
-	if status, ok := doc["status"].(float64); ok {
+
+	switch status := doc["status"].(type) {
+	case string:
+		normalized := normalizeDocStatus(status)
+		if normalized != "unknown" {
+			return normalized
+		}
+	case float64:
 		switch int(status) {
 		case 0:
 			return "unstart"
 		case 1:
+			if runStatus != "" && runStatus != "unknown" {
+				return runStatus
+			}
 			return "parsing"
 		case 2:
 			return "parsed"
@@ -820,21 +945,45 @@ func extractDocStatus(result map[string]interface{}) string {
 			return "error"
 		}
 	}
+
+	if runStatus != "" {
+		return runStatus
+	}
 	return "unknown"
 }
 
 func normalizeDocStatus(s string) string {
-	switch strings.ToLower(s) {
-	case "0", "unstart":
+	switch strings.ToLower(strings.TrimSpace(s)) {
+	case "", "unknown", "null":
+		return "unknown"
+	case "0", "unstart", "queued", "queue", "waiting", "pending", "submitted":
 		return "unstart"
-	case "1", "parsing", "running":
+	case "1", "parsing", "running", "processing", "start", "started", "doing":
 		return "parsing"
-	case "2", "parsed", "done", "success":
+	case "2", "parsed", "done", "success", "finished", "finish", "completed", "complete":
 		return "parsed"
-	case "3", "error", "fail", "failed", "cancel":
+	case "3", "error", "fail", "failed", "cancel", "canceled", "cancelled", "abort", "aborted":
 		return "error"
 	default:
-		return strings.ToLower(s)
+		return strings.ToLower(strings.TrimSpace(s))
+	}
+}
+
+func isTerminalDocStatus(status string) bool {
+	switch normalizeDocStatus(status) {
+	case "parsed", "error":
+		return true
+	default:
+		return false
+	}
+}
+
+func isQueueingDocStatus(status string) bool {
+	switch normalizeDocStatus(status) {
+	case "unstart", "unknown":
+		return true
+	default:
+		return false
 	}
 }
 
@@ -857,9 +1006,15 @@ func extractDocProgress(result map[string]interface{}) string {
 	}
 	parts := make([]string, 0, 3)
 	for _, field := range []string{"progress_msg", "process_msg", "message"} {
-		if msg, ok := doc[field].(string); ok && msg != "" {
-			parts = append(parts, msg)
+		msg, ok := doc[field].(string)
+		if !ok {
+			continue
 		}
+		msg = strings.TrimSpace(msg)
+		if msg == "" || looksLikeDocError(msg) {
+			continue
+		}
+		parts = append(parts, msg)
 	}
 	return strings.Join(parts, " | ")
 }
@@ -882,11 +1037,58 @@ func extractDocError(result map[string]interface{}) string {
 		return ""
 	}
 	for _, field := range []string{"error", "error_msg", "message", "process_msg", "progress_msg"} {
-		if msg, ok := doc[field].(string); ok && strings.TrimSpace(msg) != "" {
-			return msg
+		if msg, ok := doc[field].(string); ok {
+			msg = strings.TrimSpace(msg)
+			if msg != "" && looksLikeDocError(msg) {
+				return msg
+			}
 		}
 	}
 	return ""
+}
+
+func looksLikeDocError(msg string) bool {
+	lower := strings.ToLower(strings.TrimSpace(msg))
+	if lower == "" {
+		return false
+	}
+	for _, pattern := range []string{
+		"[error]",
+		"exception",
+		"generate embedding error",
+		"error code:",
+		" input must have less than ",
+		"failed",
+		"traceback",
+		"panic",
+	} {
+		if strings.Contains(lower, pattern) {
+			return true
+		}
+	}
+	return false
+}
+
+func isOversizeDocError(msg string) bool {
+	lower := strings.ToLower(strings.TrimSpace(msg))
+	if lower == "" {
+		return false
+	}
+	for _, pattern := range []string{
+		"413",
+		"input must have less than 8192 tokens",
+		"must have less than",
+		"too many tokens",
+		"token limit",
+		"token exceeds",
+		"generate embedding error",
+		"embedding error",
+	} {
+		if strings.Contains(lower, pattern) {
+			return true
+		}
+	}
+	return false
 }
 
 func isRateLimitError(errMsg string) bool {

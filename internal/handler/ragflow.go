@@ -381,6 +381,31 @@ func (h *RagFlowHandler) UpdateDocumentMetadata(c *gin.Context) {
 	c.JSON(http.StatusOK, result)
 }
 
+// UpdateDocumentParserConfig updates document parser method and parser_config.
+func (h *RagFlowHandler) UpdateDocumentParserConfig(c *gin.Context) {
+	var req struct {
+		DatasetID    string                 `json:"dataset_id" binding:"required"`
+		DocumentID   string                 `json:"document_id" binding:"required"`
+		ParserID     string                 `json:"parser_id"`
+		ParserConfig map[string]interface{} `json:"parser_config"`
+	}
+	if err := c.ShouldBindJSON(&req); err != nil {
+		response.BadRequest(c, err.Error())
+		return
+	}
+	if req.ParserID == "" && len(req.ParserConfig) == 0 {
+		response.BadRequest(c, "parser_id or parser_config required")
+		return
+	}
+
+	result, err := h.svc.UpdateDocumentParserConfig(req.DatasetID, req.DocumentID, req.ParserID, req.ParserConfig)
+	if err != nil {
+		response.InternalError(c, err.Error())
+		return
+	}
+	c.JSON(http.StatusOK, result)
+}
+
 // ListChunks lists chunks for a document (proxy passthrough)
 func (h *RagFlowHandler) ListChunks(c *gin.Context) {
 	datasetID := c.Query("dataset_id")

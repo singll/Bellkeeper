@@ -207,6 +207,7 @@ export interface ParseDocState {
   stage: string
   submitted_at?: string
   last_progress_at?: string
+  last_state_change_at?: string
   recovery_attempts: number
   last_error?: string
 }
