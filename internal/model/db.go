@@ -217,7 +217,7 @@ func SeedDatasetMappings(db *gorm.DB) error {
 		// Ensure tag-dataset association exists
 		var count int64
 		db.Table("dataset_mapping_tags").
-			Where("mapping_id = ? AND tag_id = ?", mapping.ID, tag.ID).
+			Where("dataset_mapping_id = ? AND tag_id = ?", mapping.ID, tag.ID).
 			Count(&count)
 		if count == 0 {
 			if err := db.Model(&mapping).Association("Tags").Append(&tag); err != nil {

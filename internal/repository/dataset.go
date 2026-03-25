@@ -82,7 +82,7 @@ func (r *DatasetMappingRepository) UpdateTags(mapping *model.DatasetMapping, tag
 func (r *DatasetMappingRepository) GetByTagIDs(tagIDs []uint) ([]model.DatasetMapping, error) {
 	var mappings []model.DatasetMapping
 	if err := r.db.Preload("Tags").
-		Joins("JOIN dataset_mapping_tags ON dataset_mappings.id = dataset_mapping_tags.mapping_id").
+		Joins("JOIN dataset_mapping_tags ON dataset_mappings.id = dataset_mapping_tags.dataset_mapping_id").
 		Where("dataset_mapping_tags.tag_id IN ?", tagIDs).
 		Group("dataset_mappings.id").
 		Find(&mappings).Error; err != nil {
