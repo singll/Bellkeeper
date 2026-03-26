@@ -204,7 +204,7 @@ func (t *ParseTask) markSubmitted(datasetID string, docIDs []string) {
 			state.LastProgressAt = &now
 		}
 		state.CurrentStatus = "submitted"
-		state.Stage = "running"
+		state.Stage = "submitted"
 		state.LastError = ""
 	}
 	t.LastProgressAt = &now
@@ -221,7 +221,7 @@ func (t *ParseTask) observeDoc(datasetID, docID string, snap docStatusSnapshot, 
 		state.LastStateChangeAt = &now
 	}
 	if stage != "" && state.Stage != "succeeded" && state.Stage != "final_failed" {
-		state.Stage = stage
+		state.Stage = normalizeTaskDocStage(stage, snap.Status)
 	}
 	if snap.Error != "" {
 		state.LastError = snap.Error
@@ -235,6 +235,37 @@ func (t *ParseTask) observeDoc(datasetID, docID string, snap docStatusSnapshot, 
 		state.LastProgressAt = &now
 	}
 	t.refreshCountsLocked()
+}
+
+func normalizeTaskDocStage(stage string, status string) string {
+	switch stage {
+	case "recovering", "succeeded", "final_failed":
+		return stage
+	case "submitted", "submitting", "queued":
+		return "submitted"
+	case "running", "polling":
+		switch normalizeDocStatus(status) {
+		case "parsed":
+			return "succeeded"
+		case "error":
+			return "recovering"
+		case "unstart", "unknown":
+			return "submitted"
+		default:
+			return "running"
+		}
+	default:
+		switch normalizeDocStatus(status) {
+		case "parsed":
+			return "succeeded"
+		case "error":
+			return "recovering"
+		case "unstart", "unknown":
+			return "submitted"
+		default:
+			return "running"
+		}
+	}
 }
 
 func (t *ParseTask) markRecovering(datasetID, docID string, errMsg string) {
@@ -271,14 +302,14 @@ func (t *ParseTask) recordRecoveryAttempt(datasetID, docID string) int {
 	return state.RecoveryAttempts
 }
 
-func (t *ParseTask) getDocLastError(datasetID, docID string) string {
+func (t *ParseTask) hasSafeParserApplied(datasetID, docID string) bool {
 	t.mu.Lock()
 	defer t.mu.Unlock()
 	state, ok := t.docStates[taskDocKey(datasetID, docID)]
 	if !ok {
-		return ""
+		return false
 	}
-	return state.LastError
+	return state.safeParserApplied
 }
 
 func (t *ParseTask) markResubmitted(datasetID, docID string) {
@@ -486,8 +517,28 @@ func (s *RagFlowService) executeParsingQueue(task *ParseTask, items []ParseQueue
 		task.Status = "completed"
 		task.CurrentStage = "completed"
 		task.CompletedAt = &now
-		task.ResultStatus = deriveResultStatus(task.Completed, task.Failed, task.Total)
+		for _, state := range task.docStates {
+			if state.Stage != "succeeded" && state.Stage != "final_failed" {
+				state.Stage = normalizeTaskDocStage("running", state.CurrentStatus)
+				if state.Stage != "succeeded" && state.Stage != "final_failed" {
+					state.Stage = "final_failed"
+					state.CurrentStatus = "error"
+					if strings.TrimSpace(state.LastError) == "" {
+						state.LastError = "task completed before document reached terminal state"
+					}
+					task.FailedDocs = upsertFailedDoc(task.FailedDocs, FailedDoc{
+						DatasetID:  state.DatasetID,
+						DocumentID: state.DocumentID,
+						Error:      state.LastError,
+						Retries:    state.RecoveryAttempts,
+					})
+				}
+				state.LastStateChangeAt = &now
+				state.LastProgressAt = &now
+			}
+		}
 		task.refreshCountsLocked()
+		task.ResultStatus = deriveResultStatus(task.Completed, task.Failed, task.Total)
 		resultStatus := task.ResultStatus
 		completed := task.Completed
 		failed := task.Failed
@@ -708,6 +759,18 @@ func shouldEnterRecovery(task *ParseTask, datasetID, docID string, snap docStatu
 	return time.Since(*state.LastProgressAt) >= stallWindow
 }
 
+func shouldRetryAfterSafeParser(status, errMsg string, safeApplied bool) bool {
+	if !safeApplied {
+		return false
+	}
+	normalized := normalizeDocStatus(status)
+	if normalized == "error" || normalized == "unknown" || normalized == "unstart" {
+		return true
+	}
+	lower := strings.ToLower(strings.TrimSpace(errMsg))
+	return lower == "" || strings.Contains(lower, "cancel") || strings.Contains(lower, "stopped") || strings.Contains(lower, "abort")
+}
+
 func (s *RagFlowService) resolveSingleDocTerminalState(task *ParseTask, datasetID, documentID string, cfg ParseQueueConfig) *FailedDoc {
 	hardDeadline := time.Now().Add(time.Duration(cfg.HardTimeout) * time.Second)
 	for attempt := 1; attempt <= cfg.MaxRecoveryAttempts; attempt++ {
@@ -721,7 +784,7 @@ func (s *RagFlowService) resolveSingleDocTerminalState(task *ParseTask, datasetI
 		task.addLog(fmt.Sprintf("开始恢复文档 %s (第 %d 次)", shortDocID(documentID), recordedAttempt))
 
 		status, errMsg := s.recheckDocStatus(task, datasetID, documentID, cfg, 3)
-		safeApplied := false
+		safeApplied := task.hasSafeParserApplied(datasetID, documentID)
 		switch status {
 		case "parsed":
 			task.addLog(fmt.Sprintf("文档 %s 复查后确认已完成", shortDocID(documentID)))
@@ -732,11 +795,11 @@ func (s *RagFlowService) resolveSingleDocTerminalState(task *ParseTask, datasetI
 				if applyErr != nil {
 					return &FailedDoc{DatasetID: datasetID, DocumentID: documentID, Error: applyErr.Error(), Retries: recordedAttempt - 1}
 				}
-				safeApplied = applied
-				if !applied {
+				safeApplied = safeApplied || applied
+				if !safeApplied {
 					return &FailedDoc{DatasetID: datasetID, DocumentID: documentID, Error: errMsg, Retries: recordedAttempt - 1}
 				}
-			} else {
+			} else if !shouldRetryAfterSafeParser(status, errMsg, safeApplied) {
 				return &FailedDoc{DatasetID: datasetID, DocumentID: documentID, Error: errMsg, Retries: recordedAttempt - 1}
 			}
 		}
@@ -751,6 +814,7 @@ func (s *RagFlowService) resolveSingleDocTerminalState(task *ParseTask, datasetI
 		}
 
 		status, errMsg = s.recheckDocStatus(task, datasetID, documentID, cfg, 2)
+		safeApplied = task.hasSafeParserApplied(datasetID, documentID) || safeApplied
 		switch status {
 		case "parsed":
 			task.addLog(fmt.Sprintf("文档 %s 在 stop 后确认已完成", shortDocID(documentID)))
@@ -761,12 +825,12 @@ func (s *RagFlowService) resolveSingleDocTerminalState(task *ParseTask, datasetI
 				if applyErr != nil {
 					return &FailedDoc{DatasetID: datasetID, DocumentID: documentID, Error: applyErr.Error(), Retries: recordedAttempt}
 				}
-				safeApplied = applied
-				if applied {
-					break
-				}
+				safeApplied = safeApplied || applied
 			}
-			return &FailedDoc{DatasetID: datasetID, DocumentID: documentID, Error: errMsg, Retries: recordedAttempt}
+			if !shouldRetryAfterSafeParser(status, errMsg, safeApplied) {
+				return &FailedDoc{DatasetID: datasetID, DocumentID: documentID, Error: errMsg, Retries: recordedAttempt}
+			}
+			task.addLog(fmt.Sprintf("文档 %s stop 后仍处于 %s，继续按安全配置重提", shortDocID(documentID), firstNonEmpty(errMsg, status)))
 		}
 
 		task.addLog(fmt.Sprintf("重新提交文档 %s 进行单文档解析", shortDocID(documentID)))
@@ -780,6 +844,7 @@ func (s *RagFlowService) resolveSingleDocTerminalState(task *ParseTask, datasetI
 		task.markResubmitted(datasetID, documentID)
 
 		status, errMsg = s.waitForSingleDocTerminalState(task, datasetID, documentID, cfg, hardDeadline)
+		safeApplied = task.hasSafeParserApplied(datasetID, documentID) || safeApplied
 		switch status {
 		case "parsed":
 			task.addLog(fmt.Sprintf("文档 %s 恢复成功", shortDocID(documentID)))
@@ -790,11 +855,14 @@ func (s *RagFlowService) resolveSingleDocTerminalState(task *ParseTask, datasetI
 				if applyErr != nil {
 					return &FailedDoc{DatasetID: datasetID, DocumentID: documentID, Error: applyErr.Error(), Retries: recordedAttempt}
 				}
-				if applied {
+				safeApplied = safeApplied || applied
+				if safeApplied {
 					continue
 				}
 			}
 			return &FailedDoc{DatasetID: datasetID, DocumentID: documentID, Error: errMsg, Retries: recordedAttempt}
+		case "running":
+			task.addLog(fmt.Sprintf("文档 %s 重提后仍未收敛，继续下一轮恢复", shortDocID(documentID)))
 		}
 	}
 	return &FailedDoc{DatasetID: datasetID, DocumentID: documentID, Error: "recovery exhausted", Retries: cfg.MaxRecoveryAttempts}
