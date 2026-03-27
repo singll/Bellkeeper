@@ -66,6 +66,7 @@ func registerDatasetRoutes(api *gin.RouterGroup, h *handler.DatasetHandler) {
 }
 
 func registerRagFlowRoutes(api *gin.RouterGroup, h *handler.RagFlowHandler) {
+	api.POST("/ragflow/ingest/obsidian", h.IngestObsidianNote)
 	api.POST("/ragflow/upload", h.Upload)
 	api.POST("/ragflow/upload/with-routing", h.UploadWithRouting)
 	api.GET("/ragflow/check-url", h.CheckURL)

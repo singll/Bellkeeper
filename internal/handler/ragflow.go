@@ -53,6 +53,25 @@ func (h *RagFlowHandler) UploadWithRouting(c *gin.Context) {
 	})
 }
 
+func (h *RagFlowHandler) IngestObsidianNote(c *gin.Context) {
+	var req service.ObsidianIngestRequest
+	if err := c.ShouldBindJSON(&req); err != nil {
+		response.BadRequest(c, err.Error())
+		return
+	}
+	if req.Vault == "" || req.Path == "" || req.Content == "" {
+		response.BadRequest(c, "vault, path and content are required")
+		return
+	}
+
+	result, err := h.svc.IngestObsidianNote(&req)
+	if err != nil {
+		response.InternalError(c, err.Error())
+		return
+	}
+	response.Success(c, result)
+}
+
 func (h *RagFlowHandler) CheckURL(c *gin.Context) {
 	url := c.Query("url")
 	if url == "" {
