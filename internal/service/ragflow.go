@@ -794,11 +794,6 @@ func (s *RagFlowService) UpdateDocumentParserConfig(datasetID, documentID, parse
 }
 
 func (s *RagFlowService) buildSafeParserProfile(filename string) (string, map[string]interface{}, bool) {
-	lower := strings.ToLower(strings.TrimSpace(filename))
-	if lower != "" && !strings.HasSuffix(lower, ".md") && !strings.HasSuffix(lower, ".markdown") && !strings.HasSuffix(lower, ".txt") {
-		return "", nil, false
-	}
-
 	return defaults.DefaultParserID, map[string]interface{}{
 		"layout_recognize":   "DeepDOC",
 		"chunk_token_num":    256,
