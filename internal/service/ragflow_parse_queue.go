@@ -850,15 +850,15 @@ func (s *RagFlowService) resolveSingleDocTerminalState(task *ParseTask, datasetI
 			task.addLog(fmt.Sprintf("文档 %s 恢复成功", shortDocID(documentID)))
 			return nil
 		case "error":
-			if isOversizeDocError(errMsg) && !safeApplied {
+			if isOversizeDocError(errMsg) {
 				applied, applyErr := s.applySafeParserRecovery(task, datasetID, documentID, errMsg)
 				if applyErr != nil {
 					return &FailedDoc{DatasetID: datasetID, DocumentID: documentID, Error: applyErr.Error(), Retries: recordedAttempt}
 				}
 				safeApplied = safeApplied || applied
-				if safeApplied {
-					continue
-				}
+				// safe parser applied (or already was) — continue to retry with updated config
+				task.addLog(fmt.Sprintf("文档 %s 安全配置后仍超限，继续下一轮恢复", shortDocID(documentID)))
+				continue
 			}
 			return &FailedDoc{DatasetID: datasetID, DocumentID: documentID, Error: errMsg, Retries: recordedAttempt}
 		case "running":
@@ -876,13 +876,13 @@ func (s *RagFlowService) applySafeParserRecovery(task *ParseTask, datasetID, doc
 	}
 	parserID, parserConfig, ok := s.buildSafeParserProfile(filename)
 	if !ok {
-		task.addLog(fmt.Sprintf("文档 %s 不是 Markdown/TXT，保持原解析失败: %s", shortDocID(documentID), errMsg))
+		task.addLog(fmt.Sprintf("文档 %s 无法构建安全解析配置，保持失败结果: %s", shortDocID(documentID), errMsg))
 		return false, nil
 	}
 
 	state := task.ensureDocState(datasetID, documentID)
 	if state.safeParserApplied {
-		task.addLog(fmt.Sprintf("文档 %s 已应用过安全解析配置，保持失败结果", shortDocID(documentID)))
+		// config already updated in a previous attempt; no need to update again
 		return false, nil
 	}
 

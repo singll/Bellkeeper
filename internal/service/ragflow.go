@@ -795,9 +795,9 @@ func (s *RagFlowService) UpdateDocumentParserConfig(datasetID, documentID, parse
 
 func (s *RagFlowService) buildSafeParserProfile(filename string) (string, map[string]interface{}, bool) {
 	return defaults.DefaultParserID, map[string]interface{}{
-		"layout_recognize":   "DeepDOC",
-		"chunk_token_num":    256,
-		"delimiter":          "\n",
+		"layout_recognize":   "naive",
+		"chunk_token_num":    64,
+		"delimiter":          "\n!?;。？！",
 		"auto_keywords":      0,
 		"auto_questions":     0,
 		"html4excel":         false,
