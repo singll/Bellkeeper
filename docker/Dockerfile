@@ -52,7 +52,8 @@ FROM alpine:3.19
 WORKDIR /app
 
 # Install runtime dependencies
-RUN apk add --no-cache ca-certificates tzdata wget
+RUN apk add --no-cache ca-certificates tzdata wget python3 py3-pip && \
+    pip3 install --break-system-packages --no-cache-dir trafilatura
 
 # Copy binary from builder
 COPY --from=backend-builder /app/bellkeeper .

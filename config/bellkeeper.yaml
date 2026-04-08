@@ -177,3 +177,21 @@ llm_proxy:
       models:
         - moonshot-v1-128k
       is_enabled: true
+
+file_ingestion:
+  enabled: true
+  base_path: "/mnt/knowledge"
+  raw_dir: "raw"
+  working_dir: "working"
+  default_layer: "raw"
+
+  trafilatura:
+    enabled: true
+    timeout: 15
+    min_content_length: 100
+
+  firecrawl:
+    enabled: true
+    api_url: "${FIRECRAWL_API_URL}"
+    timeout: 60
+    fallback_only: true
