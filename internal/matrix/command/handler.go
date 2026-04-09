@@ -171,3 +171,182 @@ func NewAliasHandler(name string, wrapped Handler) *AliasHandler {
 func (h *AliasHandler) Handle(ctx context.Context, cmdCtx *Context) (*Response, error) {
 	return h.wrapped.Handle(ctx, cmdCtx)
 }
+
+// HealthHandler handles !health command - shows detailed system status
+type HealthHandler struct {
+	BaseHandler
+	adminSvc interface {
+		GetStats(ctx context.Context) (map[string]interface{}, error)
+	}
+}
+
+func NewHealthHandler(adminSvc interface {
+	GetStats(ctx context.Context) (map[string]interface{}, error)
+}) *HealthHandler {
+	return &HealthHandler{
+		BaseHandler: BaseHandler{
+			name:        "health",
+			description: "显示系统健康状态",
+			usage:       "",
+		},
+		adminSvc: adminSvc,
+	}
+}
+
+func (h *HealthHandler) Handle(ctx context.Context, cmdCtx *Context) (*Response, error) {
+	stats, err := h.adminSvc.GetStats(ctx)
+	if err != nil {
+		return &Response{
+			Success: false,
+			Message: "❌ 无法获取系统状态: " + err.Error(),
+		}, nil
+	}
+
+	msg := "**Bellkeeper 健康状态**\n\n" +
+		"✅ 服务运行正常\n\n" +
+		"**统计信息:**\n" +
+		"- 房间数: " + formatInt(stats["rooms"]) + "\n" +
+		"- 活跃房间: " + formatInt(stats["active_rooms"]) + "\n" +
+		"- 命令数: " + formatInt(stats["commands"]) + "\n" +
+		"- 24h 事件数: " + formatInt(stats["events_24h"]) + "\n" +
+		"- 24h 通知数: " + formatInt(stats["notifications_24h"])
+
+	return &Response{
+		Success: true,
+		Message: msg,
+		IsHTML:  true,
+	}, nil
+}
+
+func formatInt(v interface{}) string {
+	if n, ok := v.(int); ok {
+		return string(rune('0'+n%10)) + formatIntHelper(n/10)
+	}
+	if n64, ok := v.(int64); ok {
+		return formatIntHelper64(n64)
+	}
+	return "0"
+}
+
+func formatIntHelper(n int) string {
+	if n == 0 {
+		return ""
+	}
+	return formatIntHelper(n/10) + string(rune('0'+n%10))
+}
+
+func formatIntHelper64(n int64) string {
+	if n == 0 {
+		return ""
+	}
+	return formatIntHelper64(n/10) + string(rune('0'+int(n%10)))
+}
+
+// RoomsHandler handles !rooms command - lists Matrix rooms
+type RoomsHandler struct {
+	BaseHandler
+	adminSvc interface {
+		ListRooms(ctx context.Context) ([]*RoomResponse, error)
+	}
+}
+
+// RoomResponse is the room info type
+type RoomResponse struct {
+	RoomID   string `json:"room_id"`
+	Name     string `json:"room_name"`
+	Type     string `json:"room_type"`
+	IsActive bool   `json:"is_active"`
+}
+
+func NewRoomsHandler(adminSvc interface {
+	ListRooms(ctx context.Context) ([]*RoomResponse, error)
+}) *RoomsHandler {
+	return &RoomsHandler{
+		BaseHandler: BaseHandler{
+			name:        "rooms",
+			description: "列出 Matrix 房间",
+			usage:       "",
+		},
+		adminSvc: adminSvc,
+	}
+}
+
+func (h *RoomsHandler) Handle(ctx context.Context, cmdCtx *Context) (*Response, error) {
+	rooms, err := h.adminSvc.ListRooms(ctx)
+	if err != nil {
+		return &Response{
+			Success: false,
+			Message: "❌ 无法获取房间列表: " + err.Error(),
+		}, nil
+	}
+
+	if len(rooms) == 0 {
+		return &Response{
+			Success: true,
+			Message: "**Matrix 房间列表**\n\n暂无注册的房间",
+			IsHTML:  true,
+		}, nil
+	}
+
+	var sb strings.Builder
+	sb.WriteString("**Matrix 房间列表**\n\n")
+	for _, r := range rooms {
+		status := "🟢"
+		if !r.IsActive {
+			status = "🔴"
+		}
+		name := r.Name
+		if name == "" {
+			name = "(未命名)"
+		}
+		sb.WriteString(status + " " + name + "\n")
+		sb.WriteString("   类型: " + r.Type + "\n")
+	}
+
+	return &Response{
+		Success: true,
+		Message: sb.String(),
+		IsHTML:  true,
+	}, nil
+}
+
+// CommandsHandler handles !commands command - lists registered commands
+type CommandsHandler struct {
+	BaseHandler
+	listCommands func() []string
+}
+
+func NewCommandsHandler(listCommands func() []string) *CommandsHandler {
+	return &CommandsHandler{
+		BaseHandler: BaseHandler{
+			name:        "commands",
+			description: "列出所有可用命令",
+			usage:       "",
+		},
+		listCommands: listCommands,
+	}
+}
+
+func (h *CommandsHandler) Handle(ctx context.Context, cmdCtx *Context) (*Response, error) {
+	cmds := h.listCommands()
+	if len(cmds) == 0 {
+		return &Response{
+			Success: true,
+			Message: "**可用命令**\n\n暂无注册的命令",
+			IsHTML:  true,
+		}, nil
+	}
+
+	var sb strings.Builder
+	sb.WriteString("**可用命令 (" + formatInt(len(cmds)) + ")**\n\n")
+	for _, cmd := range cmds {
+		sb.WriteString("• " + cmd + "\n")
+	}
+	sb.WriteString("\n发送 `!help <命令>` 查看详细帮助")
+
+	return &Response{
+		Success: true,
+		Message: sb.String(),
+		IsHTML:  true,
+	}, nil
+}

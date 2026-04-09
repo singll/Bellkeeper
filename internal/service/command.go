@@ -126,3 +126,44 @@ func (s *CommandService) ListCommands() []string {
 func (s *CommandService) GetHelpText() string {
 	return s.router.GetHelpText()
 }
+
+// SetAdminService sets the admin service and registers admin commands
+func (s *CommandService) SetAdminService(adminSvc *AdminService) {
+	// Register health command
+	s.router.RegisterHandler(command.NewHealthHandler(adminSvc))
+
+	// Register rooms command - need to wrap adminSvc with type conversion
+	type roomLister interface {
+		ListRooms(ctx context.Context) ([]*command.RoomResponse, error)
+	}
+	s.router.RegisterHandler(command.NewRoomsHandler(roomListerAdapter{svc: adminSvc}))
+
+	// Register commands list command
+	s.router.RegisterHandler(command.NewCommandsHandler(s.ListCommands))
+
+	log.Printf("[Command] registered admin commands")
+}
+
+// roomListerAdapter adapts AdminService.ListRooms to use command.RoomResponse
+type roomListerAdapter struct {
+	svc interface {
+		ListRooms(ctx context.Context) ([]*RoomResponse, error)
+	}
+}
+
+func (a roomListerAdapter) ListRooms(ctx context.Context) ([]*command.RoomResponse, error) {
+	rooms, err := a.svc.ListRooms(ctx)
+	if err != nil {
+		return nil, err
+	}
+	result := make([]*command.RoomResponse, len(rooms))
+	for i, r := range rooms {
+		result[i] = &command.RoomResponse{
+			RoomID:   r.RoomID,
+			Name:     r.Name,
+			Type:     r.Type,
+			IsActive: r.IsActive,
+		}
+	}
+	return result, nil
+}

@@ -159,6 +159,12 @@ func runServer(cmd *cobra.Command, args []string) {
 
 		// Initialize Command Service and attach to sync loop
 		commandSvc := service.NewCommandService(cfg.Matrix, cfg.N8N, cfg.Memos, repos, matrixClient)
+
+		// Wire up AdminService for admin commands
+		if services.MatrixAdmin != nil {
+			commandSvc.SetAdminService(services.MatrixAdmin)
+		}
+
 		matrixSyncLoop.SetCommandService(commandSvc)
 		log.Printf("[Matrix] Command Router initialized with %d commands", len(commandSvc.ListCommands()))
 

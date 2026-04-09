@@ -2,11 +2,14 @@ package command
 
 import (
 	"context"
+	"encoding/json"
 	"fmt"
 	"log"
 	"strings"
 
+	"github.com/singll/bellkeeper/internal/config"
 	"github.com/singll/bellkeeper/internal/matrix/policy"
+	"github.com/singll/bellkeeper/internal/model"
 	"github.com/singll/bellkeeper/internal/repository"
 )
 
@@ -17,16 +20,31 @@ type Router struct {
 	repos      *repository.Repositories
 	policy     *policy.Checker
 	adminUsers map[string]bool // set of admin user IDs (deprecated, use policy.Checker)
+	n8nCfg     config.N8NConfig
+	memosCfg   config.MemosConfig
+}
+
+// RouterConfig holds configuration for the router
+type RouterConfig struct {
+	N8NConfig   config.N8NConfig
+	MemosConfig config.MemosConfig
 }
 
 // NewRouter creates a new command router
 func NewRouter(prefixes string, repos *repository.Repositories, adminUsers []string) *Router {
+	return NewRouterWithConfig(prefixes, repos, adminUsers, RouterConfig{})
+}
+
+// NewRouterWithConfig creates a new command router with config
+func NewRouterWithConfig(prefixes string, repos *repository.Repositories, adminUsers []string, cfg RouterConfig) *Router {
 	r := &Router{
 		handlers:   make(map[string]Handler),
-		parser:     NewParser(prefixes),
-		repos:      repos,
-		policy:     policy.NewChecker(repos, adminUsers),
+		parser:    NewParser(prefixes),
+		repos:     repos,
+		policy:    policy.NewChecker(repos, adminUsers),
 		adminUsers: make(map[string]bool),
+		n8nCfg:   cfg.N8NConfig,
+		memosCfg: cfg.MemosConfig,
 	}
 
 	// Register built-in handlers
@@ -34,7 +52,7 @@ func NewRouter(prefixes string, repos *repository.Repositories, adminUsers []str
 	r.RegisterHandler(NewStatusHandler())
 	r.RegisterHandler(NewHelpHandler(r)) // Help needs router reference
 
-	// TODO: Load commands from database
+	// Load commands from database
 	r.loadCommandsFromDB()
 
 	return r
@@ -140,12 +158,102 @@ func (r *Router) SetAdminUsers(users []string) {
 	r.policy.SetAdminUsers(users)
 }
 
-// loadCommandsFromDB loads commands from database
+// loadCommandsFromDB loads commands from database and registers handlers
 func (r *Router) loadCommandsFromDB() {
-	// Load commands from DB and register custom handlers
-	// This would typically create handler instances based on HandlerType
-	// For now, we rely on built-in handlers
-	log.Printf("[Command] loaded %d commands from DB", len(r.handlers))
+	commands, err := r.repos.MatrixCommand.List(true) // activeOnly = true
+	if err != nil {
+		log.Printf("[Command] failed to load commands from DB: %v", err)
+		return
+	}
+
+	registered := 0
+	for _, cmd := range commands {
+		// Skip if handler already registered (built-in handlers take priority)
+		if _, exists := r.handlers[cmd.CommandName]; exists {
+			continue
+		}
+
+		handler := r.createHandlerFromDB(&cmd)
+		if handler != nil {
+			r.RegisterHandler(handler)
+			registered++
+		}
+	}
+
+	log.Printf("[Command] loaded %d commands from DB (total: %d registered)", registered, len(r.handlers))
+}
+
+// createHandlerFromDB creates a handler instance from DB command config
+func (r *Router) createHandlerFromDB(cmd *model.MatrixCommand) Handler {
+	var config map[string]interface{}
+	if cmd.HandlerConfig != "" {
+		json.Unmarshal([]byte(cmd.HandlerConfig), &config)
+	}
+
+	switch cmd.HandlerType {
+	case "n8n_webhook":
+		// Get webhook URL from config or build from N8N base URL
+		webhookURL := ""
+		if url, ok := config["webhook_url"].(string); ok && url != "" {
+			webhookURL = url
+		} else if r.n8nCfg.WebhookBaseURL != "" {
+			// Try to find webhook path in config
+			if path, ok := config["webhook_path"].(string); ok {
+				webhookURL = r.n8nCfg.WebhookBaseURL + path
+			}
+		}
+		if webhookURL == "" {
+			log.Printf("[Command] skip %s: no webhook URL configured", cmd.CommandName)
+			return nil
+		}
+		return NewN8NTriggerHandler(cmd.CommandName, webhookURL)
+
+	case "memos_todo":
+		// Direct Memos handler
+		if r.memosCfg.Enabled && r.memosCfg.BaseURL != "" {
+			return NewDirectMemosHandler(r.memosCfg.BaseURL, r.memosCfg.APIToken)
+		}
+		// Fall back to n8n webhook
+		if r.n8nCfg.WebhookBaseURL != "" {
+			return NewN8NTriggerHandler(cmd.CommandName, r.n8nCfg.WebhookBaseURL+"/memos-todo")
+		}
+		log.Printf("[Command] skip %s: Memos not configured", cmd.CommandName)
+		return nil
+
+	case "memos_list":
+		if r.memosCfg.Enabled && r.memosCfg.BaseURL != "" {
+			return NewDirectMemosHandler(r.memosCfg.BaseURL, r.memosCfg.APIToken)
+		}
+		if r.n8nCfg.WebhookBaseURL != "" {
+			return NewN8NTriggerHandler(cmd.CommandName, r.n8nCfg.WebhookBaseURL+"/memos-todo")
+		}
+		return nil
+
+	case "ragflow_qa", "ragflow_search":
+		// QA handler via n8n
+		if r.n8nCfg.WebhookBaseURL != "" {
+			return NewQAHandler(r.n8nCfg.WebhookBaseURL + "/qa")
+		}
+		log.Printf("[Command] skip %s: N8N not configured", cmd.CommandName)
+		return nil
+
+	case "builtin_ping":
+		return NewPingHandler()
+
+	case "builtin_status":
+		return NewStatusHandler()
+
+	case "builtin_help":
+		return NewHelpHandler(r)
+
+	default:
+		// Generic webhook handler
+		if webhookURL, ok := config["webhook_url"].(string); ok && webhookURL != "" {
+			return NewN8NTriggerHandler(cmd.CommandName, webhookURL)
+		}
+		log.Printf("[Command] unknown handler type %s for command %s", cmd.HandlerType, cmd.CommandName)
+		return nil
+	}
 }
 
 // ExecuteFromMessage processes a raw Matrix message and executes if it's a command
