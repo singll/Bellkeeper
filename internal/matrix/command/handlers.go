@@ -7,6 +7,7 @@ import (
 	"fmt"
 	"io"
 	"net/http"
+	"strconv"
 	"time"
 )
 
@@ -260,21 +261,21 @@ func (h *QAHandler) Handle(ctx context.Context, cmdCtx *Context) (*Response, err
 // DirectMemosHandler handles Memos todo directly without n8n
 type DirectMemosHandler struct {
 	BaseHandler
-	apiURL    string
-	apiKey    string
+	apiURL     string
+	apiToken   string
 	httpClient *http.Client
 }
 
 // NewDirectMemosHandler creates a direct Memos handler
-func NewDirectMemosHandler(apiURL, apiKey string) *DirectMemosHandler {
+func NewDirectMemosHandler(apiURL, apiToken string) *DirectMemosHandler {
 	return &DirectMemosHandler{
 		BaseHandler: BaseHandler{
 			name:        "待办",
-			description: "Memos 待办管理",
+			description: "Memos 待办管理（直接调用）",
 			usage:       "<子命令> [参数]",
 		},
-		apiURL: apiURL,
-		apiKey: apiKey,
+		apiURL:   apiURL,
+		apiToken: apiToken,
 		httpClient: &http.Client{
 			Timeout: 30 * time.Second,
 		},
@@ -315,12 +316,102 @@ func (h *DirectMemosHandler) Handle(ctx context.Context, cmdCtx *Context) (*Resp
 }
 
 func (h *DirectMemosHandler) listTodos(ctx context.Context) (*Response, error) {
-	// Call Memos API to list todos
-	// TODO: Implement based on actual Memos API
+	if h.apiURL == "" || h.apiToken == "" {
+		return &Response{
+			Success: false,
+			Message: "Memos API 未配置，请联系管理员",
+		}, nil
+	}
+
+	url := h.apiURL + "/api/v1/memos"
+	req, err := http.NewRequestWithContext(ctx, "GET", url, nil)
+	if err != nil {
+		return nil, err
+	}
+	req.Header.Set("Authorization", "Bearer "+h.apiToken)
+	req.Header.Set("Content-Type", "application/json")
+
+	resp, err := h.httpClient.Do(req)
+	if err != nil {
+		return &Response{
+			Success: false,
+			Message: fmt.Sprintf("❌ 调用 Memos API 失败: %v", err),
+		}, nil
+	}
+	defer resp.Body.Close()
+
+	respBody, _ := io.ReadAll(resp.Body)
+
+	if resp.StatusCode >= 400 {
+		return &Response{
+			Success: false,
+			Message: fmt.Sprintf("❌ Memos API 返回错误 (HTTP %d): %s", resp.StatusCode, string(respBody)),
+		}, nil
+	}
+
+	// Parse response
+	var result struct {
+		Memos []struct {
+			ID        int    `json:"id"`
+			Content   string `json:"content"`
+			CreatedAt string `json:"createdTs"`
+			Done      bool   `json:"done"`
+			Tags      []struct {
+				Name string `json:"name"`
+			} `json:"tags"`
+		} `json:"data"`
+	}
+
+	if err := json.Unmarshal(respBody, &result); err != nil {
+		return &Response{
+			Success: false,
+			Message: fmt.Sprintf("❌ 解析 Memos 响应失败: %v", err),
+		}, nil
+	}
+
+	// Filter todos (memos with "todo" tag or from specific resource)
+	var todos []string
+	for _, m := range result.Memos {
+		// Skip done memos
+		if m.Done {
+			continue
+		}
+		// Check if it has a todo-related tag or content pattern
+		isTodo := false
+		for _, t := range m.Tags {
+			if t.Name == "todo" || t.Name == "待办" || t.Name == "任务" {
+				isTodo = true
+				break
+			}
+		}
+		// Also include memos from specific creator or with checkboxes
+		if !isTodo && (len(m.Tags) == 0) {
+			// Show all memos without tags as potential todos
+			isTodo = true
+		}
+		if isTodo {
+			todos = append(todos, fmt.Sprintf("• `[%d]` %s", m.ID, m.Content))
+		}
+	}
+
+	if len(todos) == 0 {
+		return &Response{
+			Success: true,
+			Message: "📋 待办列表\n\n暂无待办事项",
+			IsHTML:  true,
+		}, nil
+	}
+
+	msg := "📋 待办列表\n\n"
+	for _, t := range todos {
+		msg += t + "\n"
+	}
+	msg += "\n💡 使用 `!待办 完成 <ID>` 标记完成"
+
 	return &Response{
 		Success: true,
-		Message: "📋 待办列表\n\n暂无待办事项",
-		IsHTML:  false,
+		Message: msg,
+		IsHTML:  true,
 	}, nil
 }
 
@@ -332,26 +423,120 @@ func (h *DirectMemosHandler) addTodo(ctx context.Context, content string) (*Resp
 		}, nil
 	}
 
-	// Call Memos API to create todo
-	// TODO: Implement based on actual Memos API
+	if h.apiURL == "" || h.apiToken == "" {
+		return &Response{
+			Success: false,
+			Message: "Memos API 未配置，请联系管理员",
+		}, nil
+	}
+
+	url := h.apiURL + "/api/v1/memos"
+	payload := map[string]interface{}{
+		"content": content,
+		"visibility": "PRIVATE",
+	}
+
+	body, _ := json.Marshal(payload)
+	req, err := http.NewRequestWithContext(ctx, "POST", url, bytes.NewReader(body))
+	if err != nil {
+		return nil, err
+	}
+	req.Header.Set("Authorization", "Bearer "+h.apiToken)
+	req.Header.Set("Content-Type", "application/json")
+
+	resp, err := h.httpClient.Do(req)
+	if err != nil {
+		return &Response{
+			Success: false,
+			Message: fmt.Sprintf("❌ 创建待办失败: %v", err),
+		}, nil
+	}
+	defer resp.Body.Close()
+
+	respBody, _ := io.ReadAll(resp.Body)
+
+	if resp.StatusCode >= 400 {
+		return &Response{
+			Success: false,
+			Message: fmt.Sprintf("❌ Memos API 返回错误 (HTTP %d): %s", resp.StatusCode, string(respBody)),
+		}, nil
+	}
+
+	// Parse response to get ID
+	var result struct {
+		Memo struct {
+			ID int `json:"id"`
+		} `json:"memo"`
+	}
+	if err := json.Unmarshal(respBody, &result); err == nil && result.Memo.ID > 0 {
+		return &Response{
+			Success: true,
+			Message: fmt.Sprintf("✅ 已添加待办 [#%d]: %s", result.Memo.ID, content),
+		}, nil
+	}
+
 	return &Response{
 		Success: true,
 		Message: fmt.Sprintf("✅ 已添加待办: %s", content),
 	}, nil
 }
 
-func (h *DirectMemosHandler) completeTodo(ctx context.Context, id string) (*Response, error) {
-	if id == "" {
+func (h *DirectMemosHandler) completeTodo(ctx context.Context, idStr string) (*Response, error) {
+	if idStr == "" {
 		return &Response{
 			Success: false,
 			Message: "请提供待办 ID，例如: `!待办 完成 123`",
 		}, nil
 	}
 
-	// Call Memos API to complete todo
-	// TODO: Implement based on actual Memos API
+	id, err := strconv.Atoi(idStr)
+	if err != nil {
+		return &Response{
+			Success: false,
+			Message: fmt.Sprintf("无效的 ID: %s", idStr),
+		}, nil
+	}
+
+	if h.apiURL == "" || h.apiToken == "" {
+		return &Response{
+			Success: false,
+			Message: "Memos API 未配置，请联系管理员",
+		}, nil
+	}
+
+	url := h.apiURL + "/api/v1/memos/" + strconv.Itoa(id)
+	payload := map[string]interface{}{
+		"done": true,
+	}
+
+	body, _ := json.Marshal(payload)
+	req, err := http.NewRequestWithContext(ctx, "PATCH", url, bytes.NewReader(body))
+	if err != nil {
+		return nil, err
+	}
+	req.Header.Set("Authorization", "Bearer "+h.apiToken)
+	req.Header.Set("Content-Type", "application/json")
+
+	resp, err := h.httpClient.Do(req)
+	if err != nil {
+		return &Response{
+			Success: false,
+			Message: fmt.Sprintf("❌ 标记完成失败: %v", err),
+		}, nil
+	}
+	defer resp.Body.Close()
+
+	respBody, _ := io.ReadAll(resp.Body)
+
+	if resp.StatusCode >= 400 {
+		return &Response{
+			Success: false,
+			Message: fmt.Sprintf("❌ Memos API 返回错误 (HTTP %d): %s", resp.StatusCode, string(respBody)),
+		}, nil
+	}
+
 	return &Response{
 		Success: true,
-		Message: fmt.Sprintf("✅ 已完成待办 #%s", id),
+		Message: fmt.Sprintf("✅ 已完成待办 #%d", id),
 	}, nil
 }

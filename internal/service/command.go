@@ -14,6 +14,7 @@ import (
 type CommandService struct {
 	cfg    config.MatrixConfig
 	n8nCfg config.N8NConfig
+	memosCfg config.MemosConfig
 	router *command.Router
 	client *gateway.Client
 	repos  *repository.Repositories
@@ -23,14 +24,16 @@ type CommandService struct {
 func NewCommandService(
 	cfg config.MatrixConfig,
 	n8nCfg config.N8NConfig,
+	memosCfg config.MemosConfig,
 	repos *repository.Repositories,
 	client *gateway.Client,
 ) *CommandService {
 	svc := &CommandService{
-		cfg:    cfg,
-		n8nCfg: n8nCfg,
-		repos:  repos,
-		client: client,
+		cfg:      cfg,
+		n8nCfg:   n8nCfg,
+		memosCfg: memosCfg,
+		repos:    repos,
+		client:   client,
 	}
 
 	// Create router with command prefix and admin users
@@ -47,7 +50,7 @@ func (s *CommandService) registerHandlers() {
 	// Register built-in handlers
 	// (Already registered by NewRouter)
 
-	// Register n8n webhook handlers
+	// Register n8n webhook handlers (fallback when direct handler not available)
 	if s.n8nCfg.WebhookBaseURL != "" {
 		// Memos Todo webhook
 		memosWebhook := s.n8nCfg.WebhookBaseURL + "/memos-todo"
@@ -68,9 +71,12 @@ func (s *CommandService) registerHandlers() {
 		// TODO: Add more n8n webhook handlers as needed
 	}
 
-	// Register direct handlers (when n8n not available)
-	// These provide basic functionality without n8n
-	// TODO: Implement direct Memos API handler
+	// Register direct handlers (takes priority over n8n handlers)
+	if s.memosCfg.Enabled && s.memosCfg.BaseURL != "" {
+		directMemos := command.NewDirectMemosHandler(s.memosCfg.BaseURL, s.memosCfg.APIToken)
+		s.router.RegisterHandler(directMemos)
+		log.Printf("[Command] registered direct Memos handler")
+	}
 
 	log.Printf("[Command] registered %d commands", len(s.router.ListCommands()))
 }

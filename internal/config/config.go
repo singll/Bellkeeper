@@ -21,6 +21,7 @@ type Config struct {
 	Matrix        MatrixConfig        `mapstructure:"matrix"`
 	Redis         RedisConfig         `mapstructure:"redis"`
 	NATS          NATSConfig          `mapstructure:"nats"`
+	Memos         MemosConfig         `mapstructure:"memos"`
 }
 
 type LLMProxyConfig struct {
@@ -181,6 +182,12 @@ type NATSStreamsConfig struct {
 	Commands      string `mapstructure:"commands"`
 }
 
+type MemosConfig struct {
+	BaseURL  string `mapstructure:"base_url"`
+	APIToken string `mapstructure:"api_token"`
+	Enabled  bool   `mapstructure:"enabled"`
+}
+
 func Load(cfgFile string) (*Config, error) {
 	v := viper.New()
 
@@ -229,6 +236,10 @@ func Load(cfgFile string) (*Config, error) {
 
 	// Expand ${VAR} references in Firecrawl config
 	cfg.FileIngestion.Firecrawl.APIURL = os.ExpandEnv(cfg.FileIngestion.Firecrawl.APIURL)
+
+	// Expand ${VAR} references in Memos config
+	cfg.Memos.BaseURL = os.ExpandEnv(cfg.Memos.BaseURL)
+	cfg.Memos.APIToken = os.ExpandEnv(cfg.Memos.APIToken)
 
 	return &cfg, nil
 }
@@ -328,4 +339,9 @@ func setDefaults(v *viper.Viper) {
 	v.SetDefault("nats.url", "nats://sp-nats:4222")
 	v.SetDefault("nats.streams.notifications", "notifications")
 	v.SetDefault("nats.streams.commands", "commands")
+
+	// Memos
+	v.SetDefault("memos.enabled", false)
+	v.SetDefault("memos.base_url", "")
+	v.SetDefault("memos.api_token", "")
 }
