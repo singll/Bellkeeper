@@ -13,6 +13,7 @@ import (
 // CommandService handles Matrix command execution
 type CommandService struct {
 	cfg    config.MatrixConfig
+	n8nCfg config.N8NConfig
 	router *command.Router
 	client *gateway.Client
 	repos  *repository.Repositories
@@ -21,11 +22,13 @@ type CommandService struct {
 // NewCommandService creates a new command service
 func NewCommandService(
 	cfg config.MatrixConfig,
+	n8nCfg config.N8NConfig,
 	repos *repository.Repositories,
 	client *gateway.Client,
 ) *CommandService {
 	svc := &CommandService{
 		cfg:    cfg,
+		n8nCfg: n8nCfg,
 		repos:  repos,
 		client: client,
 	}
@@ -34,7 +37,43 @@ func NewCommandService(
 	svc.router = command.NewRouter(cfg.CommandPrefix, repos)
 	svc.router.SetAdminUsers([]string{"@singll:matrix.singll.net"}) // TODO: from config
 
+	// Register command handlers
+	svc.registerHandlers()
+
 	return svc
+}
+
+// registerHandlers registers all command handlers
+func (s *CommandService) registerHandlers() {
+	// Register built-in handlers
+	// (Already registered by NewRouter)
+
+	// Register n8n webhook handlers
+	if s.n8nCfg.WebhookBaseURL != "" {
+		// Memos Todo webhook
+		memosWebhook := s.n8nCfg.WebhookBaseURL + "/memos-todo"
+		memosHandler := command.NewN8NTriggerHandler("memos", memosWebhook)
+		s.router.RegisterHandler(memosHandler)
+		s.router.RegisterHandler(command.NewAliasHandler("列表", memosHandler))
+		s.router.RegisterHandler(command.NewAliasHandler("新增", memosHandler))
+		s.router.RegisterHandler(command.NewAliasHandler("完成", memosHandler))
+
+		// QA webhook
+		qaWebhook := s.n8nCfg.WebhookBaseURL + "/qa"
+		qaHandler := command.NewQAHandler(qaWebhook)
+		s.router.RegisterHandler(qaHandler)
+		s.router.RegisterHandler(command.NewAliasHandler("问", qaHandler))
+		s.router.RegisterHandler(command.NewAliasHandler("搜", qaHandler))
+		s.router.RegisterHandler(command.NewAliasHandler("search", qaHandler))
+
+		// TODO: Add more n8n webhook handlers as needed
+	}
+
+	// Register direct handlers (when n8n not available)
+	// These provide basic functionality without n8n
+	// TODO: Implement direct Memos API handler
+
+	log.Printf("[Command] registered %d commands", len(s.router.ListCommands()))
 }
 
 // GetRouter returns the command router

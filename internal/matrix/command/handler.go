@@ -150,3 +150,24 @@ func (h *PingHandler) Handle(ctx context.Context, cmdCtx *Context) (*Response, e
 		IsHTML:  false,
 	}, nil
 }
+
+// AliasHandler wraps another handler with a different name
+type AliasHandler struct {
+	BaseHandler
+	wrapped Handler
+}
+
+func NewAliasHandler(name string, wrapped Handler) *AliasHandler {
+	return &AliasHandler{
+		BaseHandler: BaseHandler{
+			name:        name,
+			description: wrapped.Description(),
+			usage:       wrapped.Usage(),
+		},
+		wrapped: wrapped,
+	}
+}
+
+func (h *AliasHandler) Handle(ctx context.Context, cmdCtx *Context) (*Response, error) {
+	return h.wrapped.Handle(ctx, cmdCtx)
+}
