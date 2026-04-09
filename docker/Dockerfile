@@ -30,6 +30,9 @@ FROM golang:1.24-alpine AS backend-builder
 
 WORKDIR /app
 
+# Allow auto-download of newer Go toolchain if required
+ENV GOTOOLCHAIN=auto
+
 # Install build dependencies
 RUN apk add --no-cache gcc musl-dev
 
