@@ -1,21 +1,65 @@
 package handler
 
 import (
+	"fmt"
 	"net/http"
 	"strconv"
 
 	"github.com/gin-gonic/gin"
+	"github.com/singll/bellkeeper/internal/matrix/policy"
+	"github.com/singll/bellkeeper/internal/middleware"
 	"github.com/singll/bellkeeper/internal/service"
 )
 
 // MatrixAdminHandler handles Matrix admin API requests
 type MatrixAdminHandler struct {
-	adminSvc *service.AdminService
+	adminSvc     *service.AdminService
+	matrixDomain string // e.g., "matrix.singll.net"
 }
 
 // NewMatrixAdminHandler creates a new matrix admin handler
-func NewMatrixAdminHandler(svc *service.AdminService) *MatrixAdminHandler {
-	return &MatrixAdminHandler{adminSvc: svc}
+func NewMatrixAdminHandler(svc *service.AdminService, matrixDomain string) *MatrixAdminHandler {
+	return &MatrixAdminHandler{
+		adminSvc:     svc,
+		matrixDomain: matrixDomain,
+	}
+}
+
+// getCurrentUserID constructs the Matrix user ID from the authenticated user
+func (h *MatrixAdminHandler) getCurrentUserID(c *gin.Context) string {
+	user := middleware.GetUser(c)
+	if user == nil {
+		return ""
+	}
+	// Assume username is the local part of Matrix ID
+	return fmt.Sprintf("@%s:%s", user.Username, h.matrixDomain)
+}
+
+// isAdminOrOwner checks if current user is admin (group) or owner in the target room
+func (h *MatrixAdminHandler) isAdminOrOwner(c *gin.Context, roomID string) bool {
+	user := middleware.GetUser(c)
+	if user == nil {
+		return false
+	}
+
+	// Check if user is in admins group
+	for _, g := range user.Groups {
+		if g == "admins" {
+			return true
+		}
+	}
+
+	// Check if user is owner in the room
+	matrixID := h.getCurrentUserID(c)
+	if matrixID == "" {
+		return false
+	}
+
+	role, err := h.adminSvc.GetUserRolePolicy(c.Request.Context(), matrixID, roomID)
+	if err != nil || role == "" {
+		return false
+	}
+	return role == policy.RoleOwner
 }
 
 // ListRooms handles GET /api/matrix/admin/rooms
@@ -193,6 +237,7 @@ func (h *MatrixAdminHandler) GetUserRole(c *gin.Context) {
 }
 
 // SetUserRole handles POST /api/matrix/admin/roles
+// Requires admin group or room owner permission
 func (h *MatrixAdminHandler) SetUserRole(c *gin.Context) {
 	var req struct {
 		UserID string `json:"user_id" binding:"required"`
@@ -201,6 +246,12 @@ func (h *MatrixAdminHandler) SetUserRole(c *gin.Context) {
 	}
 	if err := c.ShouldBindJSON(&req); err != nil {
 		c.JSON(http.StatusBadRequest, gin.H{"error": err.Error()})
+		return
+	}
+
+	// Permission check: must be admin group or room owner
+	if !h.isAdminOrOwner(c, req.RoomID) {
+		c.JSON(http.StatusForbidden, gin.H{"error": "permission denied: requires admin group or room owner"})
 		return
 	}
 
@@ -220,11 +271,18 @@ func (h *MatrixAdminHandler) SetUserRole(c *gin.Context) {
 
 // RemoveUserRole handles DELETE /api/matrix/admin/roles/:user_id
 // Query params: room_id (required)
+// Requires admin group or room owner permission
 func (h *MatrixAdminHandler) RemoveUserRole(c *gin.Context) {
 	userID := c.Param("user_id")
 	roomID := c.Query("room_id")
 	if roomID == "" {
 		c.JSON(http.StatusBadRequest, gin.H{"error": "room_id required"})
+		return
+	}
+
+	// Permission check: must be admin group or room owner
+	if !h.isAdminOrOwner(c, roomID) {
+		c.JSON(http.StatusForbidden, gin.H{"error": "permission denied: requires admin group or room owner"})
 		return
 	}
 

@@ -49,7 +49,9 @@ func NewHandlers(services *service.Services, shutdownChan chan struct{}) *Handle
 		h.MatrixNotify = NewMatrixNotifyHandler(services.Notification)
 	}
 	if services.MatrixAdmin != nil {
-		h.MatrixAdmin = NewMatrixAdminHandler(services.MatrixAdmin)
+		// Matrix domain from config - default to matrix.singll.net
+		matrixDomain := "matrix.singll.net"
+		h.MatrixAdmin = NewMatrixAdminHandler(services.MatrixAdmin, matrixDomain)
 	}
 
 	return h

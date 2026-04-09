@@ -5,18 +5,35 @@ import (
 	"encoding/json"
 	"time"
 
+	"github.com/singll/bellkeeper/internal/matrix/policy"
 	"github.com/singll/bellkeeper/internal/model"
 	"github.com/singll/bellkeeper/internal/repository"
 )
 
 // AdminService provides admin operations for Matrix platform
 type AdminService struct {
-	repos *repository.Repositories
+	repos  *repository.Repositories
+	policy *policy.Checker
 }
 
 // NewAdminService creates a new admin service
-func NewAdminService(repos *repository.Repositories) *AdminService {
-	return &AdminService{repos: repos}
+func NewAdminService(repos *repository.Repositories, policyChecker *policy.Checker) *AdminService {
+	return &AdminService{
+		repos:  repos,
+		policy: policyChecker,
+	}
+}
+
+// GetUserRolePolicy gets a user's role as a policy.Role (for permission checks)
+func (s *AdminService) GetUserRolePolicy(ctx context.Context, userID, roomID string) (policy.Role, error) {
+	userRole, err := s.repos.MatrixUserRole.GetByUserAndRoom(ctx, userID, roomID)
+	if err != nil {
+		return "", err
+	}
+	if userRole == nil {
+		return "", nil // Not found
+	}
+	return policy.ParseRole(userRole.Role), nil
 }
 
 // ============ Room Management ============

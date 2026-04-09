@@ -13,6 +13,7 @@ import (
 	"github.com/singll/bellkeeper/internal/config"
 	"github.com/singll/bellkeeper/internal/handler"
 	"github.com/singll/bellkeeper/internal/middleware"
+	"github.com/singll/bellkeeper/internal/matrix/policy"
 	"github.com/singll/bellkeeper/internal/model"
 	"github.com/singll/bellkeeper/internal/repository"
 	"github.com/singll/bellkeeper/internal/router"
@@ -137,7 +138,9 @@ func runServer(cmd *cobra.Command, args []string) {
 		}
 
 		// Initialize Admin Service for Matrix platform management
-		services.MatrixAdmin = service.NewAdminService(repos)
+		// Create a policy checker for permission validation
+		adminPolicy := policy.NewChecker(repos, []string{})
+		services.MatrixAdmin = service.NewAdminService(repos, adminPolicy)
 		handlers = handler.NewHandlers(services, shutdownChan) // recreate to include admin handler
 	}
 
