@@ -11,6 +11,11 @@ func Setup(r *gin.Engine, handlers *handler.Handlers, mode string, apiKey string
 	// Health check (no auth required)
 	r.GET("/api/health", handlers.Health.Check)
 	r.GET("/api/health/detailed", handlers.Health.Detailed)
+	r.GET("/api/health/live", handlers.Health.Liveness)
+	r.GET("/api/health/ready", handlers.Health.Readiness)
+
+	// Prometheus metrics endpoint (no auth required)
+	r.GET("/metrics", handler.MetricsHandler())
 
 	// API routes (with Authelia auth + API Key support)
 	api := r.Group("/api")
@@ -27,6 +32,8 @@ func Setup(r *gin.Engine, handlers *handler.Handlers, mode string, apiKey string
 	registerClassifyRoutes(api, handlers.Classify)
 	registerActivityLogRoutes(api, handlers.ActivityLog)
 	registerFileIngestionRoutes(api, handlers.FileIngestion)
+	registerLogLevelRoutes(api, handlers.LogLevel)
+	registerConfigRoutes(api, handlers.Config)
 
 	// Matrix notification routes
 	if handlers.MatrixNotify != nil {
@@ -191,4 +198,14 @@ func registerMatrixAdminRoutes(api *gin.RouterGroup, h *handler.MatrixAdminHandl
 	admin.GET("/events", h.GetEventLogs)
 	admin.GET("/notifications", h.GetNotificationLogs)
 	admin.GET("/stats", h.GetStats)
+}
+
+func registerLogLevelRoutes(api *gin.RouterGroup, h *handler.LogLevelHandler) {
+	api.GET("/logging/level", h.GetLevel)
+	api.PUT("/logging/level", h.SetLevel)
+}
+
+func registerConfigRoutes(api *gin.RouterGroup, h *handler.ConfigHandler) {
+	api.POST("/config/reload", h.ReloadAll)
+	api.POST("/config/reload/llm-proxy", h.ReloadLLMProxy)
 }

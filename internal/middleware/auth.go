@@ -1,6 +1,7 @@
 package middleware
 
 import (
+	"crypto/subtle"
 	"net/http"
 	"strings"
 
@@ -19,7 +20,8 @@ type UserInfo struct {
 func AutheliaAuth(mode string, apiKey string) gin.HandlerFunc {
 	return func(c *gin.Context) {
 		// 1. API Key authentication (for internal service calls like n8n)
-		if apiKey != "" && c.GetHeader("X-API-Key") == apiKey {
+		// Use constant-time comparison to prevent timing attacks
+		if apiKey != "" && subtle.ConstantTimeCompare([]byte(c.GetHeader("X-API-Key")), []byte(apiKey)) == 1 {
 			c.Set("user", UserInfo{
 				Username: "api-service",
 				Email:    "api@internal",

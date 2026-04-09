@@ -12,6 +12,13 @@ import Workflows from './pages/Workflows'
 import LLMProxy from './pages/LLMProxy'
 import Logs from './pages/Logs'
 import Settings from './pages/Settings'
+import MatrixDashboard from './pages/MatrixDashboard'
+import MatrixRooms from './pages/MatrixRooms'
+import MatrixChannels from './pages/MatrixChannels'
+import MatrixCommands from './pages/MatrixCommands'
+import MatrixNotifications from './pages/MatrixNotifications'
+import MatrixEvents from './pages/MatrixEvents'
+import MatrixCommandLogs from './pages/MatrixCommandLogs'
 import './index.css'
 
 const root = document.getElementById('root')
@@ -28,6 +35,13 @@ render(() => (
       <Route path="/llm-proxy" component={LLMProxy} />
       <Route path="/logs" component={Logs} />
       <Route path="/settings" component={Settings} />
+      <Route path="/matrix" component={MatrixDashboard} />
+      <Route path="/matrix/rooms" component={MatrixRooms} />
+      <Route path="/matrix/channels" component={MatrixChannels} />
+      <Route path="/matrix/commands" component={MatrixCommands} />
+      <Route path="/matrix/notifications" component={MatrixNotifications} />
+      <Route path="/matrix/events" component={MatrixEvents} />
+      <Route path="/matrix/command-logs" component={MatrixCommandLogs} />
     </Router>
   </ToastProvider>
 ), root!)

@@ -14,6 +14,13 @@ import type {
   ActivityLogsPage,
   ModuleStat,
   ParseTask,
+  MatrixRoom,
+  MatrixChannel,
+  MatrixCommand,
+  MatrixNotification,
+  MatrixEvent,
+  MatrixCommandLog,
+  MatrixStats,
 } from '@/types'
 
 const API_BASE = '/api'
@@ -320,5 +327,118 @@ export const logsApi = {
   stats: (since?: string) => {
     const p = since ? `?since=${encodeURIComponent(since)}` : ''
     return request<{ data: ModuleStat[] }>(`/logs/stats${p}`)
+  },
+}
+
+// Matrix Platform API
+export const matrixApi = {
+  // Stats
+  getStats: () =>
+    request<{ data: MatrixStats }>('/matrix/admin/stats'),
+
+  // Rooms
+  listRooms: (params?: { page?: number; page_size?: number }) => {
+    const p = new URLSearchParams()
+    if (params?.page) p.set('page', String(params.page))
+    if (params?.page_size) p.set('page_size', String(params.page_size))
+    return request<{ data: PaginatedResponse<MatrixRoom> }>(`/matrix/admin/rooms?${p}`)
+  },
+
+  createRoom: (data: Partial<MatrixRoom>) =>
+    request<{ data: MatrixRoom }>('/matrix/admin/rooms', {
+      method: 'POST',
+      body: JSON.stringify(data),
+    }),
+
+  updateRoom: (id: number, data: Partial<MatrixRoom>) =>
+    request<{ data: MatrixRoom }>(`/matrix/admin/rooms/${id}`, {
+      method: 'PUT',
+      body: JSON.stringify(data),
+    }),
+
+  deleteRoom: (id: number) =>
+    request<{ message: string }>(`/matrix/admin/rooms/${id}`, { method: 'DELETE' }),
+
+  // Channels
+  listChannels: () =>
+    request<{ data: MatrixChannel[] }>('/matrix/admin/channels'),
+
+  createChannel: (data: Partial<MatrixChannel>) =>
+    request<{ data: MatrixChannel }>('/matrix/admin/channels', {
+      method: 'POST',
+      body: JSON.stringify(data),
+    }),
+
+  updateChannel: (id: number, data: Partial<MatrixChannel>) =>
+    request<{ data: MatrixChannel }>(`/matrix/admin/channels/${id}`, {
+      method: 'PUT',
+      body: JSON.stringify(data),
+    }),
+
+  deleteChannel: (id: number) =>
+    request<{ message: string }>(`/matrix/admin/channels/${id}`, { method: 'DELETE' }),
+
+  // Commands
+  listCommands: () =>
+    request<{ data: MatrixCommand[] }>('/matrix/admin/commands'),
+
+  createCommand: (data: Partial<MatrixCommand>) =>
+    request<{ data: MatrixCommand }>('/matrix/admin/commands', {
+      method: 'POST',
+      body: JSON.stringify(data),
+    }),
+
+  updateCommand: (id: number, data: Partial<MatrixCommand>) =>
+    request<{ data: MatrixCommand }>(`/matrix/admin/commands/${id}`, {
+      method: 'PUT',
+      body: JSON.stringify(data),
+    }),
+
+  deleteCommand: (id: number) =>
+    request<{ message: string }>(`/matrix/admin/commands/${id}`, { method: 'DELETE' }),
+
+  testCommand: (id: number, data: { room_id: string; user_id: string; args: string }) =>
+    request<{ message: string; response?: string; duration_ms?: number }>(
+      `/matrix/admin/commands/${id}/test`,
+      { method: 'POST', body: JSON.stringify(data) }
+    ),
+
+  // Notifications
+  listNotifications: (params?: { page?: number; page_size?: number; channel?: string; status?: string }) => {
+    const p = new URLSearchParams()
+    if (params?.page) p.set('page', String(params.page))
+    if (params?.page_size) p.set('page_size', String(params.page_size))
+    if (params?.channel) p.set('channel', params.channel)
+    if (params?.status) p.set('status', params.status)
+    return request<{ data: PaginatedResponse<MatrixNotification> }>(`/matrix/admin/notifications?${p}`)
+  },
+
+  getNotification: (id: number) =>
+    request<{ data: MatrixNotification }>(`/matrix/admin/notifications/${id}`),
+
+  retryNotification: (id: number) =>
+    request<{ message: string }>(`/matrix/admin/notifications/${id}/retry`, { method: 'POST' }),
+
+  // Events
+  listEvents: (params?: { page?: number; page_size?: number; event_type?: string; room_id?: string }) => {
+    const p = new URLSearchParams()
+    if (params?.page) p.set('page', String(params.page))
+    if (params?.page_size) p.set('page_size', String(params.page_size))
+    if (params?.event_type) p.set('event_type', params.event_type)
+    if (params?.room_id) p.set('room_id', params.room_id)
+    return request<{ data: PaginatedResponse<MatrixEvent> }>(`/matrix/admin/events?${p}`)
+  },
+
+  getEvent: (id: number) =>
+    request<{ data: MatrixEvent }>(`/matrix/admin/events/${id}`),
+
+  // Command Logs
+  listCommandLogs: (params?: { page?: number; page_size?: number; command?: string; status?: string }) => {
+    const p = new URLSearchParams()
+    if (params?.page) p.set('page', String(params.page))
+    if (params?.page_size) p.set('page_size', String(params.page_size))
+    if (params?.command) p.set('command', params.command)
+    if (params?.status) p.set('status', params.status)
+    return request<{ data: PaginatedResponse<MatrixCommandLog> }>(`/matrix/admin/command-logs?${p}`)
   },
 }

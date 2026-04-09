@@ -2,6 +2,7 @@ package service
 
 import (
 	"encoding/json"
+	"log"
 	"time"
 
 	"github.com/singll/bellkeeper/internal/model"
@@ -34,7 +35,7 @@ func (s *ActivityLogService) LogActivity(p LogActivityParams) {
 				detailStr = string(b)
 			}
 		}
-		_ = s.repo.Create(&model.ActivityLog{
+		entry := &model.ActivityLog{
 			Module:     p.Module,
 			Action:     p.Action,
 			Status:     p.Status,
@@ -43,7 +44,10 @@ func (s *ActivityLogService) LogActivity(p LogActivityParams) {
 			RefID:      p.RefID,
 			DurationMs: p.DurationMs,
 			CreatedAt:  time.Now(),
-		})
+		}
+		if err := s.repo.Create(entry); err != nil {
+			log.Printf("[ERROR] failed to log activity: module=%s action=%s error=%v", p.Module, p.Action, err)
+		}
 	}()
 }
 

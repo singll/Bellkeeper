@@ -18,6 +18,8 @@ type Handlers struct {
 	Classify      *ClassifyHandler
 	ActivityLog   *ActivityLogHandler
 	FileIngestion *FileIngestionHandler
+	LogLevel      *LogLevelHandler
+	Config        *ConfigHandler
 	// Optional handlers
 	MatrixNotify *MatrixNotifyHandler
 	MatrixAdmin  *MatrixAdminHandler
@@ -38,6 +40,8 @@ func NewHandlers(services *service.Services, shutdownChan chan struct{}) *Handle
 		Classify:      NewClassifyHandler(services.Classify),
 		ActivityLog:   NewActivityLogHandler(services.ActivityLog),
 		FileIngestion: NewFileIngestionHandler(services.FileIngestion),
+		LogLevel:      NewLogLevelHandler(),
+		Config:        NewConfigHandler(services.LLMProxy),
 	}
 
 	// Set optional handlers

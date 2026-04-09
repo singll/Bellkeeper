@@ -85,6 +85,11 @@ func runServer(cmd *cobra.Command, args []string) {
 		log.Fatalf("Failed to run migrations: %v", err)
 	}
 
+	// Initialize logger
+	if err := middleware.InitLogger(cfg.Logging.Level); err != nil {
+		log.Fatalf("Failed to initialize logger: %v", err)
+	}
+
 	// Shutdown channel for restart functionality
 	shutdownChan := make(chan struct{}, 1)
 
@@ -243,6 +248,29 @@ func runServer(cmd *cobra.Command, args []string) {
 
 	if err := srv.Shutdown(ctx); err != nil {
 		log.Printf("Server forced shutdown: %v", err)
+	}
+
+	// Shutdown Matrix infrastructure in reverse order of initialization
+	log.Println("Shutting down Matrix infrastructure...")
+
+	// Stop Matrix sync loop
+	if matrixSyncLoop != nil {
+		matrixSyncLoop.Stop()
+	}
+
+	// Stop notification worker
+	if notifyWorker != nil {
+		notifyWorker.Stop()
+	}
+
+	// Close NATS connection
+	if natsClient != nil {
+		natsClient.Close()
+	}
+
+	// Close Redis connection
+	if redisClient != nil {
+		redisClient.Close()
 	}
 
 	// Close database connection

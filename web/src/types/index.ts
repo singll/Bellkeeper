@@ -236,3 +236,87 @@ export interface ParseTask {
   completed_at?: string
   log?: string[]
 }
+
+// Matrix Platform Types
+
+export interface MatrixRoom {
+  id: number
+  room_id: string
+  name: string
+  alias?: string
+  is_public: boolean
+  is_encrypted: boolean
+  topic?: string
+  member_count?: number
+  created_at: string
+  updated_at: string
+}
+
+export interface MatrixChannel {
+  id: number
+  name: string
+  display_name: string
+  room_id: string
+  description?: string
+  message_count?: number
+  created_at: string
+  updated_at: string
+}
+
+export interface MatrixCommand {
+  id: number
+  name: string
+  description: string
+  handler_type: 'builtin' | 'n8n' | 'api'
+  handler_config: Record<string, unknown>
+  permission_scope: string
+  is_enabled: boolean
+  usage_count?: number
+  created_at: string
+  updated_at: string
+}
+
+export interface MatrixNotification {
+  id: number
+  channel_name: string
+  message_type: 'text' | 'html' | 'markdown'
+  message_content: string
+  status: 'pending' | 'sent' | 'failed'
+  retry_count: number
+  error_message?: string
+  created_at: string
+  sent_at?: string
+}
+
+export interface MatrixEvent {
+  id: number
+  event_type: string
+  room_id: string
+  sender: string
+  content?: string
+  processing_status?: string
+  error_message?: string
+  created_at: string
+}
+
+export interface MatrixCommandLog {
+  id: number
+  command_name: string
+  user_id: string
+  room_id: string
+  args?: string
+  status: 'success' | 'failed'
+  response?: string
+  error_message?: string
+  duration_ms: number
+  created_at: string
+}
+
+export interface MatrixStats {
+  rooms_count: number
+  channels_count: number
+  commands_count: number
+  messages_24h: number
+  events_24h: number
+  command_executions_24h: number
+}

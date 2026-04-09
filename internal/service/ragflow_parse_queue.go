@@ -116,7 +116,7 @@ func (t *ParseTask) addLog(msg string) {
 	log.Printf("info: [parse-queue %s] %s", id, msg)
 }
 
-func (t *ParseTask) snapshot() ParseTask {
+func (t *ParseTask) snapshot() *ParseTask {
 	t.mu.Lock()
 	defer t.mu.Unlock()
 	failedDocs := make([]FailedDoc, len(t.FailedDocs))
@@ -129,7 +129,7 @@ func (t *ParseTask) snapshot() ParseTask {
 		copied := *state
 		docStates = append(docStates, copied)
 	}
-	return ParseTask{
+	snap := &ParseTask{
 		ID:                 t.ID,
 		Status:             t.Status,
 		Total:              t.Total,
@@ -153,6 +153,7 @@ func (t *ParseTask) snapshot() ParseTask {
 		CompletedAt:        t.CompletedAt,
 		Log:                logs,
 	}
+	return snap
 }
 
 func (t *ParseTask) initDocStates(items []ParseQueueItem) {
@@ -494,13 +495,12 @@ func (s *RagFlowService) GetParseTask(taskID string) *ParseTask {
 		return nil
 	}
 	task := v.(*ParseTask)
-	snap := task.snapshot()
-	return &snap
+	return task.snapshot()
 }
 
 // ListParseTasks returns snapshots of all parse tasks currently tracked in memory.
-func (s *RagFlowService) ListParseTasks() []ParseTask {
-	var out []ParseTask
+func (s *RagFlowService) ListParseTasks() []*ParseTask {
+	var out []*ParseTask
 	parseTasks.Range(func(_, v any) bool {
 		task := v.(*ParseTask)
 		snap := task.snapshot()
