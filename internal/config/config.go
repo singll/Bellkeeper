@@ -223,6 +223,13 @@ func Load(cfgFile string) (*Config, error) {
 		cfg.LLMProxy.Channels[i].APIKey = os.ExpandEnv(cfg.LLMProxy.Channels[i].APIKey)
 	}
 
+	// Expand ${VAR} references in Matrix config
+	cfg.Matrix.HomeserverURL = os.ExpandEnv(cfg.Matrix.HomeserverURL)
+	cfg.Matrix.BotAccessToken = os.ExpandEnv(cfg.Matrix.BotAccessToken)
+
+	// Expand ${VAR} references in Firecrawl config
+	cfg.FileIngestion.Firecrawl.APIURL = os.ExpandEnv(cfg.FileIngestion.Firecrawl.APIURL)
+
 	return &cfg, nil
 }
 
