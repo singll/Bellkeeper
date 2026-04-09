@@ -130,6 +130,10 @@ func runServer(cmd *cobra.Command, args []string) {
 		if err := notifyWorker.Start(context.Background()); err != nil {
 			log.Fatalf("Failed to start notification worker: %v", err)
 		}
+
+		// Initialize Admin Service for Matrix platform management
+		services.MatrixAdmin = service.NewAdminService(repos)
+		handlers = handler.NewHandlers(services, shutdownChan) // recreate to include admin handler
 	}
 
 	// Initialize Matrix Gateway (if bot token configured)

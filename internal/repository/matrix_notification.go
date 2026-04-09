@@ -72,3 +72,13 @@ func (r *MatrixNotificationRepository) GetByChannel(ctx context.Context, channel
 		Find(&notifications).Error
 	return notifications, err
 }
+
+func (r *MatrixNotificationRepository) GetRecent(ctx context.Context, limit int) ([]*model.MatrixNotification, error) {
+	var notifications []*model.MatrixNotification
+	err := r.db.WithContext(ctx).
+		Where("created_at > ?", time.Now().Add(-24*time.Hour)).
+		Order("created_at DESC").
+		Limit(limit).
+		Find(&notifications).Error
+	return notifications, err
+}

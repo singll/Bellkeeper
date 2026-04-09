@@ -1,6 +1,7 @@
 package repository
 
 import (
+	"context"
 	"time"
 
 	"github.com/singll/bellkeeper/internal/model"
@@ -78,4 +79,14 @@ func (r *MatrixEventRepository) List(q MatrixEventQuery) ([]model.MatrixEvent, i
 		return nil, 0, err
 	}
 	return events, total, nil
+}
+
+func (r *MatrixEventRepository) GetRecent(ctx context.Context, limit int) ([]*model.MatrixEvent, error) {
+	var events []*model.MatrixEvent
+	err := r.db.WithContext(ctx).
+		Where("created_at > ?", time.Now().Add(-24*time.Hour)).
+		Order("created_at DESC").
+		Limit(limit).
+		Find(&events).Error
+	return events, err
 }

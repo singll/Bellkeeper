@@ -32,6 +32,9 @@ func Setup(r *gin.Engine, handlers *handler.Handlers, mode string, apiKey string
 	if handlers.MatrixNotify != nil {
 		registerMatrixNotifyRoutes(api, handlers.MatrixNotify)
 	}
+	if handlers.MatrixAdmin != nil {
+		registerMatrixAdminRoutes(api, handlers.MatrixAdmin)
+	}
 }
 
 func registerTagRoutes(api *gin.RouterGroup, h *handler.TagHandler) {
@@ -176,4 +179,16 @@ func registerMatrixNotifyRoutes(api *gin.RouterGroup, h *handler.MatrixNotifyHan
 	matrix.GET("/notify/:id", h.GetStatus)
 	matrix.GET("/notify/channels", h.ListChannels)
 	matrix.POST("/notify/channels/reload", h.ReloadChannels)
+}
+
+func registerMatrixAdminRoutes(api *gin.RouterGroup, h *handler.MatrixAdminHandler) {
+	admin := api.Group("/matrix/admin")
+	admin.GET("/rooms", h.ListRooms)
+	admin.POST("/rooms", h.CreateRoom)
+	admin.GET("/channels", h.ListChannels)
+	admin.PUT("/channels/:name", h.UpdateChannel)
+	admin.GET("/commands", h.ListCommands)
+	admin.GET("/events", h.GetEventLogs)
+	admin.GET("/notifications", h.GetNotificationLogs)
+	admin.GET("/stats", h.GetStats)
 }

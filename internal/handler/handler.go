@@ -20,6 +20,7 @@ type Handlers struct {
 	FileIngestion *FileIngestionHandler
 	// Optional handlers
 	MatrixNotify *MatrixNotifyHandler
+	MatrixAdmin  *MatrixAdminHandler
 }
 
 // NewHandlers creates all handler instances
@@ -42,6 +43,9 @@ func NewHandlers(services *service.Services, shutdownChan chan struct{}) *Handle
 	// Set optional handlers
 	if services.Notification != nil {
 		h.MatrixNotify = NewMatrixNotifyHandler(services.Notification)
+	}
+	if services.MatrixAdmin != nil {
+		h.MatrixAdmin = NewMatrixAdminHandler(services.MatrixAdmin)
 	}
 
 	return h

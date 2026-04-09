@@ -20,6 +20,7 @@ type Services struct {
 	FileIngestion *FileIngestionService
 	// Optional services (initialized in main.go with infra dependencies)
 	Notification *NotificationService
+	MatrixAdmin  *AdminService
 }
 
 // NewServices creates all service instances
