@@ -47,6 +47,13 @@ func AutoMigrate(db *gorm.DB) error {
 		&LLMModelGroup{},
 		&LLMModelGroupMember{},
 		&ActivityLog{},
+		&MatrixRoom{},
+		&MatrixChannel{},
+		&MatrixCommand{},
+		&MatrixEvent{},
+		&MatrixNotification{},
+		&MatrixCommandLog{},
+		&MatrixSyncState{},
 	); err != nil {
 		return err
 	}
@@ -55,7 +62,11 @@ func AutoMigrate(db *gorm.DB) error {
 		return err
 	}
 
-	return SeedDatasetMappings(db)
+	if err := SeedDatasetMappings(db); err != nil {
+		return err
+	}
+
+	return SeedMatrixPlatform(db)
 }
 
 // AutoMigrateWithLLMSeed runs migrations and seeds LLM proxy config from YAML if DB is empty.

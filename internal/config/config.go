@@ -9,14 +9,18 @@ import (
 )
 
 type Config struct {
-	Server   ServerConfig   `mapstructure:"server"`
-	Database DatabaseConfig `mapstructure:"database"`
-	RagFlow  RagFlowConfig  `mapstructure:"ragflow"`
-	N8N      N8NConfig      `mapstructure:"n8n"`
-	Logging  LoggingConfig  `mapstructure:"logging"`
-	Features FeatureConfig  `mapstructure:"features"`
-	LLMProxy LLMProxyConfig `mapstructure:"llm_proxy"`
-	Classify ClassifyConfig `mapstructure:"classify"`
+	Server        ServerConfig        `mapstructure:"server"`
+	Database      DatabaseConfig      `mapstructure:"database"`
+	RagFlow       RagFlowConfig       `mapstructure:"ragflow"`
+	N8N           N8NConfig           `mapstructure:"n8n"`
+	Logging       LoggingConfig       `mapstructure:"logging"`
+	Features      FeatureConfig       `mapstructure:"features"`
+	LLMProxy      LLMProxyConfig      `mapstructure:"llm_proxy"`
+	Classify      ClassifyConfig      `mapstructure:"classify"`
+	FileIngestion FileIngestionConfig `mapstructure:"file_ingestion"`
+	Matrix        MatrixConfig        `mapstructure:"matrix"`
+	Redis         RedisConfig         `mapstructure:"redis"`
+	NATS          NATSConfig          `mapstructure:"nats"`
 }
 
 type LLMProxyConfig struct {
@@ -127,6 +131,56 @@ type ClassifyConfig struct {
 	Prompt        string  `mapstructure:"prompt"`  // empty = use built-in default
 }
 
+type FileIngestionConfig struct {
+	Enabled     bool              `mapstructure:"enabled"`
+	BasePath    string            `mapstructure:"base_path"`
+	RawDir      string            `mapstructure:"raw_dir"`
+	WorkingDir  string            `mapstructure:"working_dir"`
+	DefaultLayer string           `mapstructure:"default_layer"`
+	Trafilatura TrafilaturaConfig `mapstructure:"trafilatura"`
+	Firecrawl   FirecrawlConfig   `mapstructure:"firecrawl"`
+}
+
+type TrafilaturaConfig struct {
+	Enabled          bool `mapstructure:"enabled"`
+	Timeout          int  `mapstructure:"timeout"`
+	MinContentLength int  `mapstructure:"min_content_length"`
+}
+
+type FirecrawlConfig struct {
+	Enabled      bool   `mapstructure:"enabled"`
+	APIURL       string `mapstructure:"api_url"`
+	Timeout      int    `mapstructure:"timeout"`
+	FallbackOnly bool   `mapstructure:"fallback_only"`
+}
+
+type MatrixConfig struct {
+	HomeserverURL  string `mapstructure:"homeserver_url"`
+	BotUserID      string `mapstructure:"bot_user_id"`
+	BotAccessToken string `mapstructure:"bot_access_token"`
+	DeviceID       string `mapstructure:"device_id"`
+	SyncTimeout    int    `mapstructure:"sync_timeout"`     // milliseconds
+	CommandPrefix  string `mapstructure:"command_prefix"`   // comma-separated prefixes
+	MaxRetry       int    `mapstructure:"max_retry"`
+}
+
+type RedisConfig struct {
+	Host     string `mapstructure:"host"`
+	Port     int    `mapstructure:"port"`
+	DB       int    `mapstructure:"db"`
+	Password string `mapstructure:"password"`
+}
+
+type NATSConfig struct {
+	URL     string              `mapstructure:"url"`
+	Streams NATSStreamsConfig   `mapstructure:"streams"`
+}
+
+type NATSStreamsConfig struct {
+	Notifications string `mapstructure:"notifications"`
+	Commands      string `mapstructure:"commands"`
+}
+
 func Load(cfgFile string) (*Config, error) {
 	v := viper.New()
 
@@ -233,4 +287,38 @@ func setDefaults(v *viper.Viper) {
 	v.SetDefault("classify.max_content_len", 1000)
 	v.SetDefault("classify.timeout", 5)
 	v.SetDefault("classify.prompt", "")
+
+	// File Ingestion
+	v.SetDefault("file_ingestion.enabled", false)
+	v.SetDefault("file_ingestion.base_path", "/mnt/knowledge")
+	v.SetDefault("file_ingestion.raw_dir", "raw")
+	v.SetDefault("file_ingestion.working_dir", "working")
+	v.SetDefault("file_ingestion.default_layer", "raw")
+	v.SetDefault("file_ingestion.trafilatura.enabled", true)
+	v.SetDefault("file_ingestion.trafilatura.timeout", 15)
+	v.SetDefault("file_ingestion.trafilatura.min_content_length", 100)
+	v.SetDefault("file_ingestion.firecrawl.enabled", true)
+	v.SetDefault("file_ingestion.firecrawl.api_url", "")
+	v.SetDefault("file_ingestion.firecrawl.timeout", 60)
+	v.SetDefault("file_ingestion.firecrawl.fallback_only", true)
+
+	// Matrix
+	v.SetDefault("matrix.homeserver_url", "https://matrix.singll.net")
+	v.SetDefault("matrix.bot_user_id", "@bellkeeper:matrix.singll.net")
+	v.SetDefault("matrix.bot_access_token", "")
+	v.SetDefault("matrix.device_id", "BELLKEEPER_KEEPER")
+	v.SetDefault("matrix.sync_timeout", 30000)
+	v.SetDefault("matrix.command_prefix", "!,！")
+	v.SetDefault("matrix.max_retry", 3)
+
+	// Redis
+	v.SetDefault("redis.host", "sp-redis")
+	v.SetDefault("redis.port", 6379)
+	v.SetDefault("redis.db", 0)
+	v.SetDefault("redis.password", "")
+
+	// NATS
+	v.SetDefault("nats.url", "nats://sp-nats:4222")
+	v.SetDefault("nats.streams.notifications", "notifications")
+	v.SetDefault("nats.streams.commands", "commands")
 }

@@ -17,6 +17,8 @@ import (
 	"github.com/singll/bellkeeper/internal/repository"
 	"github.com/singll/bellkeeper/internal/router"
 	"github.com/singll/bellkeeper/internal/service"
+	"github.com/singll/bellkeeper/internal/matrix/gateway"
+	"github.com/singll/bellkeeper/internal/matrix/infra"
 
 	"github.com/gin-gonic/gin"
 	"github.com/spf13/cobra"
@@ -89,6 +91,42 @@ func runServer(cmd *cobra.Command, args []string) {
 	repos := repository.NewRepositories(db)
 	services := service.NewServices(repos, cfg, version)
 	handlers := handler.NewHandlers(services, shutdownChan)
+
+	// Initialize Matrix Gateway (if configured)
+	var matrixSyncLoop *gateway.SyncLoop
+	if cfg.Matrix.BotAccessToken != "" {
+		log.Println("[Matrix] initializing Matrix Gateway...")
+
+		// Initialize Redis
+		redisClient, err := infra.NewRedisClient(cfg.Redis)
+		if err != nil {
+			log.Fatalf("Failed to initialize Redis: %v", err)
+		}
+		defer redisClient.Close()
+
+		// Initialize NATS
+		natsClient, err := infra.NewNATSClient(cfg.NATS)
+		if err != nil {
+			log.Fatalf("Failed to initialize NATS: %v", err)
+		}
+		defer natsClient.Close()
+
+		// Initialize Matrix client
+		matrixClient, err := gateway.NewClient(cfg.Matrix, redisClient, repos)
+		if err != nil {
+			log.Fatalf("Failed to initialize Matrix client: %v", err)
+		}
+
+		// Create and start sync loop
+		matrixSyncLoop = gateway.NewSyncLoop(matrixClient)
+		if err := matrixSyncLoop.Start(context.Background()); err != nil {
+			log.Fatalf("Failed to start Matrix sync loop: %v", err)
+		}
+
+		log.Println("[Matrix] Matrix Gateway started successfully")
+	} else {
+		log.Println("[Matrix] Matrix Gateway disabled (no bot token configured)")
+	}
 
 	// Auto-sync dataset mappings with RAGFlow in background
 	go func() {

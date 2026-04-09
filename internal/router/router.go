@@ -26,6 +26,7 @@ func Setup(r *gin.Engine, handlers *handler.Handlers, mode string, apiKey string
 	registerLLMProxyRoutes(api, handlers.LLMProxy)
 	registerClassifyRoutes(api, handlers.Classify)
 	registerActivityLogRoutes(api, handlers.ActivityLog)
+	registerFileIngestionRoutes(api, handlers.FileIngestion)
 }
 
 func registerTagRoutes(api *gin.RouterGroup, h *handler.TagHandler) {
@@ -155,4 +156,11 @@ func registerActivityLogRoutes(api *gin.RouterGroup, h *handler.ActivityLogHandl
 	api.GET("/logs", h.List)
 	api.GET("/logs/modules", h.Modules)
 	api.GET("/logs/stats", h.Stats)
+}
+
+func registerFileIngestionRoutes(api *gin.RouterGroup, h *handler.FileIngestionHandler) {
+	files := api.Group("/files")
+	files.POST("/ingest/url", h.IngestURL)
+	files.GET("/metadata/:id", h.GetMetadata)
+	files.GET("/list", h.List)
 }

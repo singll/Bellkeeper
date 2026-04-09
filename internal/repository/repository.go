@@ -14,6 +14,7 @@ type Repositories struct {
 	LLMChannel     *LLMChannelRepository
 	LLMModelGroup  *LLMModelGroupRepository
 	ActivityLog    *ActivityLogRepository
+	ArticleTag     *ArticleTagRepository
 }
 
 // NewRepositories creates all repository instances
@@ -27,5 +28,6 @@ func NewRepositories(db *gorm.DB) *Repositories {
 		LLMChannel:     NewLLMChannelRepository(db),
 		LLMModelGroup:  NewLLMModelGroupRepository(db),
 		ActivityLog:    NewActivityLogRepository(db),
+		ArticleTag:     NewArticleTagRepository(db),
 	}
 }

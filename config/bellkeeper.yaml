@@ -195,3 +195,24 @@ file_ingestion:
     api_url: "${FIRECRAWL_API_URL}"
     timeout: 60
     fallback_only: true
+
+matrix:
+  homeserver_url: ${MATRIX_HOMESERVER_URL}
+  bot_user_id: ${MATRIX_BOT_USER_ID}
+  bot_access_token: ${MATRIX_BOT_ACCESS_TOKEN}
+  device_id: ${MATRIX_BOT_DEVICE_ID}
+  sync_timeout: ${MATRIX_SYNC_TIMEOUT}
+  command_prefix: ${MATRIX_COMMAND_PREFIX}
+  max_retry: ${MATRIX_MAX_RETRY}
+
+redis:
+  host: ${REDIS_HOST}
+  port: ${REDIS_PORT}
+  db: ${REDIS_DB}
+  password: ${REDIS_PASSWORD}
+
+nats:
+  url: ${NATS_URL}
+  streams:
+    notifications: ${NATS_STREAM_NOTIFICATIONS}
+    commands: ${NATS_STREAM_COMMANDS}
