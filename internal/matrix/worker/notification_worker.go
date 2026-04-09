@@ -104,7 +104,7 @@ func (w *NotificationWorker) consumeMessages(ctx context.Context, sub *nats.Subs
 			return
 		default:
 			// Fetch messages with timeout
-			msgs, err := sub.Fetch(10, nats.Context(ctx), nats.MaxWait(5*time.Second))
+			msgs, err := sub.Fetch(10, nats.MaxWait(5*time.Second))
 			if err != nil {
 				if err == nats.ErrTimeout {
 					continue // normal, no messages available
