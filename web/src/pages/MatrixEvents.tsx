@@ -1,228 +1,265 @@
-import { Component, createSignal, onMount, For, Show } from 'solid-js'
+import { Component, createSignal, createResource, For, Show } from 'solid-js'
 import { matrixApi } from '@/api'
 import type { MatrixEvent } from '@/types'
-import Modal from '@/components/Modal'
 
 const MatrixEvents: Component = () => {
-  const [events, setEvents] = createSignal<MatrixEvent[]>([])
-  const [loading, setLoading] = createSignal(true)
-  const [error, setError] = createSignal<string | null>(null)
   const [page, setPage] = createSignal(1)
-  const [total, setTotal] = createSignal(0)
+  const [typeFilter, setTypeFilter] = createSignal('')
+  const [roomFilter, setRoomFilter] = createSignal('')
   const [selected, setSelected] = createSignal<MatrixEvent | null>(null)
 
-  const [filters, setFilters] = createSignal({
-    event_type: '',
-    room_id: '',
-  })
+  const [events, { refetch }] = createResource(
+    () => ({ page: page(), type: typeFilter(), room_id: roomFilter() }),
+    ({ page, type, room_id }) => matrixApi.listEvents({ page, page_size: 20, event_type: type, room_id })
+  )
 
-  const loadData = async () => {
-    setLoading(true)
-    try {
-      const res = await matrixApi.listEvents({ page: page(), page_size: 20, ...filters() })
-      setEvents(res.data.data || [])
-      setTotal(res.data.total || 0)
-    } catch (e) {
-      setError(e instanceof Error ? e.message : 'Failed to load data')
-    } finally {
-      setLoading(false)
+  const formatTime = (time: string) => {
+    const d = new Date(time)
+    return d.toLocaleString('zh-CN', {
+      month: '2-digit',
+      day: '2-digit',
+      hour: '2-digit',
+      minute: '2-digit',
+    })
+  }
+
+  const getTypeBadge = (type: string) => {
+    switch (type) {
+      case 'command':
+        return <span class="badge badge-blue">命令</span>
+      case 'message':
+        return <span class="badge badge-green">消息</span>
+      case 'member':
+        return <span class="badge badge-purple">成员</span>
+      default:
+        return <span class="badge badge-gray">{type}</span>
     }
   }
 
-  onMount(loadData)
-
-  const formatTime = (time: string) => {
-    return new Date(time).toLocaleString('zh-CN')
+  const getStatusBadge = (status: string) => {
+    switch (status) {
+      case 'processed':
+        return <span class="badge badge-green">已处理</span>
+      case 'failed':
+        return <span class="badge badge-red">失败</span>
+      case 'pending':
+        return <span class="badge badge-yellow">待处理</span>
+      default:
+        return <span class="badge badge-gray">{status}</span>
+    }
   }
 
-  const totalPages = () => Math.ceil(total() / 20)
+  const totalPages = () => Math.ceil((events()?.data?.total || 0) / 20)
 
   return (
-    <div class="p-6">
-      <div class="flex items-center justify-between mb-6">
-        <h1 class="text-2xl font-bold">事件日志</h1>
+    <div class="animate-fade-in">
+      {/* Header */}
+      <div class="flex flex-col sm:flex-row sm:items-center justify-between gap-4 mb-6">
+        <div>
+          <h1 class="text-2xl font-bold text-white">事件日志</h1>
+          <p class="text-sm text-dark-400 mt-1">查看 Matrix 事件记录</p>
+        </div>
       </div>
 
-      {/* Filters */}
-      <div class="bg-card rounded-lg border border-border p-4 mb-6">
-        <div class="flex items-center gap-4">
-          <div>
-            <label class="block text-sm mb-1">事件类型</label>
+      {/* Search */}
+      <div class="card mb-6">
+        <div class="flex items-center gap-3 flex-wrap">
+          <div class="relative">
+            <svg class="absolute left-3 top-1/2 -translate-y-1/2 w-5 h-5 text-dark-500" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+              <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M21 21l-6-6m2-5a7 7 0 11-14 0 7 7 0 0114 0z" />
+            </svg>
             <select
-              value={filters().event_type}
-              onChange={(e) => { setFilters({ ...filters(), event_type: e.currentTarget.value }); setPage(1) }}
-              class="px-3 py-2 bg-background border border-border rounded"
+              class="input pl-10"
+              value={typeFilter()}
+              onChange={(e) => {
+                setTypeFilter(e.currentTarget.value)
+                setPage(1)
+              }}
             >
-              <option value="">全部</option>
+              <option value="">全部类型</option>
               <option value="command">命令</option>
               <option value="message">消息</option>
               <option value="member">成员</option>
             </select>
           </div>
-          <div>
-            <label class="block text-sm mb-1">房间 ID</label>
+          <div class="relative flex-1 min-w-[200px]">
+            <svg class="absolute left-3 top-1/2 -translate-y-1/2 w-5 h-5 text-dark-500" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+              <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M21 21l-6-6m2-5a7 7 0 11-14 0 7 7 0 0114 0z" />
+            </svg>
             <input
               type="text"
-              value={filters().room_id}
-              onInput={(e) => { setFilters({ ...filters(), room_id: e.currentTarget.value }); setPage(1) }}
-              class="px-3 py-2 bg-background border border-border rounded"
-              placeholder="!xxx:matrix.example.com"
+              class="input pl-10"
+              placeholder="房间 ID..."
+              value={roomFilter()}
+              onInput={(e) => {
+                setRoomFilter(e.currentTarget.value)
+                setPage(1)
+              }}
             />
           </div>
-          <button
-            onClick={() => loadData()}
-            class="px-4 py-2 bg-primary text-white rounded hover:bg-primary/80 mt-5"
-          >
-            搜索
+          <button class="btn btn-secondary" onClick={() => refetch()}>
+            刷新
           </button>
         </div>
       </div>
 
-      <Show when={error()}>
-        <div class="bg-red-500/10 border border-red-500 text-red-500 rounded p-4 mb-4">
-          {error()}
+      {/* Table */}
+      <div class="card overflow-hidden p-0">
+        <div class="overflow-x-auto">
+          <table class="table">
+            <thead>
+              <tr>
+                <th>时间</th>
+                <th>类型</th>
+                <th>房间</th>
+                <th>用户</th>
+                <th>状态</th>
+                <th class="text-right">操作</th>
+              </tr>
+            </thead>
+            <tbody>
+              <Show
+                when={!events.loading}
+                fallback={
+                  <tr>
+                    <td colspan="6" class="text-center py-12">
+                      <div class="loading-spinner mx-auto" />
+                      <p class="mt-3 text-dark-400">加载中...</p>
+                    </td>
+                  </tr>
+                }
+              >
+                <Show
+                  when={events()?.data?.data && events()!.data.data.length > 0}
+                  fallback={
+                    <tr>
+                      <td colspan="6">
+                        <div class="empty-state">
+                          <svg class="empty-state-icon" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                            <path stroke-linecap="round" stroke-linejoin="round" stroke-width="1.5" d="M12 8v4l3 3m6-3a9 9 0 11-18 0 9 9 0 0118 0z" />
+                          </svg>
+                          <p class="empty-state-title">暂无事件记录</p>
+                          <p class="empty-state-description">Matrix 事件将在此显示</p>
+                        </div>
+                      </td>
+                    </tr>
+                  }
+                >
+                  <For each={events()?.data?.data ?? []}>
+                    {(event) => (
+                      <tr class="group">
+                        <td>
+                          <span class="text-dark-400 text-sm">{formatTime(event.created_at)}</span>
+                        </td>
+                        <td>{getTypeBadge(event.type)}</td>
+                        <td>
+                          <span class="font-mono text-sm text-dark-400 truncate max-w-[150px] block" title={event.room_id}>
+                            {event.room_id}
+                          </span>
+                        </td>
+                        <td>
+                          <span class="text-dark-300">{event.sender}</span>
+                        </td>
+                        <td>{getStatusBadge(event.status)}</td>
+                        <td class="text-right">
+                          <div class="flex items-center justify-end gap-1 opacity-0 group-hover:opacity-100 transition-opacity">
+                            <button
+                              class="btn btn-ghost btn-sm"
+                              onClick={() => setSelected(event)}
+                            >
+                              详情
+                            </button>
+                          </div>
+                        </td>
+                      </tr>
+                    )}
+                  </For>
+                </Show>
+              </Show>
+            </tbody>
+          </table>
         </div>
-      </Show>
-
-      <div class="bg-card rounded-lg border border-border overflow-hidden">
-        <table class="w-full">
-          <thead class="bg-muted">
-            <tr>
-              <th class="px-4 py-3 text-left text-sm font-medium">时间</th>
-              <th class="px-4 py-3 text-left text-sm font-medium">类型</th>
-              <th class="px-4 py-3 text-left text-sm font-medium">房间</th>
-              <th class="px-4 py-3 text-left text-sm font-medium">用户</th>
-              <th class="px-4 py-3 text-left text-sm font-medium">详情</th>
-              <th class="px-4 py-3 text-right text-sm font-medium">操作</th>
-            </tr>
-          </thead>
-          <tbody class="divide-y divide-border">
-            <Show when={loading()}>
-              <tr>
-                <td colspan="6" class="px-4 py-8 text-center text-muted-foreground">
-                  加载中...
-                </td>
-              </tr>
-            </Show>
-            <For each={events()} fallback={
-              <tr>
-                <td colspan="6" class="px-4 py-8 text-center text-muted-foreground">
-                  暂无事件记录
-                </td>
-              </tr>
-            }>
-              {(event) => (
-                <tr class="hover:bg-muted/50">
-                  <td class="px-4 py-3 text-sm text-muted-foreground">
-                    {formatTime(event.created_at)}
-                  </td>
-                  <td class="px-4 py-3 text-sm">
-                    <span class={`px-2 py-0.5 text-xs rounded ${
-                      event.event_type === 'command'
-                        ? 'bg-blue-500/20 text-blue-400'
-                        : event.event_type === 'member'
-                          ? 'bg-purple-500/20 text-purple-400'
-                          : 'bg-green-500/20 text-green-400'
-                    }`}>
-                      {event.event_type}
-                    </span>
-                  </td>
-                  <td class="px-4 py-3 text-sm font-mono">{event.room_id.slice(0, 20)}...</td>
-                  <td class="px-4 py-3 text-sm">{event.sender}</td>
-                  <td class="px-4 py-3 text-sm truncate max-w-xs">
-                    {event.content || '-'}
-                  </td>
-                  <td class="px-4 py-3 text-right">
-                    <button
-                      onClick={() => setSelected(event)}
-                      class="text-primary hover:underline"
-                    >
-                      查看
-                    </button>
-                  </td>
-                </tr>
-              )}
-            </For>
-          </tbody>
-        </table>
       </div>
 
       {/* Pagination */}
       <Show when={totalPages() > 1}>
-        <div class="flex items-center justify-center gap-2 mt-4">
-          <button
-            onClick={() => { setPage(Math.max(1, page() - 1)); loadData() }}
-            disabled={page() === 1}
-            class="px-3 py-1 border border-border rounded disabled:opacity-50"
-          >
-            上一页
-          </button>
-          <span class="px-3 py-1">
-            第 {page()} / {totalPages()} 页
-          </span>
-          <button
-            onClick={() => { setPage(page() + 1); loadData() }}
-            disabled={page() >= totalPages()}
-            class="px-3 py-1 border border-border rounded disabled:opacity-50"
-          >
-            下一页
-          </button>
+        <div class="flex items-center justify-between mt-4">
+          <div class="text-sm text-dark-400">
+            共 <span class="text-dark-200 font-medium">{events()?.data?.total || 0}</span> 条记录
+          </div>
+          <div class="flex gap-2">
+            <button
+              class="btn btn-secondary btn-sm"
+              disabled={page() === 1}
+              onClick={() => setPage((p) => p - 1)}
+            >
+              上一页
+            </button>
+            <span class="btn btn-ghost btn-sm cursor-default">
+              {page()} / {totalPages()}
+            </span>
+            <button
+              class="btn btn-secondary btn-sm"
+              disabled={page() >= totalPages()}
+              onClick={() => setPage((p) => p + 1)}
+            >
+              下一页
+            </button>
+          </div>
         </div>
       </Show>
 
       {/* Detail Modal */}
-      <Modal
-        open={!!selected()}
-        onClose={() => setSelected(null)}
-        title="事件详情"
-      >
-        <Show when={selected()}>
-          <div class="space-y-4">
-            <div class="grid grid-cols-2 gap-4">
-              <div>
-                <div class="text-sm text-muted-foreground">ID</div>
-                <div class="font-mono text-sm">{selected()!.id}</div>
-              </div>
-              <div>
-                <div class="text-sm text-muted-foreground">类型</div>
-                <div>{selected()!.event_type}</div>
-              </div>
-              <div>
-                <div class="text-sm text-muted-foreground">房间</div>
-                <div class="font-mono text-sm">{selected()!.room_id}</div>
-              </div>
-              <div>
-                <div class="text-sm text-muted-foreground">发送者</div>
-                <div>{selected()!.sender}</div>
-              </div>
-              <div>
-                <div class="text-sm text-muted-foreground">处理状态</div>
-                <div>{selected()!.processing_status || '-'}</div>
-              </div>
-              <div>
-                <div class="text-sm text-muted-foreground">创建时间</div>
-                <div class="text-sm">{formatTime(selected()!.created_at)}</div>
+      <Show when={selected()}>
+        <div class="fixed inset-0 z-50 flex items-center justify-center">
+          <div class="fixed inset-0 bg-black/60" onClick={() => setSelected(null)} />
+          <div class="relative bg-dark-800 rounded-xl border border-dark-700 shadow-2xl w-full max-w-lg mx-4">
+            <div class="flex items-center justify-between px-6 py-4 border-b border-dark-700">
+              <h3 class="text-lg font-semibold text-white">事件详情</h3>
+              <button class="btn btn-ghost btn-sm p-1" onClick={() => setSelected(null)}>
+                <svg class="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                  <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M6 18L18 6M6 6l12 12" />
+                </svg>
+              </button>
+            </div>
+            <div class="p-6 space-y-4">
+              <div class="grid grid-cols-2 gap-4">
+                <div class="p-3 bg-dark-900 rounded-lg">
+                  <div class="text-xs text-dark-500 mb-1">事件 ID</div>
+                  <div class="font-mono text-sm text-dark-200 truncate" title={selected()!.event_id}>
+                    {selected()!.event_id}
+                  </div>
+                </div>
+                <div class="p-3 bg-dark-900 rounded-lg">
+                  <div class="text-xs text-dark-500 mb-1">类型</div>
+                  <div class="mt-1">{getTypeBadge(selected()!.type)}</div>
+                </div>
+                <div class="col-span-2 p-3 bg-dark-900 rounded-lg">
+                  <div class="text-xs text-dark-500 mb-1">房间</div>
+                  <div class="font-mono text-sm text-dark-200">{selected()!.room_id}</div>
+                </div>
+                <div class="col-span-2 p-3 bg-dark-900 rounded-lg">
+                  <div class="text-xs text-dark-500 mb-1">发送者</div>
+                  <div class="text-sm text-white">{selected()!.sender}</div>
+                </div>
+                <div class="p-3 bg-dark-900 rounded-lg">
+                  <div class="text-xs text-dark-500 mb-1">状态</div>
+                  <div class="mt-1">{getStatusBadge(selected()!.status)}</div>
+                </div>
+                <div class="p-3 bg-dark-900 rounded-lg">
+                  <div class="text-xs text-dark-500 mb-1">创建时间</div>
+                  <div class="text-sm text-white">{formatTime(selected()!.created_at)}</div>
+                </div>
               </div>
             </div>
-            <Show when={selected()!.content}>
-              <div>
-                <div class="text-sm text-muted-foreground mb-1">消息内容</div>
-                <div class="bg-muted rounded p-3 text-sm whitespace-pre-wrap">
-                  {selected()!.content}
-                </div>
-              </div>
-            </Show>
-            <Show when={selected()!.error_message}>
-              <div>
-                <div class="text-sm text-muted-foreground mb-1">错误信息</div>
-                <div class="bg-red-500/10 border border-red-500 rounded p-3 text-sm text-red-400">
-                  {selected()!.error_message}
-                </div>
-              </div>
-            </Show>
+            <div class="flex justify-end gap-3 px-6 py-4 border-t border-dark-700">
+              <button class="btn btn-secondary" onClick={() => setSelected(null)}>
+                关闭
+              </button>
+            </div>
           </div>
-        </Show>
-      </Modal>
+        </div>
+      </Show>
     </div>
   )
 }

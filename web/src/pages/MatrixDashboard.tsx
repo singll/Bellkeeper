@@ -1,31 +1,10 @@
-import { Component, createSignal, onMount, For, Show } from 'solid-js'
+import { Component, createSignal, createResource, For, Show } from 'solid-js'
 import { matrixApi } from '@/api'
 import type { MatrixStats, MatrixEvent } from '@/types'
 
 const MatrixDashboard: Component = () => {
-  const [stats, setStats] = createSignal<MatrixStats | null>(null)
-  const [events, setEvents] = createSignal<MatrixEvent[]>([])
-  const [loading, setLoading] = createSignal(true)
-  const [error, setError] = createSignal<string | null>(null)
-
-  const loadData = async () => {
-    setLoading(true)
-    setError(null)
-    try {
-      const [statsRes, eventsRes] = await Promise.all([
-        matrixApi.getStats(),
-        matrixApi.listEvents({ page: 1, page_size: 10 }),
-      ])
-      setStats(statsRes)
-      setEvents((eventsRes as any).data?.data || [])
-    } catch (e) {
-      setError(e instanceof Error ? e.message : 'Failed to load data')
-    } finally {
-      setLoading(false)
-    }
-  }
-
-  onMount(loadData)
+  const [stats] = createResource(() => matrixApi.getStats())
+  const [events] = createResource(() => matrixApi.listEvents({ page: 1, page_size: 10 }))
 
   const formatTime = (time: string) => {
     const d = new Date(time)
@@ -37,86 +16,145 @@ const MatrixDashboard: Component = () => {
     })
   }
 
+  const statCards = () => [
+    { label: '房间总数', value: stats()?.rooms ?? 0, icon: 'home' },
+    { label: '活跃频道', value: stats()?.channels ?? 0, icon: 'broadcast' },
+    { label: '注册命令', value: stats()?.commands ?? 0, icon: 'command' },
+    { label: '24h 通知', value: stats()?.notifications_24h ?? 0, icon: 'bell' },
+  ]
+
+  const quickStats = () => [
+    { label: '24h 事件数', value: stats()?.events_24h ?? 0 },
+    { label: '活跃房间', value: stats()?.active_rooms ?? 0 },
+  ]
+
+  const iconSvg = (type: string) => {
+    switch (type) {
+      case 'home':
+        return (
+          <svg class="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+            <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M3 12l2-2m0 0l7-7 7 7M5 10v10a1 1 0 001 1h3m10-11l2 2m-2-2v10a1 1 0 01-1 1h-3m-6 0a1 1 0 001-1v-4a1 1 0 011-1h2a1 1 0 011 1v4a1 1 0 001 1m-6 0h6" />
+          </svg>
+        )
+      case 'broadcast':
+        return (
+          <svg class="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+            <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M8.111 16.404a5.5 5.5 0 017.778 0M12 20h.01m-7.08-7.071c3.904-3.905 10.236-3.905 14.141 0M1.394 9.393c5.857-5.857 15.355-5.857 21.213 0" />
+          </svg>
+        )
+      case 'command':
+        return (
+          <svg class="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+            <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M8 9l3 3-3 3m5 0h3M5 20h14a2 2 0 002-2V6a2 2 0 00-2-2H5a2 2 0 00-2 2v12a2 2 0 002 2z" />
+          </svg>
+        )
+      case 'bell':
+        return (
+          <svg class="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+            <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M15 17h5l-1.405-1.405A2.032 2.032 0 0118 14.158V11a6.002 6.002 0 00-4-5.659V5a2 2 0 10-4 0v.341C7.67 6.165 6 8.388 6 11v3.159c0 .538-.214 1.055-.595 1.436L4 17h5m6 0v1a3 3 0 11-6 0v-1m6 0H9" />
+          </svg>
+        )
+      default:
+        return null
+    }
+  }
+
   return (
-    <div class="p-6">
-      <h1 class="text-2xl font-bold mb-6">Matrix 平台总览</h1>
-
-      <Show when={error()}>
-        <div class="bg-red-500/10 border border-red-500 text-red-500 rounded p-4 mb-4">
-          {error()}
+    <div class="animate-fade-in">
+      {/* Header */}
+      <div class="flex flex-col sm:flex-row sm:items-center justify-between gap-4 mb-6">
+        <div>
+          <h1 class="text-2xl font-bold text-white">Matrix 平台总览</h1>
+          <p class="text-sm text-dark-400 mt-1">Matrix 平台运行状态与统计</p>
         </div>
-      </Show>
+      </div>
 
-      <Show when={loading()}>
-        <div class="flex items-center justify-center py-12">
-          <div class="animate-spin w-8 h-8 border-2 border-primary border-t-transparent rounded-full"></div>
-        </div>
-      </Show>
-
-      <Show when={!loading() && stats()}>
-        {/* Stats Cards */}
-        <div class="grid grid-cols-1 md:grid-cols-4 gap-4 mb-8">
-          <div class="bg-card rounded-lg p-6 border border-border">
-            <div class="text-sm text-muted-foreground mb-1">房间总数</div>
-            <div class="text-3xl font-bold">{stats()?.rooms ?? 0}</div>
-          </div>
-          <div class="bg-card rounded-lg p-6 border border-border">
-            <div class="text-sm text-muted-foreground mb-1">活跃频道</div>
-            <div class="text-3xl font-bold">{stats()?.channels ?? 0}</div>
-          </div>
-          <div class="bg-card rounded-lg p-6 border border-border">
-            <div class="text-sm text-muted-foreground mb-1">注册命令</div>
-            <div class="text-3xl font-bold">{stats()?.commands ?? 0}</div>
-          </div>
-          <div class="bg-card rounded-lg p-6 border border-border">
-            <div class="text-sm text-muted-foreground mb-1">24h 消息</div>
-            <div class="text-3xl font-bold">{stats()?.notifications_24h ?? 0}</div>
-          </div>
-        </div>
-
-        {/* Recent Events */}
-        <div class="bg-card rounded-lg border border-border">
-          <div class="px-6 py-4 border-b border-border">
-            <h2 class="text-lg font-semibold">最近事件</h2>
-          </div>
-          <div class="divide-y divide-border">
-            <For each={events()} fallback={
-              <div class="px-6 py-8 text-center text-muted-foreground">
-                暂无事件记录
-              </div>
-            }>
-              {(event) => (
-                <div class="px-6 py-3 flex items-center justify-between">
-                  <div class="flex items-center gap-4">
-                    <span class="text-sm text-muted-foreground">{formatTime(event.created_at)}</span>
-                    <span class={`px-2 py-0.5 text-xs rounded ${
-                      event.event_type === 'command'
-                        ? 'bg-blue-500/20 text-blue-400'
-                        : 'bg-green-500/20 text-green-400'
-                    }`}>
-                      {event.event_type}
-                    </span>
-                    <span class="text-sm">{event.content || event.sender}</span>
-                  </div>
-                  <span class="text-xs text-muted-foreground">{event.room_id}</span>
+      {/* Stats Cards */}
+      <div class="grid grid-cols-2 lg:grid-cols-4 gap-4 mb-6">
+        <Show
+          when={!stats.loading}
+          fallback={
+            <For each={statCards()}>
+              {() => (
+                <div class="card p-6">
+                  <div class="loading-skeleton h-4 w-20 mb-2" />
+                  <div class="loading-skeleton h-8 w-12 mt-3" />
                 </div>
               )}
             </For>
-          </div>
-        </div>
+          }
+        >
+          <For each={statCards()}>
+            {(stat) => (
+              <div class="card p-6">
+                <div class="flex items-center justify-between mb-2">
+                  <span class="text-sm text-dark-400">{stat.label}</span>
+                  <span class="text-dark-500">{iconSvg(stat.icon)}</span>
+                </div>
+                <div class="text-3xl font-bold text-white mt-2">{stat.value}</div>
+              </div>
+            )}
+          </For>
+        </Show>
+      </div>
 
-        {/* Quick Stats */}
-        <div class="grid grid-cols-1 md:grid-cols-2 gap-4 mt-6">
-          <div class="bg-card rounded-lg p-6 border border-border">
-            <div class="text-sm text-muted-foreground mb-1">24h 事件数</div>
-            <div class="text-2xl font-bold">{stats()?.events_24h ?? 0}</div>
-          </div>
-          <div class="bg-card rounded-lg p-6 border border-border">
-            <div class="text-sm text-muted-foreground mb-1">活跃房间</div>
-            <div class="text-2xl font-bold">{stats()?.active_rooms ?? 0}</div>
-          </div>
+      {/* Recent Events */}
+      <div class="card overflow-hidden p-0 mb-6">
+        <div class="px-6 py-4 border-b border-dark-700">
+          <h2 class="text-lg font-semibold text-white">最近事件</h2>
         </div>
-      </Show>
+        <div class="divide-y divide-dark-700">
+          <Show
+            when={!events.loading && events()?.data?.data?.length > 0}
+            fallback={
+              <div class="px-6 py-8 text-center">
+                <p class="text-dark-500">暂无事件记录</p>
+              </div>
+            }
+          >
+            <For each={events()?.data?.data ?? []}>
+              {(event) => (
+                <div class="px-6 py-3 flex items-center justify-between hover:bg-dark-800/50 transition-colors">
+                  <div class="flex items-center gap-4">
+                    <span class="text-sm text-dark-400">{formatTime(event.created_at)}</span>
+                    <span class={`badge ${event.type === 'command' ? 'badge-blue' : 'badge-green'}`}>
+                      {event.type === 'command' ? '命令' : event.type}
+                    </span>
+                    <span class="text-sm text-dark-300">{event.sender}</span>
+                  </div>
+                  <span class="text-xs text-dark-500 font-mono truncate max-w-[120px]">{event.room_id}</span>
+                </div>
+              )}
+            </For>
+          </Show>
+        </div>
+      </div>
+
+      {/* Quick Stats */}
+      <div class="grid grid-cols-2 gap-4">
+        <Show
+          when={!stats.loading}
+          fallback={
+            <For each={quickStats()}>
+              {() => (
+                <div class="card p-6">
+                  <div class="loading-skeleton h-4 w-20 mb-2" />
+                  <div class="loading-skeleton h-6 w-10 mt-3" />
+                </div>
+              )}
+            </For>
+          }
+        >
+          <For each={quickStats()}>
+            {(stat) => (
+              <div class="card p-6">
+                <div class="text-sm text-dark-400 mb-1">{stat.label}</div>
+                <div class="text-2xl font-bold text-white">{stat.value}</div>
+              </div>
+            )}
+          </For>
+        </Show>
+      </div>
     </div>
   )
 }

@@ -240,75 +240,60 @@ export interface ParseTask {
 // Matrix Platform Types
 
 export interface MatrixRoom {
-  id: number
   room_id: string
-  name: string
-  alias?: string
-  is_public: boolean
-  is_encrypted: boolean
-  topic?: string
-  member_count?: number
-  created_at: string
-  updated_at: string
+  room_name: string
+  room_type: string
+  is_active: boolean
 }
 
 export interface MatrixChannel {
-  id: number
   name: string
-  display_name: string
   room_id: string
-  description?: string
-  message_count?: number
-  created_at: string
-  updated_at: string
+  is_active: boolean
+  priority: number
+  config?: Record<string, unknown>
 }
 
 export interface MatrixCommand {
-  id: number
   name: string
-  description: string
-  handler_type: 'builtin' | 'n8n' | 'api'
-  handler_config: Record<string, unknown>
-  permission_scope: string
-  is_enabled: boolean
-  usage_count?: number
-  created_at: string
-  updated_at: string
+  handler_type: string
+  permission_level: string
+  room_scope: string
+  is_active: boolean
+  description?: string
+  usage_example?: string
 }
 
 export interface MatrixNotification {
   id: number
   channel_name: string
-  message_type: 'text' | 'html' | 'markdown'
-  message_content: string
-  status: 'pending' | 'sent' | 'failed'
+  status: string
   retry_count: number
+  message_content?: string
   error_message?: string
   created_at: string
   sent_at?: string
 }
 
 export interface MatrixEvent {
-  id: number
-  event_type: string
+  event_id: string
   room_id: string
   sender: string
-  content?: string
-  processing_status?: string
-  error_message?: string
+  type: string
+  status: string
   created_at: string
 }
-
-export interface MatrixCommandLog {
   id: number
-  command_name: string
-  user_id: string
+  event_id: string
   room_id: string
-  args?: string
-  status: 'success' | 'failed'
-  response?: string
+  sender: string
+  command_name: string
+  command_args?: string
+  handler_type?: string
+  execution_status: string
+  execution_time_ms?: number
   error_message?: string
-  duration_ms: number
+  response_event_id?: string
   created_at: string
 }
 

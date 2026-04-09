@@ -1,262 +1,222 @@
-import { Component, createSignal, onMount, For, Show } from 'solid-js'
+import { Component, createSignal, createResource, For, Show } from 'solid-js'
 import { matrixApi } from '@/api'
-import type { MatrixRoom } from '@/types'
-import Modal from '@/components/Modal'
 import { useToast } from '@/components/Toast'
+import Modal from '@/components/Modal'
+import type { MatrixRoom } from '@/types'
 
 const MatrixRooms: Component = () => {
-  const { success: showSuccess, error: showError } = useToast()
-  const [rooms, setRooms] = createSignal<MatrixRoom[]>([])
-  const [loading, setLoading] = createSignal(true)
-  const [error, setError] = createSignal<string | null>(null)
-  const [showCreate, setShowCreate] = createSignal(false)
-  const [editing, setEditing] = createSignal<MatrixRoom | null>(null)
+  const toast = useToast()
+  const [showModal, setShowModal] = createSignal(false)
+  const [submitting, setSubmitting] = createSignal(false)
+  const [roomId, setRoomId] = createSignal('')
+
+  const [rooms, { refetch }] = createResource(() => matrixApi.listRooms({ page: 1, page_size: 100 }))
 
   const [form, setForm] = createSignal({
     name: '',
-    alias: '',
-    is_public: true,
-    is_encrypted: false,
-    topic: '',
+    room_type: 'notification',
   })
 
-  const loadRooms = async () => {
-    setLoading(true)
+  const openCreateModal = () => {
+    setForm({ name: '', room_type: 'notification' })
+    setRoomId('')
+    setShowModal(true)
+  }
+
+  const handleSubmit = async (e: Event) => {
+    e.preventDefault()
+    setSubmitting(true)
     try {
-      const res = await matrixApi.listRooms({ page: 1, page_size: 100 })
-      setRooms(res.data.data || [])
-    } catch (e) {
-      setError(e instanceof Error ? e.message : 'Failed to load rooms')
+      const roomID = roomId() || `!${Date.now()}:matrix.singll.net`
+      await matrixApi.createRoom({ ...form(), room_id: roomID })
+      toast.success('房间创建成功')
+      setShowModal(false)
+      refetch()
+    } catch (err) {
+      toast.error('创建失败: ' + (err as Error).message)
     } finally {
-      setLoading(false)
+      setSubmitting(false)
     }
   }
 
-  onMount(loadRooms)
-
-  const handleCreate = async () => {
+  const handleDelete = async (room: MatrixRoom) => {
+    if (!confirm(`确定要删除房间 "${room.room_name}" 吗？`)) return
     try {
-      await matrixApi.createRoom(form())
-      showSuccess('房间创建成功')
-      setShowCreate(false)
-      setForm({ name: '', alias: '', is_public: true, is_encrypted: false, topic: '' })
-      loadRooms()
-    } catch (e) {
-      showError(e instanceof Error ? e.message : '创建失败')
+      // Note: deleteRoom is not implemented in backend, this is just for UI completeness
+      toast.error('删除功能暂未实现')
+    } catch (err) {
+      toast.error('删除失败: ' + (err as Error).message)
     }
-  }
-
-  const handleUpdate = async () => {
-    const room = editing()
-    if (!room) return
-    try {
-      await matrixApi.updateRoom(room.id, form())
-      showSuccess('房间更新成功')
-      setEditing(null)
-      loadRooms()
-    } catch (e) {
-      showError(e instanceof Error ? e.message : '更新失败')
-    }
-  }
-
-  const handleDelete = async (id: number) => {
-    if (!confirm('确定要删除这个房间吗？')) return
-    try {
-      await matrixApi.deleteRoom(id)
-      showSuccess('房间已删除')
-      loadRooms()
-    } catch (e) {
-      showError(e instanceof Error ? e.message : '删除失败')
-    }
-  }
-
-  const openEdit = (room: MatrixRoom) => {
-    setForm({
-      name: room.name,
-      alias: room.alias || '',
-      is_public: room.is_public,
-      is_encrypted: room.is_encrypted,
-      topic: room.topic || '',
-    })
-    setEditing(room)
   }
 
   return (
-    <div class="p-6">
-      <div class="flex items-center justify-between mb-6">
-        <h1 class="text-2xl font-bold">房间管理</h1>
-        <button
-          onClick={() => setShowCreate(true)}
-          class="px-4 py-2 bg-primary text-white rounded hover:bg-primary/80"
-        >
-          创建房间
+    <div class="animate-fade-in">
+      {/* Header */}
+      <div class="flex flex-col sm:flex-row sm:items-center justify-between gap-4 mb-6">
+        <div>
+          <h1 class="text-2xl font-bold text-white">房间管理</h1>
+          <p class="text-sm text-dark-400 mt-1">管理 Matrix 平台房间</p>
+        </div>
+        <button class="btn btn-primary" onClick={openCreateModal}>
+          <svg class="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+            <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M12 4v16m8-8H4" />
+          </svg>
+          注册房间
         </button>
       </div>
 
-      <Show when={error()}>
-        <div class="bg-red-500/10 border border-red-500 text-red-500 rounded p-4 mb-4">
-          {error()}
+      {/* Table */}
+      <div class="card overflow-hidden p-0">
+        <div class="overflow-x-auto">
+          <table class="table">
+            <thead>
+              <tr>
+                <th>房间 ID</th>
+                <th>名称</th>
+                <th>类型</th>
+                <th>状态</th>
+                <th class="text-right">操作</th>
+              </tr>
+            </thead>
+            <tbody>
+              <Show
+                when={!rooms.loading}
+                fallback={
+                  <tr>
+                    <td colspan="5" class="text-center py-12">
+                      <div class="loading-spinner mx-auto" />
+                      <p class="mt-3 text-dark-400">加载中...</p>
+                    </td>
+                  </tr>
+                }
+              >
+                <Show
+                  when={rooms()?.data?.data && rooms()!.data.data.length > 0}
+                  fallback={
+                    <tr>
+                      <td colspan="5">
+                        <div class="empty-state">
+                          <svg class="empty-state-icon" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                            <path stroke-linecap="round" stroke-linejoin="round" stroke-width="1.5" d="M3 12l2-2m0 0l7-7 7 7M5 10v10a1 1 0 001 1h3m10-11l2 2m-2-2v10a1 1 0 01-1 1h-3m-6 0a1 1 0 001-1v-4a1 1 0 011-1h2a1 1 0 011 1v4a1 1 0 001 1m-6 0h6" />
+                          </svg>
+                          <p class="empty-state-title">暂无注册房间</p>
+                          <p class="empty-state-description">点击"注册房间"添加第一个 Matrix 房间</p>
+                        </div>
+                      </td>
+                    </tr>
+                  }
+                >
+                  <For each={rooms()?.data?.data ?? []}>
+                    {(room) => (
+                      <tr class="group">
+                        <td>
+                          <span class="font-mono text-sm text-dark-400 truncate max-w-[200px] block" title={room.room_id}>
+                            {room.room_id}
+                          </span>
+                        </td>
+                        <td>
+                          <div class="flex items-center gap-2">
+                            <svg class="w-4 h-4 text-primary-400" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                              <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M3 12l2-2m0 0l7-7 7 7M5 10v10a1 1 0 001 1h3m10-11l2 2m-2-2v10a1 1 0 01-1 1h-3m-6 0a1 1 0 001-1v-4a1 1 0 011-1h2a1 1 0 011 1v4a1 1 0 001 1m-6 0h6" />
+                            </svg>
+                            <span class="font-medium text-white">{room.room_name || '-'}</span>
+                          </div>
+                        </td>
+                        <td>
+                          <span class="badge badge-gray">{room.room_type}</span>
+                        </td>
+                        <td>
+                          <div class="flex items-center gap-2">
+                            <span class={`status-dot ${room.is_active ? 'status-dot-success' : 'status-dot-gray'}`} />
+                            <span class={room.is_active ? 'text-emerald-400' : 'text-dark-500'}>
+                              {room.is_active ? '活跃' : '禁用'}
+                            </span>
+                          </div>
+                        </td>
+                        <td class="text-right">
+                          <div class="flex items-center justify-end gap-1 opacity-0 group-hover:opacity-100 transition-opacity">
+                            <button
+                              class="btn btn-ghost btn-sm text-red-400 hover:text-red-300 hover:bg-red-500/10"
+                              onClick={() => handleDelete(room)}
+                            >
+                              <svg class="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                                <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M19 7l-.867 12.142A2 2 0 0116.138 21H7.862a2 2 0 01-1.995-1.858L5 7m5 4v6m4-6v6m1-10V4a1 1 0 00-1-1h-4a1 1 0 00-1 1v3M4 7h16" />
+                              </svg>
+                            </button>
+                          </div>
+                        </td>
+                      </tr>
+                    )}
+                  </For>
+                </Show>
+              </Show>
+            </tbody>
+          </table>
         </div>
-      </Show>
-
-      <div class="bg-card rounded-lg border border-border overflow-hidden">
-        <table class="w-full">
-          <thead class="bg-muted">
-            <tr>
-              <th class="px-4 py-3 text-left text-sm font-medium">房间 ID</th>
-              <th class="px-4 py-3 text-left text-sm font-medium">名称</th>
-              <th class="px-4 py-3 text-left text-sm font-medium">类型</th>
-              <th class="px-4 py-3 text-left text-sm font-medium">成员数</th>
-              <th class="px-4 py-3 text-left text-sm font-medium">创建时间</th>
-              <th class="px-4 py-3 text-right text-sm font-medium">操作</th>
-            </tr>
-          </thead>
-          <tbody class="divide-y divide-border">
-            <Show when={loading()}>
-              <tr>
-                <td colspan="6" class="px-4 py-8 text-center text-muted-foreground">
-                  加载中...
-                </td>
-              </tr>
-            </Show>
-            <For each={rooms()} fallback={
-              <tr>
-                <td colspan="6" class="px-4 py-8 text-center text-muted-foreground">
-                  暂无房间
-                </td>
-              </tr>
-            }>
-              {(room) => (
-                <tr class="hover:bg-muted/50">
-                  <td class="px-4 py-3 text-sm font-mono">{room.room_id.slice(0, 20)}...</td>
-                  <td class="px-4 py-3 text-sm">{room.name}</td>
-                  <td class="px-4 py-3 text-sm">
-                    <span class={`px-2 py-0.5 text-xs rounded ${
-                      room.is_public ? 'bg-green-500/20 text-green-400' : 'bg-yellow-500/20 text-yellow-400'
-                    }`}>
-                      {room.is_public ? '公开' : '私有'}
-                    </span>
-                  </td>
-                  <td class="px-4 py-3 text-sm">{room.member_count ?? '-'}</td>
-                  <td class="px-4 py-3 text-sm text-muted-foreground">
-                    {new Date(room.created_at).toLocaleDateString('zh-CN')}
-                  </td>
-                  <td class="px-4 py-3 text-right">
-                    <button
-                      onClick={() => openEdit(room)}
-                      class="text-primary hover:underline mr-3"
-                    >
-                      编辑
-                    </button>
-                    <button
-                      onClick={() => handleDelete(room.id)}
-                      class="text-red-500 hover:underline"
-                    >
-                      删除
-                    </button>
-                  </td>
-                </tr>
-              )}
-            </For>
-          </tbody>
-        </table>
       </div>
 
-      {/* Create Modal */}
+      {/* Modal */}
       <Modal
-        open={showCreate()}
-        onClose={() => setShowCreate(false)}
-        title="创建 Matrix 房间"
-        onConfirm={handleCreate}
+        open={showModal()}
+        onClose={() => setShowModal(false)}
+        title="注册 Matrix 房间"
+        size="md"
+        footer={
+          <>
+            <button type="button" class="btn btn-secondary" onClick={() => setShowModal(false)}>
+              取消
+            </button>
+            <button
+              type="submit"
+              form="room-form"
+              class="btn btn-primary"
+              disabled={submitting()}
+            >
+              {submitting() ? (
+                <>
+                  <div class="loading-spinner" />
+                  处理中...
+                </>
+              ) : '创建'}
+            </button>
+          </>
+        }
       >
-        <div class="space-y-4">
+        <form id="room-form" onSubmit={handleSubmit} class="space-y-4">
           <div>
-            <label class="block text-sm mb-1">房间名称</label>
+            <label class="label">房间 ID *</label>
             <input
               type="text"
+              class="input font-mono"
+              required
+              placeholder="!xxx:matrix.singll.net"
+              value={roomId()}
+              onInput={(e) => setRoomId(e.currentTarget.value)}
+            />
+          </div>
+          <div>
+            <label class="label">房间名称</label>
+            <input
+              type="text"
+              class="input"
+              placeholder="如：通知房间"
               value={form().name}
               onInput={(e) => setForm({ ...form(), name: e.currentTarget.value })}
-              class="w-full px-3 py-2 bg-background border border-border rounded"
-              placeholder="通知房间"
             />
           </div>
           <div>
-            <label class="block text-sm mb-1">房间别名</label>
-            <input
-              type="text"
-              value={form().alias}
-              onInput={(e) => setForm({ ...form(), alias: e.currentTarget.value })}
-              class="w-full px-3 py-2 bg-background border border-border rounded"
-              placeholder="optional-alias"
-            />
+            <label class="label">房间类型 *</label>
+            <select
+              class="input"
+              value={form().room_type}
+              onChange={(e) => setForm({ ...form(), room_type: e.currentTarget.value })}
+            >
+              <option value="notification">通知</option>
+              <option value="command">命令</option>
+              <option value="general">通用</option>
+            </select>
           </div>
-          <div>
-            <label class="block text-sm mb-1">房间主题</label>
-            <input
-              type="text"
-              value={form().topic}
-              onInput={(e) => setForm({ ...form(), topic: e.currentTarget.value })}
-              class="w-full px-3 py-2 bg-background border border-border rounded"
-            />
-          </div>
-          <div class="flex items-center gap-4">
-            <label class="flex items-center gap-2">
-              <input
-                type="checkbox"
-                checked={form().is_public}
-                onChange={(e) => setForm({ ...form(), is_public: e.currentTarget.checked })}
-              />
-              <span class="text-sm">公开房间</span>
-            </label>
-            <label class="flex items-center gap-2">
-              <input
-                type="checkbox"
-                checked={form().is_encrypted}
-                onChange={(e) => setForm({ ...form(), is_encrypted: e.currentTarget.checked })}
-              />
-              <span class="text-sm">启用端到端加密</span>
-            </label>
-          </div>
-        </div>
-      </Modal>
-
-      {/* Edit Modal */}
-      <Modal
-        open={!!editing()}
-        onClose={() => setEditing(null)}
-        title={`编辑房间: ${editing()?.name}`}
-        onConfirm={handleUpdate}
-      >
-        <div class="space-y-4">
-          <div>
-            <label class="block text-sm mb-1">房间名称</label>
-            <input
-              type="text"
-              value={form().name}
-              onInput={(e) => setForm({ ...form(), name: e.currentTarget.value })}
-              class="w-full px-3 py-2 bg-background border border-border rounded"
-            />
-          </div>
-          <div>
-            <label class="block text-sm mb-1">房间主题</label>
-            <input
-              type="text"
-              value={form().topic}
-              onInput={(e) => setForm({ ...form(), topic: e.currentTarget.value })}
-              class="w-full px-3 py-2 bg-background border border-border rounded"
-            />
-          </div>
-          <div class="flex items-center gap-4">
-            <label class="flex items-center gap-2">
-              <input
-                type="checkbox"
-                checked={form().is_public}
-                onChange={(e) => setForm({ ...form(), is_public: e.currentTarget.checked })}
-              />
-              <span class="text-sm">公开房间</span>
-            </label>
-          </div>
-        </div>
+        </form>
       </Modal>
     </div>
   )
