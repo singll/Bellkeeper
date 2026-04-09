@@ -1,6 +1,11 @@
 package model
 
-import "time"
+import (
+	"log"
+	"time"
+
+	"gorm.io/gorm"
+)
 
 // MatrixRoom represents a registered Matrix room in the platform.
 type MatrixRoom struct {
@@ -128,3 +133,112 @@ type MatrixSyncState struct {
 func (MatrixSyncState) TableName() string {
 	return "matrix_sync_state"
 }
+
+// SeedMatrixPlatform seeds initial Matrix platform data (rooms, channels, commands).
+func SeedMatrixPlatform(db *gorm.DB) error {
+	// Check if already seeded
+	var roomCount int64
+	db.Model(&MatrixRoom{}).Count(&roomCount)
+	if roomCount > 0 {
+		return nil // Already seeded
+	}
+
+	log.Println("info: seeding Matrix platform initial data...")
+
+	// Seed rooms from environment variables
+	type roomSeed struct {
+		RoomID   string
+		RoomName string
+		RoomType string
+	}
+
+	// Note: Room IDs will be loaded from environment variables at runtime
+	// For now, we just create the structure. Actual room registration
+	// will happen when the Matrix gateway starts.
+
+	// Seed default channels (logical channels that will be mapped to rooms)
+	channels := []MatrixChannel{
+		{ChannelName: "alerts", RoomID: "", IsActive: true, Priority: 100},
+		{ChannelName: "daily", RoomID: "", IsActive: true, Priority: 50},
+		{ChannelName: "todo", RoomID: "", IsActive: true, Priority: 30},
+		{ChannelName: "qa", RoomID: "", IsActive: true, Priority: 30},
+	}
+
+	for _, ch := range channels {
+		if err := db.Create(&ch).Error; err != nil {
+			log.Printf("warn: failed to seed Matrix channel %q: %v", ch.ChannelName, err)
+			continue
+		}
+		log.Printf("info: seeded Matrix channel %q", ch.ChannelName)
+	}
+
+	// Seed default commands
+	commands := []MatrixCommand{
+		{
+			CommandName:     "help",
+			HandlerType:     "builtin_help",
+			PermissionLevel: "user",
+			RoomScope:       "any",
+			IsActive:        true,
+			Description:     "显示可用命令列表",
+			UsageExample:    "!help",
+		},
+		{
+			CommandName:     "status",
+			HandlerType:     "builtin_status",
+			PermissionLevel: "user",
+			RoomScope:       "any",
+			IsActive:        true,
+			Description:     "显示系统状态",
+			UsageExample:    "!status",
+		},
+		{
+			CommandName:     "列表",
+			HandlerType:     "memos_todo_list",
+			PermissionLevel: "user",
+			RoomScope:       "any",
+			IsActive:        true,
+			Description:     "查看 Memos 待办列表",
+			UsageExample:    "!列表",
+		},
+		{
+			CommandName:     "新增",
+			HandlerType:     "memos_todo_create",
+			PermissionLevel: "user",
+			RoomScope:       "any",
+			IsActive:        true,
+			Description:     "创建 Memos 待办事项",
+			UsageExample:    "!新增 完成项目文档",
+		},
+		{
+			CommandName:     "问",
+			HandlerType:     "ragflow_qa",
+			PermissionLevel: "user",
+			RoomScope:       "any",
+			IsActive:        true,
+			Description:     "向 RAGFlow 提问",
+			UsageExample:    "!问 什么是 GORM？",
+		},
+		{
+			CommandName:     "搜",
+			HandlerType:     "ragflow_search",
+			PermissionLevel: "user",
+			RoomScope:       "any",
+			IsActive:        true,
+			Description:     "在 RAGFlow 中搜索",
+			UsageExample:    "!搜 Docker 部署",
+		},
+	}
+
+	for _, cmd := range commands {
+		if err := db.Create(&cmd).Error; err != nil {
+			log.Printf("warn: failed to seed Matrix command %q: %v", cmd.CommandName, err)
+			continue
+		}
+		log.Printf("info: seeded Matrix command %q", cmd.CommandName)
+	}
+
+	log.Println("info: Matrix platform seeding completed")
+	return nil
+}
+

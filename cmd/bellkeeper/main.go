@@ -19,6 +19,7 @@ import (
 	"github.com/singll/bellkeeper/internal/service"
 	"github.com/singll/bellkeeper/internal/matrix/gateway"
 	"github.com/singll/bellkeeper/internal/matrix/infra"
+	"github.com/singll/bellkeeper/internal/matrix/worker"
 
 	"github.com/gin-gonic/gin"
 	"github.com/spf13/cobra"
@@ -92,27 +93,51 @@ func runServer(cmd *cobra.Command, args []string) {
 	services := service.NewServices(repos, cfg, version)
 	handlers := handler.NewHandlers(services, shutdownChan)
 
-	// Initialize Matrix Gateway (if configured)
-	var matrixSyncLoop *gateway.SyncLoop
-	if cfg.Matrix.BotAccessToken != "" {
-		log.Println("[Matrix] initializing Matrix Gateway...")
+	// Initialize Matrix infrastructure (Redis, NATS)
+	var (
+		redisClient           *infra.RedisClient
+		natsClient            *infra.NATSClient
+		matrixClient          *gateway.Client
+		matrixSyncLoop        *gateway.SyncLoop
+		notifyWorker          *worker.NotificationWorker
+	)
 
-		// Initialize Redis
-		redisClient, err := infra.NewRedisClient(cfg.Redis)
+	if cfg.Matrix.BotAccessToken != "" || cfg.Redis.Host != "" {
+		log.Println("[Matrix] initializing Matrix infrastructure...")
+
+		// Initialize Redis (used by both Gateway and Notification)
+		redisClient, err = infra.NewRedisClient(cfg.Redis)
 		if err != nil {
 			log.Fatalf("Failed to initialize Redis: %v", err)
 		}
 		defer redisClient.Close()
 
-		// Initialize NATS
-		natsClient, err := infra.NewNATSClient(cfg.NATS)
+		// Initialize NATS (used by Notification Gateway)
+		natsClient, err = infra.NewNATSClient(cfg.NATS)
 		if err != nil {
 			log.Fatalf("Failed to initialize NATS: %v", err)
 		}
 		defer natsClient.Close()
 
+		// Initialize Notification Service and Handler
+		notifySvc := service.NewNotificationService(cfg.NATS, redisClient, natsClient, repos)
+		services.SetNotificationService(notifySvc)
+		handlers = handler.NewHandlers(services, shutdownChan) // recreate to include notify handler
+
+		// Initialize Notification Worker
+		notifySender := service.NewNotificationSender(nil, repos) // sender needs matrix client
+		notifyWorker = worker.NewNotificationWorker(cfg.NATS, natsClient, notifySender, cfg.Matrix.MaxRetry)
+		if err := notifyWorker.Start(context.Background()); err != nil {
+			log.Fatalf("Failed to start notification worker: %v", err)
+		}
+	}
+
+	// Initialize Matrix Gateway (if bot token configured)
+	if cfg.Matrix.BotAccessToken != "" {
+		log.Println("[Matrix] initializing Matrix Gateway...")
+
 		// Initialize Matrix client
-		matrixClient, err := gateway.NewClient(cfg.Matrix, redisClient, repos)
+		matrixClient, err = gateway.NewClient(cfg.Matrix, redisClient, repos)
 		if err != nil {
 			log.Fatalf("Failed to initialize Matrix client: %v", err)
 		}
@@ -121,6 +146,11 @@ func runServer(cmd *cobra.Command, args []string) {
 		matrixSyncLoop = gateway.NewSyncLoop(matrixClient)
 		if err := matrixSyncLoop.Start(context.Background()); err != nil {
 			log.Fatalf("Failed to start Matrix sync loop: %v", err)
+		}
+
+		// Update notification sender with matrix client
+		if notifyWorker != nil {
+			notifyWorker.UpdateMatrixClient(matrixClient)
 		}
 
 		log.Println("[Matrix] Matrix Gateway started successfully")

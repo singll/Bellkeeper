@@ -1,6 +1,8 @@
 package repository
 
 import (
+	"context"
+
 	"github.com/singll/bellkeeper/internal/model"
 	"gorm.io/gorm"
 )
@@ -23,6 +25,15 @@ func (r *MatrixChannelRepository) List(activeOnly bool) ([]model.MatrixChannel, 
 		return nil, err
 	}
 	return channels, nil
+}
+
+func (r *MatrixChannelRepository) GetAllActive(ctx context.Context) ([]*model.MatrixChannel, error) {
+	var channels []*model.MatrixChannel
+	err := r.db.WithContext(ctx).
+		Where("is_active = ?", true).
+		Order("priority DESC, id ASC").
+		Find(&channels).Error
+	return channels, err
 }
 
 func (r *MatrixChannelRepository) GetByName(name string) (*model.MatrixChannel, error) {

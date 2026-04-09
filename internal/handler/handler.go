@@ -18,11 +18,13 @@ type Handlers struct {
 	Classify      *ClassifyHandler
 	ActivityLog   *ActivityLogHandler
 	FileIngestion *FileIngestionHandler
+	// Optional handlers
+	MatrixNotify *MatrixNotifyHandler
 }
 
 // NewHandlers creates all handler instances
 func NewHandlers(services *service.Services, shutdownChan chan struct{}) *Handlers {
-	return &Handlers{
+	h := &Handlers{
 		Tag:           NewTagHandler(services.Tag),
 		RSS:           NewRSSHandler(services.RSS),
 		Dataset:       NewDatasetHandler(services.Dataset),
@@ -36,4 +38,11 @@ func NewHandlers(services *service.Services, shutdownChan chan struct{}) *Handle
 		ActivityLog:   NewActivityLogHandler(services.ActivityLog),
 		FileIngestion: NewFileIngestionHandler(services.FileIngestion),
 	}
+
+	// Set optional handlers
+	if services.Notification != nil {
+		h.MatrixNotify = NewMatrixNotifyHandler(services.Notification)
+	}
+
+	return h
 }

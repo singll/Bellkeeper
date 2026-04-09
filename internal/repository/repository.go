@@ -15,6 +15,14 @@ type Repositories struct {
 	LLMModelGroup  *LLMModelGroupRepository
 	ActivityLog    *ActivityLogRepository
 	ArticleTag     *ArticleTagRepository
+	// Matrix Platform
+	MatrixRoom         *MatrixRoomRepository
+	MatrixChannel      *MatrixChannelRepository
+	MatrixCommand      *MatrixCommandRepository
+	MatrixEvent        *MatrixEventRepository
+	MatrixNotification *MatrixNotificationRepository
+	MatrixCommandLog   *MatrixCommandLogRepository
+	MatrixSyncState    *MatrixSyncStateRepository
 }
 
 // NewRepositories creates all repository instances
@@ -29,5 +37,13 @@ func NewRepositories(db *gorm.DB) *Repositories {
 		LLMModelGroup:  NewLLMModelGroupRepository(db),
 		ActivityLog:    NewActivityLogRepository(db),
 		ArticleTag:     NewArticleTagRepository(db),
+		// Matrix Platform
+		MatrixRoom:         NewMatrixRoomRepository(db),
+		MatrixChannel:      NewMatrixChannelRepository(db),
+		MatrixCommand:      NewMatrixCommandRepository(db),
+		MatrixEvent:        NewMatrixEventRepository(db),
+		MatrixNotification: NewMatrixNotificationRepository(db),
+		MatrixCommandLog:   NewMatrixCommandLogRepository(db),
+		MatrixSyncState:    NewMatrixSyncStateRepository(db),
 	}
 }

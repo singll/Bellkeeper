@@ -27,6 +27,11 @@ func Setup(r *gin.Engine, handlers *handler.Handlers, mode string, apiKey string
 	registerClassifyRoutes(api, handlers.Classify)
 	registerActivityLogRoutes(api, handlers.ActivityLog)
 	registerFileIngestionRoutes(api, handlers.FileIngestion)
+
+	// Matrix notification routes
+	if handlers.MatrixNotify != nil {
+		registerMatrixNotifyRoutes(api, handlers.MatrixNotify)
+	}
 }
 
 func registerTagRoutes(api *gin.RouterGroup, h *handler.TagHandler) {
@@ -163,4 +168,12 @@ func registerFileIngestionRoutes(api *gin.RouterGroup, h *handler.FileIngestionH
 	files.POST("/ingest/url", h.IngestURL)
 	files.GET("/metadata/:id", h.GetMetadata)
 	files.GET("/list", h.List)
+}
+
+func registerMatrixNotifyRoutes(api *gin.RouterGroup, h *handler.MatrixNotifyHandler) {
+	matrix := api.Group("/matrix")
+	matrix.POST("/notify", h.Send)
+	matrix.GET("/notify/:id", h.GetStatus)
+	matrix.GET("/notify/channels", h.ListChannels)
+	matrix.POST("/notify/channels/reload", h.ReloadChannels)
 }

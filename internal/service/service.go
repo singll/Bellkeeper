@@ -18,6 +18,8 @@ type Services struct {
 	Classify      *ClassifyService
 	ActivityLog   *ActivityLogService
 	FileIngestion *FileIngestionService
+	// Optional services (initialized in main.go with infra dependencies)
+	Notification *NotificationService
 }
 
 // NewServices creates all service instances
@@ -62,4 +64,9 @@ func NewServices(repos *repository.Repositories, cfg *config.Config, version str
 		ActivityLog:   activityLogSvc,
 		FileIngestion: fileIngestionSvc,
 	}
+}
+
+// SetNotificationService sets the optional notification service
+func (s *Services) SetNotificationService(svc *NotificationService) {
+	s.Notification = svc
 }
