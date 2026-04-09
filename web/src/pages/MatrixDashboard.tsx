@@ -16,8 +16,8 @@ const MatrixDashboard: Component = () => {
         matrixApi.getStats(),
         matrixApi.listEvents({ page: 1, page_size: 10 }),
       ])
-      setStats(statsRes.data)
-      setEvents(eventsRes.data.data || [])
+      setStats(statsRes)
+      setEvents((eventsRes as any).data?.data || [])
     } catch (e) {
       setError(e instanceof Error ? e.message : 'Failed to load data')
     } finally {
@@ -58,19 +58,19 @@ const MatrixDashboard: Component = () => {
         <div class="grid grid-cols-1 md:grid-cols-4 gap-4 mb-8">
           <div class="bg-card rounded-lg p-6 border border-border">
             <div class="text-sm text-muted-foreground mb-1">房间总数</div>
-            <div class="text-3xl font-bold">{stats()?.rooms_count ?? 0}</div>
+            <div class="text-3xl font-bold">{stats()?.rooms ?? 0}</div>
           </div>
           <div class="bg-card rounded-lg p-6 border border-border">
             <div class="text-sm text-muted-foreground mb-1">活跃频道</div>
-            <div class="text-3xl font-bold">{stats()?.channels_count ?? 0}</div>
+            <div class="text-3xl font-bold">{stats()?.channels ?? 0}</div>
           </div>
           <div class="bg-card rounded-lg p-6 border border-border">
             <div class="text-sm text-muted-foreground mb-1">注册命令</div>
-            <div class="text-3xl font-bold">{stats()?.commands_count ?? 0}</div>
+            <div class="text-3xl font-bold">{stats()?.commands ?? 0}</div>
           </div>
           <div class="bg-card rounded-lg p-6 border border-border">
             <div class="text-sm text-muted-foreground mb-1">24h 消息</div>
-            <div class="text-3xl font-bold">{stats()?.messages_24h ?? 0}</div>
+            <div class="text-3xl font-bold">{stats()?.notifications_24h ?? 0}</div>
           </div>
         </div>
 
@@ -112,8 +112,8 @@ const MatrixDashboard: Component = () => {
             <div class="text-2xl font-bold">{stats()?.events_24h ?? 0}</div>
           </div>
           <div class="bg-card rounded-lg p-6 border border-border">
-            <div class="text-sm text-muted-foreground mb-1">24h 命令执行</div>
-            <div class="text-2xl font-bold">{stats()?.command_executions_24h ?? 0}</div>
+            <div class="text-sm text-muted-foreground mb-1">活跃房间</div>
+            <div class="text-2xl font-bold">{stats()?.active_rooms ?? 0}</div>
           </div>
         </div>
       </Show>

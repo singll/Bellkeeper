@@ -332,9 +332,9 @@ export const logsApi = {
 
 // Matrix Platform API
 export const matrixApi = {
-  // Stats
+  // Stats - returns stats directly, not wrapped in { data: ... }
   getStats: () =>
-    request<{ data: MatrixStats }>('/matrix/admin/stats'),
+    request<MatrixStats>('/matrix/admin/stats'),
 
   // Rooms
   listRooms: (params?: { page?: number; page_size?: number }) => {

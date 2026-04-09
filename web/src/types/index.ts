@@ -313,10 +313,10 @@ export interface MatrixCommandLog {
 }
 
 export interface MatrixStats {
-  rooms_count: number
-  channels_count: number
-  commands_count: number
-  messages_24h: number
+  rooms: number
+  channels: number
+  commands: number
   events_24h: number
-  command_executions_24h: number
+  notifications_24h: number
+  active_rooms: number
 }
