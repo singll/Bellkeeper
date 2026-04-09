@@ -238,3 +238,38 @@ func (s *AdminService) GetStats(ctx context.Context) (map[string]interface{}, er
 
 	return stats, nil
 }
+
+// ============ User Role Management ============
+
+// ListUserRoles returns all user roles in a room
+func (s *AdminService) ListUserRoles(ctx context.Context, roomID string) ([]*model.MatrixUserRole, error) {
+	return s.repos.MatrixUserRole.GetByRoom(ctx, roomID)
+}
+
+// GetUserRole returns a user's role in a room
+func (s *AdminService) GetUserRole(ctx context.Context, userID, roomID string) (*model.MatrixUserRole, error) {
+	return s.repos.MatrixUserRole.GetByUserAndRoom(ctx, userID, roomID)
+}
+
+// SetUserRole sets a user's role in a room
+func (s *AdminService) SetUserRole(ctx context.Context, userID, roomID, role string) error {
+	return s.repos.MatrixUserRole.Upsert(ctx, userID, roomID, role)
+}
+
+// RemoveUserRole removes a user's role from a room
+func (s *AdminService) RemoveUserRole(ctx context.Context, userID, roomID string) error {
+	return s.repos.MatrixUserRole.Delete(ctx, userID, roomID)
+}
+
+// ListAllUserRoles returns all user roles
+func (s *AdminService) ListAllUserRoles(ctx context.Context, limit, offset int) ([]*model.MatrixUserRole, int64, error) {
+	roles, err := s.repos.MatrixUserRole.List(ctx, limit, offset)
+	if err != nil {
+		return nil, 0, err
+	}
+	count, err := s.repos.MatrixUserRole.Count(ctx)
+	if err != nil {
+		return nil, 0, err
+	}
+	return roles, count, nil
+}

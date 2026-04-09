@@ -134,6 +134,20 @@ func (MatrixSyncState) TableName() string {
 	return "matrix_sync_state"
 }
 
+// MatrixUserRole stores user roles in rooms.
+type MatrixUserRole struct {
+	ID        uint      `gorm:"primaryKey" json:"id"`
+	UserID    string    `gorm:"size:255;notNull;index:idx_user_room,unique" json:"user_id"` // Matrix user ID
+	RoomID    string    `gorm:"size:255;notNull;index:idx_user_room,unique" json:"room_id"` // Matrix room ID
+	Role      string    `gorm:"size:50;notNull" json:"role"`                               // owner, admin, member, guest
+	CreatedAt time.Time `json:"created_at"`
+	UpdatedAt time.Time `json:"updated_at"`
+}
+
+func (MatrixUserRole) TableName() string {
+	return "matrix_user_roles"
+}
+
 // SeedMatrixPlatform seeds initial Matrix platform data (rooms, channels, commands).
 func SeedMatrixPlatform(db *gorm.DB) error {
 	// Check if already seeded

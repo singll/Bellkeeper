@@ -198,6 +198,11 @@ func registerMatrixAdminRoutes(api *gin.RouterGroup, h *handler.MatrixAdminHandl
 	admin.GET("/events", h.GetEventLogs)
 	admin.GET("/notifications", h.GetNotificationLogs)
 	admin.GET("/stats", h.GetStats)
+	// User roles
+	admin.GET("/roles", h.ListUserRoles)
+	admin.GET("/roles/:user_id", h.GetUserRole)
+	admin.POST("/roles", h.SetUserRole)
+	admin.DELETE("/roles/:user_id", h.RemoveUserRole)
 }
 
 func registerLogLevelRoutes(api *gin.RouterGroup, h *handler.LogLevelHandler) {

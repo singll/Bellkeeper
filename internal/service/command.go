@@ -33,9 +33,8 @@ func NewCommandService(
 		client: client,
 	}
 
-	// Create router with command prefix
-	svc.router = command.NewRouter(cfg.CommandPrefix, repos)
-	svc.router.SetAdminUsers([]string{"@singll:matrix.singll.net"}) // TODO: from config
+	// Create router with command prefix and admin users
+	svc.router = command.NewRouter(cfg.CommandPrefix, repos, []string{"@singll:matrix.singll.net"})
 
 	// Register command handlers
 	svc.registerHandlers()

@@ -6,23 +6,26 @@ import (
 	"log"
 	"strings"
 
+	"github.com/singll/bellkeeper/internal/matrix/policy"
 	"github.com/singll/bellkeeper/internal/repository"
 )
 
 // Router routes commands to handlers
 type Router struct {
 	handlers    map[string]Handler
-	parser      *Parser
-	repos       *repository.Repositories
-	adminUsers  map[string]bool // set of admin user IDs
+	parser     *Parser
+	repos      *repository.Repositories
+	policy     *policy.Checker
+	adminUsers map[string]bool // set of admin user IDs (deprecated, use policy.Checker)
 }
 
 // NewRouter creates a new command router
-func NewRouter(prefixes string, repos *repository.Repositories) *Router {
+func NewRouter(prefixes string, repos *repository.Repositories, adminUsers []string) *Router {
 	r := &Router{
 		handlers:   make(map[string]Handler),
 		parser:     NewParser(prefixes),
 		repos:      repos,
+		policy:     policy.NewChecker(repos, adminUsers),
 		adminUsers: make(map[string]bool),
 	}
 
@@ -35,6 +38,11 @@ func NewRouter(prefixes string, repos *repository.Repositories) *Router {
 	r.loadCommandsFromDB()
 
 	return r
+}
+
+// SetPolicyChecker updates the policy checker (for hot reload)
+func (r *Router) SetPolicyChecker(checker *policy.Checker) {
+	r.policy = checker
 }
 
 // RegisterHandler registers a command handler
@@ -77,8 +85,8 @@ func (r *Router) Route(ctx context.Context, cmdCtx *Context) (*Response, error) 
 		}, nil
 	}
 
-	// Check permission
-	if !r.checkPermission(cmdCtx, handler) {
+	// Check permission using policy engine
+	if !r.checkPermission(ctx, cmdCtx) {
 		return &Response{
 			Success: false,
 			Message: "⚠️ 权限不足",
@@ -90,37 +98,46 @@ func (r *Router) Route(ctx context.Context, cmdCtx *Context) (*Response, error) 
 	return handler.Handle(ctx, cmdCtx)
 }
 
-// checkPermission checks if user has permission to execute command
-func (r *Router) checkPermission(cmdCtx *Context, handler Handler) bool {
-	// Get handler config from DB (if any)
+// checkPermission checks if user has permission to execute command using policy engine
+func (r *Router) checkPermission(ctx context.Context, cmdCtx *Context) bool {
+	// Get command config from DB
 	cmd, err := r.repos.MatrixCommand.GetByName(cmdCtx.Command.Name)
-	if err == nil && cmd != nil {
-		// Check room scope
-		switch cmd.RoomScope {
-		case "admin_only":
-			if !r.isAdmin(cmdCtx.Sender) {
-				return false
-			}
-		}
-
-		// Check permission level (simplified - just check admin)
-		// TODO: Implement proper permission checking
+	if err != nil {
+		log.Printf("[Policy] failed to get command %s: %v", cmdCtx.Command.Name, err)
+		return false
+	}
+	if cmd == nil {
+		log.Printf("[Policy] command %s not found", cmdCtx.Command.Name)
+		return false
 	}
 
-	return true
+	// Check room scope first
+	if cmd.RoomScope == "admin_only" && !r.policy.IsAdmin(cmdCtx.Sender) {
+		log.Printf("[Policy] command %s requires admin_only room scope", cmdCtx.Command.Name)
+		return false
+	}
+
+	// Use policy checker for permission level
+	allowed, err := r.policy.CheckCommandPermission(ctx, cmdCtx.Sender, cmdCtx.RoomID, cmdCtx.Command.Name, cmd.PermissionLevel)
+	if err != nil {
+		log.Printf("[Policy] permission check failed: %v", err)
+		return false
+	}
+	return allowed
 }
 
-// isAdmin checks if user is an admin
+// isAdmin checks if user is a global admin (deprecated, use policy.Checker.IsAdmin)
 func (r *Router) isAdmin(userID string) bool {
-	return r.adminUsers[userID]
+	return r.adminUsers[userID] || r.policy.IsAdmin(userID)
 }
 
-// SetAdminUsers sets the list of admin users
+// SetAdminUsers sets the list of admin users (updates both router and policy)
 func (r *Router) SetAdminUsers(users []string) {
 	r.adminUsers = make(map[string]bool)
 	for _, u := range users {
 		r.adminUsers[u] = true
 	}
+	r.policy.SetAdminUsers(users)
 }
 
 // loadCommandsFromDB loads commands from database

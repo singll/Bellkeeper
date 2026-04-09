@@ -131,3 +131,106 @@ func (h *MatrixAdminHandler) GetStats(c *gin.Context) {
 	}
 	c.JSON(http.StatusOK, stats)
 }
+
+// ============ User Role Management ============
+
+// ListUserRoles handles GET /api/matrix/admin/roles
+// Query params: room_id (optional)
+func (h *MatrixAdminHandler) ListUserRoles(c *gin.Context) {
+	roomID := c.Query("room_id")
+	if roomID != "" {
+		roles, err := h.adminSvc.ListUserRoles(c.Request.Context(), roomID)
+		if err != nil {
+			c.JSON(http.StatusInternalServerError, gin.H{"error": err.Error()})
+			return
+		}
+		c.JSON(http.StatusOK, gin.H{"roles": roles})
+		return
+	}
+
+	// List all roles with pagination
+	limit := 100
+	offset := 0
+	if l := c.Query("limit"); l != "" {
+		if parsed, err := strconv.Atoi(l); err == nil && parsed > 0 {
+			limit = parsed
+		}
+	}
+	if o := c.Query("offset"); o != "" {
+		if parsed, err := strconv.Atoi(o); err == nil && parsed >= 0 {
+			offset = parsed
+		}
+	}
+
+	roles, total, err := h.adminSvc.ListAllUserRoles(c.Request.Context(), limit, offset)
+	if err != nil {
+		c.JSON(http.StatusInternalServerError, gin.H{"error": err.Error()})
+		return
+	}
+	c.JSON(http.StatusOK, gin.H{"roles": roles, "total": total})
+}
+
+// GetUserRole handles GET /api/matrix/admin/roles/:user_id
+// Query params: room_id (required)
+func (h *MatrixAdminHandler) GetUserRole(c *gin.Context) {
+	userID := c.Param("user_id")
+	roomID := c.Query("room_id")
+	if roomID == "" {
+		c.JSON(http.StatusBadRequest, gin.H{"error": "room_id required"})
+		return
+	}
+
+	role, err := h.adminSvc.GetUserRole(c.Request.Context(), userID, roomID)
+	if err != nil {
+		c.JSON(http.StatusInternalServerError, gin.H{"error": err.Error()})
+		return
+	}
+	if role == nil {
+		c.JSON(http.StatusNotFound, gin.H{"error": "role not found"})
+		return
+	}
+	c.JSON(http.StatusOK, gin.H{"role": role})
+}
+
+// SetUserRole handles POST /api/matrix/admin/roles
+func (h *MatrixAdminHandler) SetUserRole(c *gin.Context) {
+	var req struct {
+		UserID string `json:"user_id" binding:"required"`
+		RoomID string `json:"room_id" binding:"required"`
+		Role   string `json:"role" binding:"required"`
+	}
+	if err := c.ShouldBindJSON(&req); err != nil {
+		c.JSON(http.StatusBadRequest, gin.H{"error": err.Error()})
+		return
+	}
+
+	// Validate role
+	validRoles := map[string]bool{"owner": true, "admin": true, "member": true, "guest": true}
+	if !validRoles[req.Role] {
+		c.JSON(http.StatusBadRequest, gin.H{"error": "invalid role, must be one of: owner, admin, member, guest"})
+		return
+	}
+
+	if err := h.adminSvc.SetUserRole(c.Request.Context(), req.UserID, req.RoomID, req.Role); err != nil {
+		c.JSON(http.StatusInternalServerError, gin.H{"error": err.Error()})
+		return
+	}
+	c.JSON(http.StatusOK, gin.H{"message": "role set"})
+}
+
+// RemoveUserRole handles DELETE /api/matrix/admin/roles/:user_id
+// Query params: room_id (required)
+func (h *MatrixAdminHandler) RemoveUserRole(c *gin.Context) {
+	userID := c.Param("user_id")
+	roomID := c.Query("room_id")
+	if roomID == "" {
+		c.JSON(http.StatusBadRequest, gin.H{"error": "room_id required"})
+		return
+	}
+
+	if err := h.adminSvc.RemoveUserRole(c.Request.Context(), userID, roomID); err != nil {
+		c.JSON(http.StatusInternalServerError, gin.H{"error": err.Error()})
+		return
+	}
+	c.JSON(http.StatusOK, gin.H{"message": "role removed"})
+}
