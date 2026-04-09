@@ -15,10 +15,13 @@ import (
 
 // SyncLoop manages the Matrix sync loop
 type SyncLoop struct {
-	client  *Client
-	syncer  *mautrix.DefaultSyncer
-	stopCh  chan struct{}
-	stopped bool
+	client         *Client
+	syncer         *mautrix.DefaultSyncer
+	stopCh         chan struct{}
+	stopped        bool
+	commandService interface {
+		ExecuteMessage(ctx context.Context, roomID, sender, eventID, content string) error
+	}
 }
 
 // NewSyncLoop creates a new sync loop
@@ -35,6 +38,13 @@ func NewSyncLoop(client *Client) *SyncLoop {
 	loop.registerHandlers()
 
 	return loop
+}
+
+// SetCommandService sets the command service for processing commands
+func (s *SyncLoop) SetCommandService(svc interface {
+	ExecuteMessage(ctx context.Context, roomID, sender, eventID, content string) error
+}) {
+	s.commandService = svc
 }
 
 // registerHandlers registers Matrix event handlers
@@ -194,8 +204,16 @@ func (s *SyncLoop) handleRoomMessage(ctx context.Context, evt *event.Event) erro
 
 	log.Printf("[Matrix] received message in %s from %s: %s", evt.RoomID, evt.Sender, content.Body)
 
-	// TODO: Route to command handler
-	// For now, just mark as processed
+	// Route to command handler if command service is set
+	if s.commandService != nil {
+		if err := s.commandService.ExecuteMessage(ctx, evt.RoomID.String(), evt.Sender.String(), evt.ID.String(), content.Body); err != nil {
+			log.Printf("[Matrix] command execution failed: %v", err)
+			s.client.repos.MatrixEvent.UpdateStatus(evt.ID.String(), "failed", err.Error())
+			return nil
+		}
+	}
+
+	// Mark as processed
 	if err := s.client.repos.MatrixEvent.UpdateStatus(evt.ID.String(), "processed", ""); err != nil {
 		log.Printf("[Matrix] failed to update event status: %v", err)
 	}

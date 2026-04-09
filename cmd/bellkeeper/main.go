@@ -144,6 +144,12 @@ func runServer(cmd *cobra.Command, args []string) {
 
 		// Create and start sync loop
 		matrixSyncLoop = gateway.NewSyncLoop(matrixClient)
+
+		// Initialize Command Service and attach to sync loop
+		commandSvc := service.NewCommandService(cfg.Matrix, repos, matrixClient)
+		matrixSyncLoop.SetCommandService(commandSvc)
+		log.Printf("[Matrix] Command Router initialized with %d commands", len(commandSvc.ListCommands()))
+
 		if err := matrixSyncLoop.Start(context.Background()); err != nil {
 			log.Fatalf("Failed to start Matrix sync loop: %v", err)
 		}
