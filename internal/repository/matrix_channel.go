@@ -45,6 +45,10 @@ func (r *MatrixChannelRepository) GetByName(name string) (*model.MatrixChannel, 
 }
 
 func (r *MatrixChannelRepository) Create(channel *model.MatrixChannel) error {
+	// Ensure Config is valid JSON (empty string causes PostgreSQL jsonb error)
+	if channel.Config == "" {
+		channel.Config = "{}"
+	}
 	return r.db.Create(channel).Error
 }
 

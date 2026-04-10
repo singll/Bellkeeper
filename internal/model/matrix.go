@@ -171,11 +171,12 @@ func SeedMatrixPlatform(db *gorm.DB) error {
 	// will happen when the Matrix gateway starts.
 
 	// Seed default channels (logical channels that will be mapped to rooms)
+	// Note: Config uses "{}" instead of "" because PostgreSQL jsonb rejects empty strings
 	channels := []MatrixChannel{
-		{ChannelName: "alerts", RoomID: "", IsActive: true, Priority: 100},
-		{ChannelName: "daily", RoomID: "", IsActive: true, Priority: 50},
-		{ChannelName: "todo", RoomID: "", IsActive: true, Priority: 30},
-		{ChannelName: "qa", RoomID: "", IsActive: true, Priority: 30},
+		{ChannelName: "alerts", RoomID: "", IsActive: true, Priority: 100, Config: "{}"},
+		{ChannelName: "daily", RoomID: "", IsActive: true, Priority: 50, Config: "{}"},
+		{ChannelName: "todo", RoomID: "", IsActive: true, Priority: 30, Config: "{}"},
+		{ChannelName: "qa", RoomID: "", IsActive: true, Priority: 30, Config: "{}"},
 	}
 
 	for _, ch := range channels {
@@ -187,6 +188,7 @@ func SeedMatrixPlatform(db *gorm.DB) error {
 	}
 
 	// Seed default commands
+	// Note: HandlerConfig uses "{}" instead of "" because PostgreSQL jsonb rejects empty strings
 	commands := []MatrixCommand{
 		{
 			CommandName:     "help",
@@ -194,6 +196,7 @@ func SeedMatrixPlatform(db *gorm.DB) error {
 			PermissionLevel: "user",
 			RoomScope:       "any",
 			IsActive:        true,
+			HandlerConfig:   "{}",
 			Description:     "显示可用命令列表",
 			UsageExample:    "!help",
 		},
@@ -203,6 +206,7 @@ func SeedMatrixPlatform(db *gorm.DB) error {
 			PermissionLevel: "user",
 			RoomScope:       "any",
 			IsActive:        true,
+			HandlerConfig:   "{}",
 			Description:     "显示系统状态",
 			UsageExample:    "!status",
 		},
@@ -212,6 +216,7 @@ func SeedMatrixPlatform(db *gorm.DB) error {
 			PermissionLevel: "user",
 			RoomScope:       "any",
 			IsActive:        true,
+			HandlerConfig:   "{}",
 			Description:     "查看 Memos 待办列表",
 			UsageExample:    "!列表",
 		},
@@ -221,6 +226,7 @@ func SeedMatrixPlatform(db *gorm.DB) error {
 			PermissionLevel: "user",
 			RoomScope:       "any",
 			IsActive:        true,
+			HandlerConfig:   "{}",
 			Description:     "创建 Memos 待办事项",
 			UsageExample:    "!新增 完成项目文档",
 		},
@@ -230,6 +236,7 @@ func SeedMatrixPlatform(db *gorm.DB) error {
 			PermissionLevel: "user",
 			RoomScope:       "any",
 			IsActive:        true,
+			HandlerConfig:   "{}",
 			Description:     "向 RAGFlow 提问",
 			UsageExample:    "!问 什么是 GORM？",
 		},
@@ -239,6 +246,7 @@ func SeedMatrixPlatform(db *gorm.DB) error {
 			PermissionLevel: "user",
 			RoomScope:       "any",
 			IsActive:        true,
+			HandlerConfig:   "{}",
 			Description:     "在 RAGFlow 中搜索",
 			UsageExample:    "!搜 Docker 部署",
 		},
