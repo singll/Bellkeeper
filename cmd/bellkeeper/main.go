@@ -97,7 +97,7 @@ func runServer(cmd *cobra.Command, args []string) {
 	// Initialize layers: Repository → Service → Handler
 	repos := repository.NewRepositories(db)
 	services := service.NewServices(repos, cfg, version)
-	handlers := handler.NewHandlers(services, shutdownChan)
+	handlers := handler.NewHandlers(services, shutdownChan, cfg.Memos.BaseURL, cfg.Memos.APIToken)
 
 	// Initialize Matrix infrastructure (Redis, NATS)
 	var (
@@ -128,7 +128,7 @@ func runServer(cmd *cobra.Command, args []string) {
 		// Initialize Notification Service and Handler
 		notifySvc := service.NewNotificationService(cfg.NATS, redisClient, natsClient, repos)
 		services.SetNotificationService(notifySvc)
-		handlers = handler.NewHandlers(services, shutdownChan) // recreate to include notify handler
+		handlers = handler.NewHandlers(services, shutdownChan, cfg.Memos.BaseURL, cfg.Memos.APIToken) // recreate to include notify handler
 
 		// Initialize Notification Worker
 		notifySender := service.NewNotificationSender(nil, repos) // sender needs matrix client
@@ -141,7 +141,7 @@ func runServer(cmd *cobra.Command, args []string) {
 		// Create a policy checker for permission validation
 		adminPolicy := policy.NewChecker(repos, []string{})
 		services.MatrixAdmin = service.NewAdminService(repos, adminPolicy)
-		handlers = handler.NewHandlers(services, shutdownChan) // recreate to include admin handler
+		handlers = handler.NewHandlers(services, shutdownChan, cfg.Memos.BaseURL, cfg.Memos.APIToken) // recreate to include admin handler
 	}
 
 	// Initialize Matrix Gateway (if bot token configured)

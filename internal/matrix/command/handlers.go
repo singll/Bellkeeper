@@ -258,7 +258,7 @@ func (h *QAHandler) Handle(ctx context.Context, cmdCtx *Context) (*Response, err
 	}, nil
 }
 
-// DirectMemosHandler handles Memos todo directly without n8n
+// DirectMemosHandler handles Memos todo directly with todo.txt format
 type DirectMemosHandler struct {
 	BaseHandler
 	apiURL     string
@@ -271,7 +271,7 @@ func NewDirectMemosHandler(apiURL, apiToken string) *DirectMemosHandler {
 	return &DirectMemosHandler{
 		BaseHandler: BaseHandler{
 			name:        "待办",
-			description: "Memos 待办管理（直接调用）",
+			description: "Memos 待办管理（支持 todo.txt 格式）",
 			usage:       "<子命令> [参数]",
 		},
 		apiURL:   apiURL,
@@ -286,10 +286,15 @@ func (h *DirectMemosHandler) Handle(ctx context.Context, cmdCtx *Context) (*Resp
 	if len(cmdCtx.Command.Argv) == 0 {
 		return &Response{
 			Success: true,
-			Message: "**待办命令:**\n\n" +
-				"• `!待办 列表` - 查看所有待办\n" +
-				"• `!待办 新增 <内容>` - 添加新待办\n" +
-				"• `!待办 完成 <ID>` - 标记待办完成",
+			Message: "**📋 待办命令（todo.txt 格式）**\n\n" +
+				"`!待办 列表` - 查看所有待办\n" +
+				"`!待办 新增 <内容>` - 添加待办\n" +
+				"`!待办 完成 <ID>` - 标记完成\n" +
+				"`!待办 删除 <ID>` - 删除待办\n\n" +
+				"**参数格式示例：**\n" +
+				"`P1 D4/20 完成报告` - P1优先级, 4月20日截止\n" +
+				"`+工作 @办公室 任务` - +项目名, @上下文\n" +
+				"`P2 +项目 @上下文 D5/1 内容` - 组合使用",
 			IsHTML: true,
 		}, nil
 	}
@@ -303,10 +308,14 @@ func (h *DirectMemosHandler) Handle(ctx context.Context, cmdCtx *Context) (*Resp
 	switch subCmd {
 	case "列表", "list":
 		return h.listTodos(ctx)
-	case "新增", "add":
+	case "新增", "add", "new":
 		return h.addTodo(ctx, args)
 	case "完成", "done":
 		return h.completeTodo(ctx, args)
+	case "删除", "delete", "del":
+		return h.deleteTodo(ctx, args)
+	case "显示", "show":
+		return h.showTodo(ctx, args)
 	default:
 		return &Response{
 			Success: false,
@@ -352,11 +361,12 @@ func (h *DirectMemosHandler) listTodos(ctx context.Context) (*Response, error) {
 	// Parse response
 	var result struct {
 		Memos []struct {
-			ID        int    `json:"id"`
-			Content   string `json:"content"`
-			CreatedAt string `json:"createdTs"`
-			Done      bool   `json:"done"`
-			Tags      []struct {
+			ID          int    `json:"id"`
+			Content     string `json:"content"`
+			CreatedTs   int64  `json:"createdTs"`
+			Done        bool   `json:"done"`
+			CompletedTs *int64 `json:"completedTs"`
+			Tags        []struct {
 				Name string `json:"name"`
 			} `json:"tags"`
 		} `json:"data"`
@@ -369,14 +379,10 @@ func (h *DirectMemosHandler) listTodos(ctx context.Context) (*Response, error) {
 		}, nil
 	}
 
-	// Filter todos (memos with "todo" tag or from specific resource)
-	var todos []string
+	// Convert to todo items
+	var todoItems []*TodoItem
 	for _, m := range result.Memos {
-		// Skip done memos
-		if m.Done {
-			continue
-		}
-		// Check if it has a todo-related tag or content pattern
+		// Check if it has a todo-related tag
 		isTodo := false
 		for _, t := range m.Tags {
 			if t.Name == "todo" || t.Name == "待办" || t.Name == "任务" {
@@ -384,33 +390,43 @@ func (h *DirectMemosHandler) listTodos(ctx context.Context) (*Response, error) {
 				break
 			}
 		}
-		// Also include memos from specific creator or with checkboxes
-		if !isTodo && (len(m.Tags) == 0) {
-			// Show all memos without tags as potential todos
+		if !isTodo && len(m.Tags) == 0 {
 			isTodo = true
 		}
-		if isTodo {
-			todos = append(todos, fmt.Sprintf("• `[%d]` %s", m.ID, m.Content))
+
+		if !isTodo {
+			continue
 		}
+
+		item := &TodoItem{
+			ID:         m.ID,
+			Done:       m.Done,
+			RawContent: m.Content,
+		}
+
+		// Parse created date
+		if m.CreatedTs > 0 {
+			item.CreatedAt = formatTimestamp(m.CreatedTs)
+		}
+
+		// Parse completed date
+		if m.CompletedTs != nil && *m.CompletedTs > 0 {
+			item.CompletedAt = formatTimestamp(*m.CompletedTs)
+		}
+
+		// Convert Memos content to todo.txt format for display
+		item.RawContent = MemosToTodoTxt(m.Content)
+
+		todoItems = append(todoItems, item)
 	}
 
-	if len(todos) == 0 {
-		return &Response{
-			Success: true,
-			Message: "📋 待办列表\n\n暂无待办事项",
-			IsHTML:  true,
-		}, nil
-	}
-
-	msg := "📋 待办列表\n\n"
-	for _, t := range todos {
-		msg += t + "\n"
-	}
-	msg += "\n💡 使用 `!待办 完成 <ID>` 标记完成"
+	// Format and return
+	formatted := FormatTodoList(todoItems, false)
+	formatted += "\n\n💡 使用 `!待办 完成 <ID>` 标记完成"
 
 	return &Response{
 		Success: true,
-		Message: msg,
+		Message: formatted,
 		IsHTML:  true,
 	}, nil
 }
@@ -419,7 +435,7 @@ func (h *DirectMemosHandler) addTodo(ctx context.Context, content string) (*Resp
 	if content == "" {
 		return &Response{
 			Success: false,
-			Message: "请输入待办内容，例如: `!待办 新增 完成报告`",
+			Message: "请输入待办内容\n格式: `!待办 新增 P1 D4/20 内容 +项目 @上下文`",
 		}, nil
 	}
 
@@ -430,9 +446,15 @@ func (h *DirectMemosHandler) addTodo(ctx context.Context, content string) (*Resp
 		}, nil
 	}
 
+	// Parse command input to extract parameters
+	params := ParseCommandInput(content)
+
+	// Build Memos content
+	memosContent := params.ToMemosContent()
+
 	url := h.apiURL + "/api/v1/memos"
 	payload := map[string]interface{}{
-		"content": content,
+		"content":    memosContent,
 		"visibility": "PRIVATE",
 	}
 
@@ -469,9 +491,11 @@ func (h *DirectMemosHandler) addTodo(ctx context.Context, content string) (*Resp
 		} `json:"memo"`
 	}
 	if err := json.Unmarshal(respBody, &result); err == nil && result.Memo.ID > 0 {
+		// Format display for todo.txt
+		displayTxt := params.ToTodoTxtDisplay()
 		return &Response{
 			Success: true,
-			Message: fmt.Sprintf("✅ 已添加待办 [#%d]: %s", result.Memo.ID, content),
+			Message: fmt.Sprintf("✅ 已添加待办\n`%s`\n\n[#%d]", displayTxt, result.Memo.ID),
 		}, nil
 	}
 
@@ -537,6 +561,144 @@ func (h *DirectMemosHandler) completeTodo(ctx context.Context, idStr string) (*R
 
 	return &Response{
 		Success: true,
-		Message: fmt.Sprintf("✅ 已完成待办 #%d", id),
+		Message: fmt.Sprintf("✅ 已完成待办 [#%d]", id),
 	}, nil
+}
+
+func (h *DirectMemosHandler) deleteTodo(ctx context.Context, idStr string) (*Response, error) {
+	if idStr == "" {
+		return &Response{
+			Success: false,
+			Message: "请提供待办 ID，例如: `!待办 删除 123`",
+		}, nil
+	}
+
+	id, err := strconv.Atoi(idStr)
+	if err != nil {
+		return &Response{
+			Success: false,
+			Message: fmt.Sprintf("无效的 ID: %s", idStr),
+		}, nil
+	}
+
+	if h.apiURL == "" || h.apiToken == "" {
+		return &Response{
+			Success: false,
+			Message: "Memos API 未配置，请联系管理员",
+		}, nil
+	}
+
+	url := h.apiURL + "/api/v1/memos/" + strconv.Itoa(id)
+	req, err := http.NewRequestWithContext(ctx, "DELETE", url, nil)
+	if err != nil {
+		return nil, err
+	}
+	req.Header.Set("Authorization", "Bearer "+h.apiToken)
+
+	resp, err := h.httpClient.Do(req)
+	if err != nil {
+		return &Response{
+			Success: false,
+			Message: fmt.Sprintf("❌ 删除待办失败: %v", err),
+		}, nil
+	}
+	defer resp.Body.Close()
+
+	if resp.StatusCode >= 400 && resp.StatusCode != 404 {
+		respBody, _ := io.ReadAll(resp.Body)
+		return &Response{
+			Success: false,
+			Message: fmt.Sprintf("❌ Memos API 返回错误 (HTTP %d): %s", resp.StatusCode, string(respBody)),
+		}, nil
+	}
+
+	return &Response{
+		Success: true,
+		Message: fmt.Sprintf("🗑️ 已删除待办 [#%d]", id),
+	}, nil
+}
+
+func (h *DirectMemosHandler) showTodo(ctx context.Context, idStr string) (*Response, error) {
+	if idStr == "" {
+		return &Response{
+			Success: false,
+			Message: "请提供待办 ID，例如: `!待办 显示 123`",
+		}, nil
+	}
+
+	id, err := strconv.Atoi(idStr)
+	if err != nil {
+		return &Response{
+			Success: false,
+			Message: fmt.Sprintf("无效的 ID: %s", idStr),
+		}, nil
+	}
+
+	if h.apiURL == "" || h.apiToken == "" {
+		return &Response{
+			Success: false,
+			Message: "Memos API 未配置，请联系管理员",
+		}, nil
+	}
+
+	url := h.apiURL + "/api/v1/memos/" + strconv.Itoa(id)
+	req, err := http.NewRequestWithContext(ctx, "GET", url, nil)
+	if err != nil {
+		return nil, err
+	}
+	req.Header.Set("Authorization", "Bearer "+h.apiToken)
+
+	resp, err := h.httpClient.Do(req)
+	if err != nil {
+		return &Response{
+			Success: false,
+			Message: fmt.Sprintf("❌ 查询待办失败: %v", err),
+		}, nil
+	}
+	defer resp.Body.Close()
+
+	respBody, _ := io.ReadAll(resp.Body)
+
+	if resp.StatusCode >= 400 {
+		return &Response{
+			Success: false,
+			Message: fmt.Sprintf("❌ Memos API 返回错误 (HTTP %d): %s", resp.StatusCode, string(respBody)),
+		}, nil
+	}
+
+	var memo struct {
+		Memo struct {
+			ID          int    `json:"id"`
+			Content     string `json:"content"`
+			CreatedTs   int64  `json:"createdTs"`
+			Done        bool   `json:"done"`
+			CompletedTs *int64 `json:"completedTs"`
+		} `json:"memo"`
+	}
+
+	if err := json.Unmarshal(respBody, &memo); err != nil {
+		return &Response{
+			Success: false,
+			Message: fmt.Sprintf("❌ 解析响应失败: %v", err),
+		}, nil
+	}
+
+	todoTxt := MemosToTodoTxt(memo.Memo.Content)
+
+	status := "📝 进行中"
+	if memo.Memo.Done {
+		status = "✅ 已完成"
+	}
+
+	return &Response{
+		Success: true,
+		Message: fmt.Sprintf("**#%d** %s\n\n`%s`\n\n创建时间: %s",
+			memo.Memo.ID, status, todoTxt, formatTimestamp(memo.Memo.CreatedTs)),
+	}, nil
+}
+
+// Helper function to format Unix timestamp to YYYY-MM-DD
+func formatTimestamp(ts int64) string {
+	t := time.Unix(ts, 0)
+	return t.Format("2006-01-02")
 }

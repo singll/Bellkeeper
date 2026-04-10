@@ -20,13 +20,14 @@ type Handlers struct {
 	FileIngestion *FileIngestionHandler
 	LogLevel      *LogLevelHandler
 	Config        *ConfigHandler
+	TodoTxt       *TodoTxtHandler
 	// Optional handlers
 	MatrixNotify *MatrixNotifyHandler
 	MatrixAdmin  *MatrixAdminHandler
 }
 
 // NewHandlers creates all handler instances
-func NewHandlers(services *service.Services, shutdownChan chan struct{}) *Handlers {
+func NewHandlers(services *service.Services, shutdownChan chan struct{}, memosBaseURL, memosAPIToken string) *Handlers {
 	h := &Handlers{
 		Tag:           NewTagHandler(services.Tag),
 		RSS:           NewRSSHandler(services.RSS),
@@ -42,6 +43,7 @@ func NewHandlers(services *service.Services, shutdownChan chan struct{}) *Handle
 		FileIngestion: NewFileIngestionHandler(services.FileIngestion),
 		LogLevel:      NewLogLevelHandler(),
 		Config:        NewConfigHandler(services.LLMProxy),
+		TodoTxt:       NewTodoTxtHandler(memosBaseURL, memosAPIToken),
 	}
 
 	// Set optional handlers

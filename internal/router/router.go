@@ -34,6 +34,7 @@ func Setup(r *gin.Engine, handlers *handler.Handlers, mode string, apiKey string
 	registerFileIngestionRoutes(api, handlers.FileIngestion)
 	registerLogLevelRoutes(api, handlers.LogLevel)
 	registerConfigRoutes(api, handlers.Config)
+	registerTodoTxtRoutes(api, handlers.TodoTxt)
 
 	// Matrix notification routes
 	if handlers.MatrixNotify != nil {
@@ -213,4 +214,10 @@ func registerLogLevelRoutes(api *gin.RouterGroup, h *handler.LogLevelHandler) {
 func registerConfigRoutes(api *gin.RouterGroup, h *handler.ConfigHandler) {
 	api.POST("/config/reload", h.ReloadAll)
 	api.POST("/config/reload/llm-proxy", h.ReloadLLMProxy)
+}
+
+func registerTodoTxtRoutes(api *gin.RouterGroup, h *handler.TodoTxtHandler) {
+	todos := api.Group("/todos")
+	todos.GET("/export", h.Export)
+	todos.GET("/export/plain", h.ExportPlain)
 }
