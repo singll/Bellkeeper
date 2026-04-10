@@ -1,42 +1,64 @@
 # Bellkeeper
 
-**Bellkeeper (钟守者)** 是一个知识管理系统，用于采集、组织和检索信息。集成 RagFlow 向量知识库和 n8n 工作流引擎，提供从信息采集到知识入库的完整管理链路。
+**Bellkeeper (钟守者)** 是一个知识管理中台 + LLM 代理网关，充当 n8n 工作流的"能力增强器"。集成 RagFlow 向量知识库、Matrix 通信平台、Memos 待办系统和 n8n 工作流引擎，提供从信息采集到知识入库的完整管理链路。
 
 ## 功能概览
 
 ### 核心功能
 
-- **标签系统** — 统一的知识分类标签，支持自定义颜色，与所有实体关联
-- **数据源管理** — 管理各类信息来源 URL，按类型/分类组织
-- **RSS 订阅** — RSS Feed 管理，可配置抓取间隔
-- **Webhook 管理** — 自定义 Webhook 端点配置、手动触发、完整的请求/响应历史记录
-- **知识库映射** — 将标签映射到 RagFlow Dataset，实现智能路由
+- **标签系统** — 统一的知识分类标签，支持自定义颜色，LLM 驱动智能分类
+- **知识库映射** — 将标签映射到 RagFlow Dataset，实现智能路由上传
+- **RSS 订阅** — RSS Feed 管理，可配置抓取间隔和标签关联
+- **文件入库** — URL 内容提取（Trafilatura + Firecrawl）、YAML frontmatter 生成、元数据管理
+- **URL 去重** — 三级匹配策略（精确/归一化/模糊）
+
+### LLM Proxy 代理池
+
+- **多渠道路由** — 7+ 预配置渠道（SiliconFlow、DashScope、DeepSeek 等）
+- **虚拟模型组** — 逻辑模型映射到多个真实渠道（pool-chat-free、pool-chat-balanced、pool-summary）
+- **令牌桶限速** — 每渠道 RPM/RPD 限制
+- **熔断器** — 连续失败自动熔断，冷却后半开探测
+- **粘性路由** — 任务绑定同一渠道
+
+### Matrix 控制平面
+
+- **Matrix 机器人** — 前缀命令模式（`!help`、`!待办`、`!问`、`!搜`）
+- **通知网关** — 频道路由 + NATS 队列 + 重试逻辑
+- **房间/频道管理** — Web UI 管理 Matrix 房间和通知频道
+- **命令路由** — 可扩展的命令处理器，支持权限控制
 
 ### 集成能力
 
-- **RagFlow 集成** — 文档上传、智能路由上传、文档管理、URL 去重检查
+- **RagFlow 集成** — 文档上传、智能路由上传、解析队列、文档管理
 - **n8n 工作流** — 查看/激活/停用工作流、执行历史、手动触发
+- **Memos 集成** — 待办管理（通过 Matrix 命令或 n8n 工作流）
 - **系统设置** — Web UI 动态配置 API Key、功能开关等
 
-### 监控面板
+### 监控与运维
 
-- **Dashboard** — 系统概览、服务状态、快捷操作
-- **健康检查** — 外部服务连通性监测 (RagFlow、n8n)、系统指标统计
+- **Dashboard** — 系统概览、服务状态、LLM Proxy 健康状态
+- **健康检查** — 外部服务连通性监测、Liveness/Readiness 探针
+- **Prometheus Metrics** — `/metrics` 端点
+- **活动日志** — 跨模块操作审计
 
 ## 技术栈
 
 | 层级 | 技术 | 版本 |
 |------|------|------|
-| **后端框架** | Go + Gin | Go 1.22, Gin 1.9 |
+| **后端框架** | Go + Gin | Go 1.25, Gin 1.9 |
 | **ORM** | GORM | 1.25 |
 | **数据库** | PostgreSQL | 16 |
+| **消息队列** | NATS | - |
+| **缓存** | Redis | - |
+| **Matrix SDK** | mautrix-go | - |
 | **前端框架** | SolidJS + TypeScript | SolidJS 1.8 |
 | **UI 样式** | TailwindCSS | 3.4 |
 | **构建工具** | Vite | 5.x |
 | **包管理** | Go Modules / pnpm | - |
-| **认证** | Authelia (Forward Auth) | - |
+| **认证** | Authelia (Forward Auth) + API Key | - |
 | **配置** | Viper + Cobra | - |
 | **日志** | Zap (结构化日志) | 1.26 |
+| **监控** | Prometheus | - |
 | **容器** | Docker (多阶段构建) | Alpine |
 
 ## 项目结构
@@ -48,104 +70,114 @@ bellkeeper/
 │
 ├── internal/
 │   ├── config/                    # 配置管理 (Viper)
-│   │   └── config.go              #   配置结构体 + 加载 + 默认值
+│   │   └── config.go
 │   │
 │   ├── router/                    # 路由注册
-│   │   └── router.go              #   按功能域分组注册所有 API 路由
+│   │   └── router.go
 │   │
-│   ├── handler/                   # HTTP 处理器 (9 个)
+│   ├── handler/                   # HTTP 处理器
 │   │   ├── handler.go             #   Handler 注册中心
 │   │   ├── health.go              #   健康检查
-│   │   ├── tag.go                 #   标签 CRUD + 批量/匹配
-│   │   ├── datasource.go          #   数据源 CRUD
+│   │   ├── tag.go                 #   标签 CRUD
 │   │   ├── rss.go                 #   RSS 订阅 CRUD
-│   │   ├── webhook.go             #   Webhook CRUD + 触发/历史
 │   │   ├── dataset.go             #   知识库映射 CRUD + 智能推荐
 │   │   ├── ragflow.go             #   RagFlow 文档管理
+│   │   ├── llm_proxy.go           #   LLM Proxy 代理池管理
+│   │   ├── file_ingestion.go      #   文件入库 API
+│   │   ├── matrix_notify.go       #   Matrix 通知 API
+│   │   ├── matrix_admin.go        #   Matrix 管理 API
+│   │   ├── todotxt_export.go      #   todo.txt 导出
+│   │   ├── search.go              #   全局搜索
 │   │   ├── setting.go             #   系统设置
-│   │   └── workflow.go            #   n8n 工作流管理
+│   │   ├── workflow.go            #   n8n 工作流管理
+│   │   └── activity_log.go        #   活动日志查询
 │   │
-│   ├── service/                   # 业务逻辑层 (9 个)
+│   ├── service/                   # 业务逻辑层
 │   │   ├── service.go             #   Service 注册中心
-│   │   ├── health.go              #   服务健康检查逻辑
-│   │   ├── tag.go                 #   标签业务 (含 GetOrCreateByNames)
-│   │   ├── datasource.go          #   数据源业务
+│   │   ├── health.go              #   服务健康检查
+│   │   ├── tag.go                 #   标签业务
 │   │   ├── rss.go                 #   RSS 业务
-│   │   ├── webhook.go             #   Webhook 执行 + 历史记录
 │   │   ├── dataset.go             #   知识库映射 + 标签路由
-│   │   ├── ragflow.go             #   RagFlow API 调用 + 智能路由
-│   │   ├── workflow.go            #   n8n REST API 调用
-│   │   └── setting.go             #   配置管理 (含秘钥掩码)
+│   │   ├── ragflow.go             #   RagFlow API 集成
+│   │   ├── ragflow_parse_queue.go #   RAGFlow 解析队列
+│   │   ├── llm_proxy.go           #   LLM 多渠道代理
+│   │   ├── llm_model_group.go     #   虚拟模型组
+│   │   ├── llm_channel_health.go  #   熔断器
+│   │   ├── classify.go            #   LLM 分类
+│   │   ├── file_ingestion.go      #   文件入库服务
+│   │   ├── extractor.go           #   内容提取器
+│   │   ├── notification.go        #   通知服务
+│   │   ├── notification_sender.go #   Matrix 通知发送
+│   │   ├── command.go             #   Matrix 命令路由
+│   │   ├── admin.go               #   Matrix 管理服务
+│   │   ├── workflow.go            #   n8n API 调用
+│   │   ├── setting.go             #   配置管理
+│   │   └── activity_log.go        #   活动日志
 │   │
-│   ├── repository/                # 数据访问层 (6 个)
+│   ├── repository/                # 数据访问层
 │   │   ├── repository.go          #   Repository 注册中心
-│   │   ├── tag.go
-│   │   ├── datasource.go
-│   │   ├── rss.go
-│   │   ├── webhook.go
-│   │   ├── dataset.go
-│   │   └── setting.go
+│   │   ├── tag.go, rss.go, dataset.go, setting.go ...
+│   │   └── matrix_*.go            #   Matrix 实体仓储
 │   │
 │   ├── model/                     # 数据模型 (GORM)
-│   │   ├── db.go                  #   数据库初始化 + AutoMigrate + SeedSettings
-│   │   ├── tag.go                 #   Tag (多对多关联)
-│   │   ├── datasource.go          #   DataSource
-│   │   ├── rss_feed.go            #   RSSFeed
-│   │   ├── webhook.go             #   WebhookConfig + WebhookHistory
-│   │   ├── dataset_mapping.go     #   DatasetMapping + ArticleTag
-│   │   └── setting.go             #   Setting (含 MaskedValue)
+│   │   ├── db.go                  #   数据库初始化 + AutoMigrate
+│   │   ├── tag.go, rss_feed.go, dataset_mapping.go ...
+│   │   ├── llm_*.go               #   LLM Proxy 模型
+│   │   └── matrix.go              #   Matrix 实体模型
+│   │
+│   ├── matrix/                    # Matrix 集成模块
+│   │   ├── command/               #   命令系统 (parser/router/handlers)
+│   │   ├── gateway/               #   Matrix 网关 (client/sync)
+│   │   ├── infra/                 #   基础设施 (Redis/NATS)
+│   │   ├── notify/                #   通知网关
+│   │   ├── policy/                #   权限引擎
+│   │   ├── queue/                 #   消息队列
+│   │   ├── registry/              #   注册中心
+│   │   └── worker/                #   后台工作者
 │   │
 │   ├── middleware/                 # HTTP 中间件
-│   │   ├── auth.go                #   Authelia Forward Auth (Remote-User)
-│   │   ├── cors.go                #   CORS
-│   │   └── logger.go              #   Zap 结构化日志
+│   │   ├── auth.go                #   Authelia + API Key 认证
+│   │   ├── cors.go, logger.go, ratelimit.go
+│   │
+│   ├── metrics/                   # Prometheus 指标
 │   │
 │   └── pkg/                       # 内部工具包
-│       ├── response/              #   统一 API 响应辅助函数
-│       │   └── response.go        #     Success / Page / Error / ParsePagination / ParseID
-│       ├── defaults/              #   集中管理的常量和默认值
-│       │   └── defaults.go        #     DefaultTagColor / DefaultParserID / HealthCheckTimeout 等
-│       └── urlutil/               #   URL 规范化
-│           └── normalize.go
+│       ├── response/              #   统一 API 响应
+│       ├── errors/                #   错误类型定义
+│       ├── defaults/              #   常量和默认值
+│       ├── urlutil/               #   URL 规范化
+│       └── sanitizer/             #   HTML 清理
 │
 ├── web/                           # 前端 (SolidJS)
 │   ├── src/
 │   │   ├── api/index.ts           #   类型安全的 API 客户端
 │   │   ├── types/index.ts         #   TypeScript 类型定义
-│   │   ├── components/
-│   │   │   ├── Layout.tsx         #   主布局 + 侧边栏导航
-│   │   │   ├── Toast.tsx          #   通知组件
-│   │   │   └── Modal.tsx          #   模态框组件
-│   │   ├── pages/
-│   │   │   ├── Dashboard.tsx      #   仪表板
-│   │   │   ├── Tags.tsx           #   标签管理
-│   │   │   ├── DataSources.tsx    #   数据源管理
-│   │   │   ├── RSSFeeds.tsx       #   RSS 订阅管理
-│   │   │   ├── Datasets.tsx       #   知识库映射
-│   │   │   ├── Documents.tsx      #   RagFlow 文档管理
-│   │   │   ├── Webhooks.tsx       #   Webhook 管理
-│   │   │   ├── Workflows.tsx      #   n8n 工作流
-│   │   │   └── Settings.tsx       #   系统设置
-│   │   ├── index.tsx              #   前端入口
-│   │   └── index.css              #   全局样式 (深炭灰主题)
+│   │   ├── components/            #   Layout / Toast / Modal
+│   │   └── pages/                 #   15 个页面 (Dashboard/Tags/RSS/...)
 │   ├── index.html
 │   ├── package.json
-│   ├── vite.config.ts
-│   ├── tsconfig.json
-│   └── tailwind.config.js
+│   └── vite.config.ts
 │
 ├── config/
 │   └── bellkeeper.yaml            # 默认配置文件
 │
 ├── docker/
-│   ├── Dockerfile                 # 多阶段构建 (Node + Go + Alpine)
+│   ├── Dockerfile                 # 多阶段构建
 │   └── docker-compose.yml         # 本地开发编排
 │
-├── migrations/
-│   └── 001_init.up.sql            # 初始数据库迁移
+├── doc/                           # 项目文档
+│   ├── ENHANCEMENT-PLAN.md        # 增强规划（当前开发方向）
+│   ├── PROGRESS.md                # 进度跟踪与验收检查
+│   ├── DEVELOPMENT-GUIDE.md       # 开发规范与架构说明
+│   ├── API.md                     # REST API 参考
+│   ├── ARCHITECTURE.md            # 系统架构总览
+│   ├── LLM_PROXY_GUIDE.md         # LLM 代理池指南
+│   ├── documents/                 # 文件入库模块文档
+│   ├── matrix/                    # Matrix 平台文档
+│   ├── rss/                       # RSS 模块文档
+│   └── old/                       # 已归档文档
 │
-├── go.mod
-├── go.sum
+├── go.mod / go.sum
 ├── Makefile
 └── README.md
 ```
@@ -194,17 +226,17 @@ Config → DB → Repositories → Services → Handlers → Router
 ### 外部集成
 
 ```
-┌─────────────────────────────────────────────────────────────┐
-│                      Caddy (反向代理)                        │
-│                    + Authelia (认证)                          │
-└───────────────────────────┬─────────────────────────────────┘
-                            │ Remote-User Header
-┌───────────────────────────▼─────────────────────────────────┐
-│                     Bellkeeper Backend                        │
+┌──────────────────────────────────────────────────────────────┐
+│                       Caddy (反向代理)                        │
+│                     + Authelia (认证)                          │
+└────────────────────────────┬─────────────────────────────────┘
+                             │ Remote-User / X-API-Key
+┌────────────────────────────▼─────────────────────────────────┐
+│                      Bellkeeper Backend                        │
 │  ┌─────────────┐  ┌──────────────┐  ┌────────────────────┐  │
 │  │  Middleware  │→ │   Handler    │→ │     Service        │  │
 │  │  Auth/CORS  │  │  (HTTP API)  │  │  (Business Logic)  │  │
-│  │  Logger     │  │              │  │                    │  │
+│  │  RateLimit  │  │              │  │                    │  │
 │  └─────────────┘  └──────────────┘  └────────┬───────────┘  │
 │                                               │              │
 │                                    ┌──────────▼───────────┐  │
@@ -214,109 +246,102 @@ Config → DB → Repositories → Services → Handlers → Router
 │                                               │              │
 │  ┌────────────────────────────────────────────┼───────────┐  │
 │  │               SolidJS Frontend (嵌入)       │           │  │
-│  │  Dashboard | Tags | DataSources | RSS      │           │  │
-│  │  Datasets | Documents | Webhooks           │           │  │
-│  │  Workflows | Settings                      │           │  │
+│  │  Dashboard | Documents | Datasets | Tags   │           │  │
+│  │  LLM Proxy | Workflows | Matrix Admin     │           │  │
+│  │  RSS | Logs | Settings                     │           │  │
 │  └────────────────────────────────────────────┼───────────┘  │
 └───────────────────────────────────────────────┼──────────────┘
-          │                                     │
-    ┌─────▼─────┐  ┌──────▼──────┐  ┌─────────▼─────────┐
-    │ PostgreSQL │  │   RagFlow   │  │       n8n         │
-    │  (数据库)  │  │ (向量知识库) │  │  (工作流引擎)     │
-    └───────────┘  └─────────────┘  └───────────────────┘
+    │              │              │              │         │
+┌───▼───┐  ┌──────▼──────┐  ┌───▼───┐  ┌──────▼───┐ ┌───▼───┐
+│ PgSQL │  │   RagFlow   │  │  n8n  │  │  Matrix  │ │ Redis │
+│       │  │ (向量知识库) │  │       │  │ (Conduit)│ │ NATS  │
+└───────┘  └─────────────┘  └───────┘  └──────────┘ └───────┘
 ```
 
 ## API 端点
 
-### 公开端点 (无需认证)
+完整 API 参考见 [doc/API.md](doc/API.md)。以下为主要端点概览：
+
+### 公开端点
 
 | 方法 | 路径 | 说明 |
 |------|------|------|
 | GET | `/api/health` | 基本健康检查 |
-| GET | `/api/health/detailed` | 详细健康检查 (含外部服务状态和系统指标) |
+| GET | `/api/health/detailed` | 详细健康检查 |
+| GET | `/api/health/live` | Liveness 探针 |
+| GET | `/api/health/ready` | Readiness 探针 |
+| GET | `/metrics` | Prometheus 指标 |
 
-### 认证端点 (需 Authelia Forward Auth)
+### 认证端点
 
 #### 标签
 
 | 方法 | 路径 | 说明 |
 |------|------|------|
-| GET | `/api/tags` | 标签列表 (支持 `page`, `per_page`, `keyword`) |
-| POST | `/api/tags` | 创建标签 |
-| GET | `/api/tags/:id` | 获取标签详情 |
-| PUT | `/api/tags/:id` | 更新标签 |
-| DELETE | `/api/tags/:id` | 删除标签 |
-
-#### 数据源
-
-| 方法 | 路径 | 说明 |
-|------|------|------|
-| GET | `/api/datasources` | 数据源列表 (支持 `category`, `keyword`) |
-| POST | `/api/datasources` | 创建数据源 (支持 `tag_ids` 关联) |
-| GET | `/api/datasources/:id` | 获取详情 |
-| PUT | `/api/datasources/:id` | 更新数据源 |
-| DELETE | `/api/datasources/:id` | 删除数据源 |
+| GET/POST | `/api/tags` | 标签列表 / 创建 |
+| GET/PUT/DELETE | `/api/tags/:id` | 标签详情 / 更新 / 删除 |
 
 #### RSS 订阅
 
 | 方法 | 路径 | 说明 |
 |------|------|------|
-| GET | `/api/rss` | RSS 列表 (支持 `category`, `keyword`) |
-| POST | `/api/rss` | 创建订阅 |
-| GET | `/api/rss/:id` | 获取详情 |
-| PUT | `/api/rss/:id` | 更新订阅 |
-| DELETE | `/api/rss/:id` | 删除订阅 |
-
-#### Webhook
-
-| 方法 | 路径 | 说明 |
-|------|------|------|
-| GET | `/api/webhooks` | Webhook 列表 |
-| POST | `/api/webhooks` | 创建 Webhook |
-| GET | `/api/webhooks/:id` | 获取详情 |
-| PUT | `/api/webhooks/:id` | 更新 Webhook |
-| DELETE | `/api/webhooks/:id` | 删除 Webhook |
-| POST | `/api/webhooks/:id/trigger` | 触发执行 |
-| GET | `/api/webhooks/:id/history` | 执行历史 |
+| GET/POST | `/api/rss` | RSS 列表 / 创建 |
+| GET/PUT/DELETE | `/api/rss/:id` | 详情 / 更新 / 删除 |
 
 #### 知识库映射
 
 | 方法 | 路径 | 说明 |
 |------|------|------|
-| GET | `/api/datasets` | 映射列表 |
-| POST | `/api/datasets` | 创建映射 (支持 `tag_ids` 关联) |
-| GET | `/api/datasets/:id` | 获取详情 |
-| PUT | `/api/datasets/:id` | 更新映射 |
-| DELETE | `/api/datasets/:id` | 删除映射 |
+| GET/POST | `/api/datasets` | 映射列表 / 创建 |
+| GET/PUT/DELETE | `/api/datasets/:id` | 详情 / 更新 / 删除 |
 
 #### RagFlow 文档
 
 | 方法 | 路径 | 说明 |
 |------|------|------|
-| POST | `/api/ragflow/upload` | 上传文档到指定 Dataset |
-| POST | `/api/ragflow/upload/with-routing` | 智能路由上传 (根据标签/分类自动选择 Dataset) |
+| POST | `/api/ragflow/upload/with-routing` | 智能路由上传 |
 | GET | `/api/ragflow/check-url` | URL 去重检查 |
 | GET | `/api/ragflow/documents` | 文档列表 |
-| DELETE | `/api/ragflow/documents/:id` | 删除文档 |
 
-#### 系统设置
+#### LLM Proxy
 
 | 方法 | 路径 | 说明 |
 |------|------|------|
-| GET | `/api/settings` | 获取所有设置 (支持 `category` 筛选) |
-| GET | `/api/settings/:key` | 获取单个设置 |
-| PUT | `/api/settings/:key` | 更新设置值 |
+| ANY | `/api/llm/v1/*` | OpenAI 兼容代理 |
+| GET | `/api/llm/health` | 渠道健康状态 |
+| GET | `/api/llm/groups/status` | 模型组状态 |
+
+#### Matrix
+
+| 方法 | 路径 | 说明 |
+|------|------|------|
+| POST | `/api/matrix/notify` | 发送通知 |
+| GET | `/api/matrix/admin/rooms` | 房间列表 |
+| GET | `/api/matrix/admin/commands` | 命令列表 |
 
 #### n8n 工作流
 
 | 方法 | 路径 | 说明 |
 |------|------|------|
 | GET | `/api/workflows/status` | 工作流列表 |
-| GET | `/api/workflows/:id` | 工作流详情 |
 | POST | `/api/workflows/:id/activate` | 激活工作流 |
 | POST | `/api/workflows/:id/deactivate` | 停用工作流 |
 | GET | `/api/workflows/executions` | 执行历史 |
 | POST | `/api/workflows/trigger/:name` | 按名称触发工作流 |
+
+## 文档导读
+
+| 文档 | 用途 | 建议阅读 |
+|------|------|----------|
+| [doc/ENHANCEMENT-PLAN.md](doc/ENHANCEMENT-PLAN.md) | **增强规划** — 当前开发方向、4 个阶段的详细实施方案 | 参与开发前必读 |
+| [doc/PROGRESS.md](doc/PROGRESS.md) | **进度跟踪** — 每项任务的验收检查清单 | 开发中随时对照 |
+| [doc/DEVELOPMENT-GUIDE.md](doc/DEVELOPMENT-GUIDE.md) | **开发规范** — 架构说明、编码标准、禁止事项 | 写代码前必读 |
+| [doc/API.md](doc/API.md) | **API 参考** — 完整 REST API 文档 | 对接/调试时查阅 |
+| [doc/ARCHITECTURE.md](doc/ARCHITECTURE.md) | **架构总览** — 系统定位、模块职责、技术选型 | 了解全局 |
+| [doc/LLM_PROXY_GUIDE.md](doc/LLM_PROXY_GUIDE.md) | **LLM 代理池** — 渠道配置、模型组、熔断器使用 | 配置 LLM 时查阅 |
+| [doc/documents/](doc/documents/) | **文件入库模块** — 入库流程、索引策略、迁移方案 | 知识管道开发 |
+| [doc/matrix/](doc/matrix/) | **Matrix 平台** — 架构、数据模型、API 契约、实施清单 | Matrix 功能开发 |
+| [doc/rss/](doc/rss/) | **RSS 模块** — 采集管道、提取策略 | RSS 功能开发 |
 
 ## 部署
 
