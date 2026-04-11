@@ -91,6 +91,21 @@ func (h *MatrixAdminHandler) CreateRoom(c *gin.Context) {
 	c.JSON(http.StatusCreated, gin.H{"message": "room created"})
 }
 
+// DeleteRoom handles DELETE /api/matrix/admin/rooms/:id
+func (h *MatrixAdminHandler) DeleteRoom(c *gin.Context) {
+	roomID := c.Param("id")
+	if roomID == "" {
+		c.JSON(http.StatusBadRequest, gin.H{"error": "room id required"})
+		return
+	}
+
+	if err := h.adminSvc.DeleteRoom(c.Request.Context(), roomID); err != nil {
+		c.JSON(http.StatusInternalServerError, gin.H{"error": err.Error()})
+		return
+	}
+	c.JSON(http.StatusOK, gin.H{"message": "room deleted"})
+}
+
 // ListChannels handles GET /api/matrix/admin/channels
 func (h *MatrixAdminHandler) ListChannels(c *gin.Context) {
 	channels, err := h.adminSvc.ListChannels(c.Request.Context())
@@ -291,4 +306,33 @@ func (h *MatrixAdminHandler) RemoveUserRole(c *gin.Context) {
 		return
 	}
 	c.JSON(http.StatusOK, gin.H{"message": "role removed"})
+}
+
+// ListCommandLogs handles GET /api/matrix/admin/command-logs
+func (h *MatrixAdminHandler) ListCommandLogs(c *gin.Context) {
+	// Parse query parameters
+	page, _ := strconv.Atoi(c.DefaultQuery("page", "1"))
+	perPage, _ := strconv.Atoi(c.DefaultQuery("per_page", "20"))
+	command := c.Query("command")
+	status := c.Query("status")
+
+	if page < 1 {
+		page = 1
+	}
+	if perPage < 1 || perPage > 100 {
+		perPage = 20
+	}
+
+	logs, total, err := h.adminSvc.ListCommandLogs(c.Request.Context(), page, perPage, command, status)
+	if err != nil {
+		c.JSON(http.StatusInternalServerError, gin.H{"error": err.Error()})
+		return
+	}
+
+	c.JSON(http.StatusOK, gin.H{
+		"data":     logs,
+		"total":    total,
+		"page":     page,
+		"per_page": perPage,
+	})
 }

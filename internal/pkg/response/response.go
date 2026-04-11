@@ -5,6 +5,8 @@ import (
 	"strconv"
 
 	"github.com/gin-gonic/gin"
+
+	apierrors "github.com/singll/bellkeeper/internal/pkg/errors"
 )
 
 // Success sends a 200 response with data payload.
@@ -79,4 +81,39 @@ func ParseID(c *gin.Context, param string) (uint, bool) {
 		return 0, false
 	}
 	return uint(id), true
+}
+
+// ErrorFromService automatically maps a ServiceError to the appropriate HTTP response.
+// Falls back to InternalError if the error is not a ServiceError.
+func ErrorFromService(c *gin.Context, err error) {
+	if err == nil {
+		return
+	}
+
+	// Try to extract ServiceError from the error chain
+	if svcErr := apierrors.GetServiceError(err); svcErr != nil {
+		Error(c, svcErr.Code, svcErr.Message)
+		return
+	}
+
+	// Fallback: check for sentinel errors
+	if apierrors.IsNotFound(err) {
+		NotFound(c, "resource not found")
+		return
+	}
+	if apierrors.IsInvalidInput(err) {
+		BadRequest(c, "invalid input")
+		return
+	}
+	if apierrors.Is(err, apierrors.ErrUnauthorized) {
+		Error(c, http.StatusUnauthorized, "unauthorized")
+		return
+	}
+	if apierrors.Is(err, apierrors.ErrRateLimited) {
+		Error(c, http.StatusTooManyRequests, "rate limit exceeded")
+		return
+	}
+
+	// Default fallback
+	InternalError(c, err.Error())
 }

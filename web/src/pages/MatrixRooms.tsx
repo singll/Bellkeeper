@@ -40,10 +40,11 @@ const MatrixRooms: Component = () => {
   }
 
   const handleDelete = async (room: MatrixRoom) => {
-    if (!confirm(`确定要删除房间 "${room.room_name}" 吗？`)) return
+    if (!confirm(`确定要删除房间 "${room.room_name || room.room_id}" 吗？此操作不可撤销。`)) return
     try {
-      // Note: deleteRoom is not implemented in backend, this is just for UI completeness
-      toast.error('删除功能暂未实现')
+      await matrixApi.deleteRoom(room.room_id)
+      toast.success('房间已删除')
+      refetch()
     } catch (err) {
       toast.error('删除失败: ' + (err as Error).message)
     }

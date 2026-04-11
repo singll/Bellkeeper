@@ -76,6 +76,11 @@ func (s *AdminService) CreateRoom(ctx context.Context, roomID, name, roomType st
 	return s.repos.MatrixRoom.Create(room)
 }
 
+// DeleteRoom deletes a room by room ID
+func (s *AdminService) DeleteRoom(ctx context.Context, roomID string) error {
+	return s.repos.MatrixRoom.Delete(roomID)
+}
+
 // ============ Channel Management ============
 
 // ChannelResponse represents channel info for API response
@@ -289,4 +294,52 @@ func (s *AdminService) ListAllUserRoles(ctx context.Context, limit, offset int) 
 		return nil, 0, err
 	}
 	return roles, count, nil
+}
+
+// ============ Command Log Management ============
+
+// CommandLogResponse represents a command log for API response
+type CommandLogResponse struct {
+	ID              uint      `json:"id"`
+	EventID         string    `json:"event_id"`
+	Command         string    `json:"command"`
+	UserID          string    `json:"user_id"`
+	RoomID          string    `json:"room_id"`
+	Args            string    `json:"args"`
+	ExecutionStatus string    `json:"execution_status"`
+	ExecutionTimeMs int       `json:"execution_time_ms"`
+	ErrorMessage    string    `json:"error_message,omitempty"`
+	ResponseEventID string    `json:"response_event_id,omitempty"`
+	CreatedAt       time.Time `json:"created_at"`
+	CompletedAt     *time.Time `json:"completed_at,omitempty"`
+}
+
+// ListCommandLogs returns command logs with optional filtering and pagination
+func (s *AdminService) ListCommandLogs(ctx context.Context, page, pageSize int, command, status string) ([]*CommandLogResponse, int64, error) {
+	logs, total, err := s.repos.MatrixCommandLog.List(page, pageSize, command, status)
+	if err != nil {
+		return nil, 0, err
+	}
+
+	result := make([]*CommandLogResponse, len(logs))
+	for i, log := range logs {
+		result[i] = &CommandLogResponse{
+			ID:              log.ID,
+			EventID:         log.EventID,
+			Command:         log.CommandName,
+			UserID:          log.Sender,
+			RoomID:          log.RoomID,
+			Args:            log.CommandArgs,
+			ExecutionStatus: log.ExecutionStatus,
+			ExecutionTimeMs: log.ExecutionTimeMs,
+			ErrorMessage:    log.ErrorMessage,
+			ResponseEventID: log.ResponseEventID,
+			CreatedAt:       log.CreatedAt,
+		}
+		if !log.CompletedAt.IsZero() {
+			completedAt := log.CompletedAt
+			result[i].CompletedAt = &completedAt
+		}
+	}
+	return result, total, nil
 }

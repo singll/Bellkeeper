@@ -125,3 +125,15 @@ func (r *TagRepository) MatchByKeyword(keyword string) ([]model.Tag, error) {
 	}
 	return tags, nil
 }
+
+// Search searches tags by name or description
+func (r *TagRepository) Search(keyword string, limit int) ([]model.Tag, error) {
+	var tags []model.Tag
+	if limit <= 0 {
+		limit = 10
+	}
+	if err := r.db.Where("name ILIKE ? OR description ILIKE ?", keyword, keyword).Order("name ASC").Limit(limit).Find(&tags).Error; err != nil {
+		return nil, err
+	}
+	return tags, nil
+}

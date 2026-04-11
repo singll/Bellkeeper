@@ -299,3 +299,13 @@ func (s *FileIngestionService) logIngestion(url, status, message string) {
 		},
 	})
 }
+
+// GetMetadata retrieves metadata for a single file by ID
+func (s *FileIngestionService) GetMetadata(id uint) (*model.ArticleTag, error) {
+	return s.articleRepo.GetByIDWithPreload(id)
+}
+
+// ListFiles retrieves files with optional filtering and pagination
+func (s *FileIngestionService) ListFiles(opts repository.ListArticleTagOpts) ([]model.ArticleTag, int64, error) {
+	return s.articleRepo.ListWithFilter(opts)
+}

@@ -44,3 +44,7 @@ func (r *MatrixRoomRepository) Create(room *model.MatrixRoom) error {
 func (r *MatrixRoomRepository) Update(room *model.MatrixRoom) error {
 	return r.db.Save(room).Error
 }
+
+func (r *MatrixRoomRepository) Delete(roomID string) error {
+	return r.db.Where("room_id = ?", roomID).Delete(&model.MatrixRoom{}).Error
+}

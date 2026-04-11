@@ -35,6 +35,7 @@ func Setup(r *gin.Engine, handlers *handler.Handlers, mode string, apiKey string
 	registerLogLevelRoutes(api, handlers.LogLevel)
 	registerConfigRoutes(api, handlers.Config)
 	registerTodoTxtRoutes(api, handlers.TodoTxt)
+	registerSearchRoutes(api, handlers.Search)
 
 	// Matrix notification routes
 	if handlers.MatrixNotify != nil {
@@ -193,9 +194,11 @@ func registerMatrixAdminRoutes(api *gin.RouterGroup, h *handler.MatrixAdminHandl
 	admin := api.Group("/matrix/admin")
 	admin.GET("/rooms", h.ListRooms)
 	admin.POST("/rooms", h.CreateRoom)
+	admin.DELETE("/rooms/:id", h.DeleteRoom)
 	admin.GET("/channels", h.ListChannels)
 	admin.PUT("/channels/:name", h.UpdateChannel)
 	admin.GET("/commands", h.ListCommands)
+	admin.GET("/command-logs", h.ListCommandLogs)
 	admin.GET("/events", h.GetEventLogs)
 	admin.GET("/notifications", h.GetNotificationLogs)
 	admin.GET("/stats", h.GetStats)
@@ -220,4 +223,8 @@ func registerTodoTxtRoutes(api *gin.RouterGroup, h *handler.TodoTxtHandler) {
 	todos := api.Group("/todos")
 	todos.GET("/export", h.Export)
 	todos.GET("/export/plain", h.ExportPlain)
+}
+
+func registerSearchRoutes(api *gin.RouterGroup, h *handler.SearchHandler) {
+	api.GET("/search", h.Search)
 }

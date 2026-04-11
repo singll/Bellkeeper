@@ -125,10 +125,11 @@ func runServer(cmd *cobra.Command, args []string) {
 		}
 		defer natsClient.Close()
 
-		// Initialize Notification Service and Handler
+		// Initialize Notification Service
 		notifySvc := service.NewNotificationService(cfg.NATS, redisClient, natsClient, repos)
 		services.SetNotificationService(notifySvc)
-		handlers = handler.NewHandlers(services, shutdownChan, cfg.Memos.BaseURL, cfg.Memos.APIToken) // recreate to include notify handler
+		// Inject notification handler via field assignment (instead of recreating all handlers)
+		handlers.MatrixNotify = handler.NewMatrixNotifyHandler(notifySvc)
 
 		// Initialize Notification Worker
 		notifySender := service.NewNotificationSender(nil, repos) // sender needs matrix client
@@ -141,7 +142,9 @@ func runServer(cmd *cobra.Command, args []string) {
 		// Create a policy checker for permission validation
 		adminPolicy := policy.NewChecker(repos, []string{})
 		services.MatrixAdmin = service.NewAdminService(repos, adminPolicy)
-		handlers = handler.NewHandlers(services, shutdownChan, cfg.Memos.BaseURL, cfg.Memos.APIToken) // recreate to include admin handler
+		// Inject admin handler via field assignment (instead of recreating all handlers)
+		matrixDomain := "matrix.singll.net"
+		handlers.MatrixAdmin = handler.NewMatrixAdminHandler(services.MatrixAdmin, matrixDomain)
 	}
 
 	// Initialize Matrix Gateway (if bot token configured)

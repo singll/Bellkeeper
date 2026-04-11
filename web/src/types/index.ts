@@ -283,6 +283,8 @@ export interface MatrixEvent {
   status: string
   created_at: string
 }
+
+export interface MatrixCommandLog {
   id: number
   event_id: string
   room_id: string
@@ -295,6 +297,7 @@ export interface MatrixEvent {
   error_message?: string
   response_event_id?: string
   created_at: string
+  completed_at?: string
 }
 
 export interface MatrixStats {

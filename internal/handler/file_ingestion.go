@@ -4,6 +4,7 @@ import (
 	"strconv"
 
 	"github.com/singll/bellkeeper/internal/pkg/response"
+	"github.com/singll/bellkeeper/internal/repository"
 	"github.com/singll/bellkeeper/internal/service"
 
 	"github.com/gin-gonic/gin"
@@ -45,11 +46,13 @@ func (h *FileIngestionHandler) GetMetadata(c *gin.Context) {
 		return
 	}
 
-	// TODO: Implement GetByID in service layer
-	response.Success(c, gin.H{
-		"id":      id,
-		"message": "GetMetadata not yet implemented",
-	})
+	article, err := h.svc.GetMetadata(uint(id))
+	if err != nil {
+		response.InternalError(c, err.Error())
+		return
+	}
+
+	response.Success(c, article)
 }
 
 // List handles GET /api/files/list
@@ -57,25 +60,32 @@ func (h *FileIngestionHandler) List(c *gin.Context) {
 	// Parse query parameters
 	layer := c.DefaultQuery("layer", "")
 	status := c.DefaultQuery("status", "")
-	limitStr := c.DefaultQuery("limit", "50")
-	offsetStr := c.DefaultQuery("offset", "0")
+	keyword := c.DefaultQuery("keyword", "")
+	pageStr := c.DefaultQuery("page", "1")
+	perPageStr := c.DefaultQuery("per_page", "20")
 
-	limit, err := strconv.Atoi(limitStr)
-	if err != nil || limit <= 0 || limit > 1000 {
-		limit = 50
+	page, _ := strconv.Atoi(pageStr)
+	perPage, _ := strconv.Atoi(perPageStr)
+	if page < 1 {
+		page = 1
+	}
+	if perPage < 1 || perPage > 1000 {
+		perPage = 20
 	}
 
-	offset, err := strconv.Atoi(offsetStr)
-	if err != nil || offset < 0 {
-		offset = 0
+	opts := repository.ListArticleTagOpts{
+		Layer:   layer,
+		Status:  status,
+		Keyword: keyword,
+		Page:    page,
+		PerPage: perPage,
 	}
 
-	// TODO: Implement List in service layer
-	response.Success(c, gin.H{
-		"layer":   layer,
-		"status":  status,
-		"limit":   limit,
-		"offset":  offset,
-		"message": "List not yet implemented",
-	})
+	articles, total, err := h.svc.ListFiles(opts)
+	if err != nil {
+		response.InternalError(c, err.Error())
+		return
+	}
+
+	response.Page(c, articles, total, page, perPage)
 }

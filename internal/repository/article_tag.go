@@ -133,3 +133,66 @@ func (r *ArticleTagRepository) Delete(id uint) error {
 func (r *ArticleTagRepository) Update(article *model.ArticleTag) error {
 	return r.db.Save(article).Error
 }
+
+// ListArticleTagOpts contains filter options for listing article tags
+type ListArticleTagOpts struct {
+	Layer   string
+	Status  string
+	Keyword string
+	Page    int
+	PerPage int
+}
+
+// ListWithFilter retrieves article tags with filtering and pagination
+func (r *ArticleTagRepository) ListWithFilter(opts ListArticleTagOpts) ([]model.ArticleTag, int64, error) {
+	var articles []model.ArticleTag
+	var total int64
+
+	query := r.db.Model(&model.ArticleTag{})
+
+	// Apply filters
+	if opts.Layer != "" {
+		query = query.Where("layer = ?", opts.Layer)
+	}
+	if opts.Status != "" {
+		query = query.Where("ingest_status = ?", opts.Status)
+	}
+	if opts.Keyword != "" {
+		keyword := "%" + opts.Keyword + "%"
+		query = query.Where("article_title LIKE ? OR article_url LIKE ? OR source_domain LIKE ?",
+			keyword, keyword, keyword)
+	}
+
+	// Get total count
+	if err := query.Count(&total).Error; err != nil {
+		return nil, 0, err
+	}
+
+	// Apply pagination
+	if opts.Page < 1 {
+		opts.Page = 1
+	}
+	if opts.PerPage < 1 {
+		opts.PerPage = 20
+	}
+	offset := (opts.Page - 1) * opts.PerPage
+
+	// Query with pagination
+	err := query.
+		Order("created_at DESC").
+		Limit(opts.PerPage).
+		Offset(offset).
+		Find(&articles).Error
+
+	return articles, total, err
+}
+
+// GetByIDWithPreload retrieves an article tag by ID with preloaded associations
+func (r *ArticleTagRepository) GetByIDWithPreload(id uint) (*model.ArticleTag, error) {
+	var article model.ArticleTag
+	err := r.db.Preload("Tag").First(&article, id).Error
+	if err != nil {
+		return nil, err
+	}
+	return &article, nil
+}

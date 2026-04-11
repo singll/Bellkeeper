@@ -76,3 +76,15 @@ func (r *RSSRepository) GetActive() ([]model.RSSFeed, error) {
 	}
 	return feeds, nil
 }
+
+// Search searches RSS feeds by name or URL
+func (r *RSSRepository) Search(keyword string, limit int) ([]model.RSSFeed, error) {
+	var feeds []model.RSSFeed
+	if limit <= 0 {
+		limit = 10
+	}
+	if err := r.db.Where("name ILIKE ? OR url ILIKE ?", keyword, keyword).Preload("Tags").Order("name ASC").Limit(limit).Find(&feeds).Error; err != nil {
+		return nil, err
+	}
+	return feeds, nil
+}

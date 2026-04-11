@@ -432,9 +432,13 @@ export const matrixApi = {
   getEvent: (id: number) =>
     request<{ data: MatrixEvent }>(`/matrix/admin/events/${id}`),
 
-  // Command Logs - backend endpoint not implemented
-  listCommandLogs: () => {
-    // Return empty response as endpoint is not implemented
-    return Promise.resolve({ data: { data: [], total: 0, page: 1, per_page: 20 } } as unknown as { data: PaginatedResponse<MatrixCommandLog> })
+  // Command Logs
+  listCommandLogs: (params?: { page?: number; per_page?: number; command?: string; status?: string }) => {
+    const p = new URLSearchParams()
+    if (params?.page) p.set('page', String(params.page))
+    if (params?.per_page) p.set('per_page', String(params.per_page))
+    if (params?.command) p.set('command', params.command)
+    if (params?.status) p.set('status', params.status)
+    return request<PaginatedResponse<MatrixCommandLog>>(`/matrix/admin/command-logs?${p}`)
   },
 }

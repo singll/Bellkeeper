@@ -18,6 +18,7 @@ type Services struct {
 	Classify      *ClassifyService
 	ActivityLog   *ActivityLogService
 	FileIngestion *FileIngestionService
+	Search        *SearchService
 	// Optional services (initialized in main.go with infra dependencies)
 	Notification *NotificationService
 	MatrixAdmin  *AdminService
@@ -64,6 +65,7 @@ func NewServices(repos *repository.Repositories, cfg *config.Config, version str
 		Classify:      classifySvc,
 		ActivityLog:   activityLogSvc,
 		FileIngestion: fileIngestionSvc,
+		Search:        NewSearchService(repos.Tag, repos.ArticleTag, repos.RSS),
 	}
 }
 
