@@ -442,3 +442,22 @@ export const matrixApi = {
     return request<PaginatedResponse<MatrixCommandLog>>(`/matrix/admin/command-logs?${p}`)
   },
 }
+
+// Search API
+export interface SearchResult {
+  tags: any[]
+  documents: any[]
+  rss_feeds: any[]
+  total_count: number
+}
+
+export const search = async (
+  query: string,
+  scope: 'all' | 'tags' | 'documents' | 'rss' = 'all',
+  limit = 10
+): Promise<SearchResult> => {
+  const response = await request<{ success: boolean; data: SearchResult }>(
+    `/search?q=${encodeURIComponent(query)}&scope=${scope}&limit=${limit}`
+  )
+  return response.data
+}

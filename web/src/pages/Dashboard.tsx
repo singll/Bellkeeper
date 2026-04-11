@@ -1,14 +1,85 @@
-import { Component, createSignal, createResource, Show, For } from 'solid-js'
+import { Component, createSignal, createEffect, onCleanup, Show, For, onMount } from 'solid-js'
 import { A } from '@solidjs/router'
-import { healthApi, workflowsApi, llmProxyApi } from '@/api'
+import { healthApi, workflowsApi, llmProxyApi, logsApi } from '@/api'
 import { useToast } from '@/components/Toast'
+import { Skeleton } from '@/components/Skeleton'
+
+const REFRESH_INTERVAL = 30000 // 30 seconds
 
 const Dashboard: Component = () => {
   const toast = useToast()
-  const [health, { refetch: refetchHealth }] = createResource(() => healthApi.detailed())
-  const [workflows] = createResource(() => workflowsApi.list())
-  const [llmChannels] = createResource(() => llmProxyApi.channelsStatus())
+
+  // Auto-refresh state
+  const [autoRefresh, setAutoRefresh] = createSignal(true)
+  const [countdown, setCountdown] = createSignal(REFRESH_INTERVAL / 1000)
+  const [lastUpdated, setLastUpdated] = createSignal<Date | null>(null)
+
+  // Data state
+  const [health, setHealth] = createSignal<any>(null)
+  const [workflows, setWorkflows] = createSignal<any[]>([])
+  const [llmChannels, setLlmChannels] = createSignal<any[]>([])
+  const [activityStats, setActivityStats] = createSignal<{ module: string; count: number }[]>([])
+  const [loading, setLoading] = createSignal(true)
+  const [error, setError] = createSignal<string | null>(null)
   const [triggeringWorkflow, setTriggeringWorkflow] = createSignal<string | null>(null)
+
+  // Fetch all data
+  const fetchAll = async () => {
+    setError(null)
+    try {
+      const [h, w, llm, stats] = await Promise.all([
+        healthApi.detailed(),
+        workflowsApi.list(),
+        llmProxyApi.channelsStatus(),
+        logsApi.stats(),
+      ])
+      setHealth(h)
+      setWorkflows(w?.data || [])
+      setLlmChannels(llm?.data || [])
+      setActivityStats(stats?.data || [])
+      setLastUpdated(new Date())
+      setCountdown(REFRESH_INTERVAL / 1000)
+    } catch (err) {
+      setError(err instanceof Error ? err.message : '加载失败')
+    } finally {
+      setLoading(false)
+    }
+  }
+
+  // Initial fetch
+  onMount(() => {
+    fetchAll()
+  })
+
+  // Auto-refresh timer
+  let countdownInterval: number | undefined
+  let refreshInterval: number | undefined
+
+  createEffect(() => {
+    // Clear existing intervals
+    if (countdownInterval) clearInterval(countdownInterval)
+    if (refreshInterval) clearInterval(refreshInterval)
+
+    if (autoRefresh()) {
+      // Countdown timer (update every second)
+      countdownInterval = window.setInterval(() => {
+        setCountdown((c) => {
+          if (c <= 1) return REFRESH_INTERVAL / 1000
+          return c - 1
+        })
+      }, 1000)
+
+      // Refresh timer
+      refreshInterval = window.setInterval(() => {
+        fetchAll()
+      }, REFRESH_INTERVAL)
+    }
+  })
+
+  onCleanup(() => {
+    if (countdownInterval) clearInterval(countdownInterval)
+    if (refreshInterval) clearInterval(refreshInterval)
+  })
 
   const getMetric = (key: string): number | string => {
     const metrics = health()?.metrics
@@ -17,13 +88,9 @@ const Dashboard: Component = () => {
     return typeof value === 'number' ? value : '--'
   }
 
-  const healthyLLMChannels = () =>
-    llmChannels()?.data.filter((channel) => channel.health.state === 'closed').length ?? 0
-
-  const brokenLLMChannels = () =>
-    llmChannels()?.data.filter((channel) => channel.health.state === 'open').length ?? 0
-
-  const totalLLMChannels = () => llmChannels()?.data.length ?? 0
+  const healthyLLMChannels = () => llmChannels().filter((channel) => channel.health.state === 'closed').length
+  const brokenLLMChannels = () => llmChannels().filter((channel) => channel.health.state === 'open').length
+  const totalLLMChannels = () => llmChannels().length
 
   const handleTriggerWorkflow = async (name: string) => {
     setTriggeringWorkflow(name)
@@ -35,6 +102,23 @@ const Dashboard: Component = () => {
     } finally {
       setTriggeringWorkflow(null)
     }
+  }
+
+  // Activity trend chart data (mock 7-day data based on stats)
+  const getActivityChartData = () => {
+    const stats = activityStats()
+    const modules = ['ragflow_upload', 'ragflow_parse', 'rss_fetch', 'llm_call', 'matrix_event']
+    const total = stats.reduce((sum, s) => sum + s.count, 0) || 1
+
+    // Distribute total across 7 days with some variation
+    return modules.slice(0, 5).map((mod, i) => ({
+      label: mod.replace(/_/g, ' '),
+      value: Math.max(1, Math.round(total * (0.3 + Math.random() * 0.4))),
+      percentage: 0,
+    })).map((item, _, arr) => {
+      const arrTotal = arr.reduce((s, i) => s + i.value, 0) || 1
+      return { ...item, percentage: Math.round((item.value / arrTotal) * 100) }
+    })
   }
 
   const stats = [
@@ -52,17 +136,30 @@ const Dashboard: Component = () => {
           <h1 class="text-2xl font-bold text-white">仪表盘</h1>
           <p class="text-sm text-dark-400 mt-1">系统状态概览</p>
         </div>
-        <button class="btn btn-secondary" onClick={() => refetchHealth()}>
-          <svg class="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-            <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M4 4v5h.582m15.356 2A8.001 8.001 0 004.582 9m0 0H9m11 11v-5h-.581m0 0a8.003 8.003 0 01-15.357-2m15.357 2H15" />
-          </svg>
-          刷新状态
-        </button>
+        <div class="flex items-center gap-3">
+          {/* Auto-refresh toggle */}
+          <button
+            class={`btn ${autoRefresh() ? 'btn-primary' : 'btn-secondary'}`}
+            onClick={() => setAutoRefresh(!autoRefresh())}
+            title={autoRefresh() ? '自动刷新已开启' : '自动刷新已关闭'}
+          >
+            <svg class={`w-4 h-4 ${autoRefresh() ? '' : 'opacity-50'}`} fill="none" stroke="currentColor" viewBox="0 0 24 24">
+              <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M4 4v5h.582m15.356 2A8.001 8.001 0 004.582 9m0 0H9m11 11v-5h-.581m0 0a8.003 8.003 0 01-15.357-2m15.357 2H15" />
+            </svg>
+            {autoRefresh() ? `${countdown()}s` : '已暂停'}
+          </button>
+          <button class="btn btn-secondary" onClick={() => fetchAll()}>
+            <svg class="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+              <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M4 4v5h.582m15.356 2A8.001 8.001 0 004.582 9m0 0H9m11 11v-5h-.581m0 0a8.003 8.003 0 01-15.357-2m15.357 2H15" />
+            </svg>
+            刷新状态
+          </button>
+        </div>
       </div>
 
       {/* System Status */}
       <div class="card mb-6">
-        <div class="flex items-center justify-between">
+        <div class="flex flex-col sm:flex-row sm:items-center justify-between gap-4">
           <div class="flex items-center gap-4">
             <div class={`w-12 h-12 rounded-xl flex items-center justify-center ${
               health()?.status === 'healthy'
@@ -80,18 +177,26 @@ const Dashboard: Component = () => {
               <div class={`text-xl font-bold ${
                 health()?.status === 'healthy' ? 'text-emerald-400' : 'text-amber-400'
               }`}>
-                <Show when={health()} fallback="加载中...">
+                <Show when={health()} fallback={<Skeleton width={80} height={24} />}>
                   {health()?.status === 'healthy' ? '运行正常' : '部分降级'}
                 </Show>
               </div>
             </div>
           </div>
-          <Show when={health()?.version}>
-            <div class="text-right">
-              <div class="text-sm text-dark-400">版本</div>
-              <div class="text-lg font-mono text-dark-200">{health()?.version}</div>
-            </div>
-          </Show>
+          <div class="flex items-center gap-6">
+            <Show when={health()?.version}>
+              <div class="text-right">
+                <div class="text-sm text-dark-400">版本</div>
+                <div class="text-lg font-mono text-dark-200">{health()?.version}</div>
+              </div>
+            </Show>
+            <Show when={lastUpdated()}>
+              <div class="text-right">
+                <div class="text-sm text-dark-400">最后更新</div>
+                <div class="text-sm text-dark-300">{lastUpdated()?.toLocaleTimeString('zh-CN')}</div>
+              </div>
+            </Show>
+          </div>
         </div>
       </div>
 
@@ -108,11 +213,13 @@ const Dashboard: Component = () => {
                 </div>
                 <div>
                   <div class="text-sm text-dark-400">{stat.label}</div>
-                  <div class={`text-2xl font-bold ${stat.color}`}>
-                    {stat.key === '_llm_channels'
-                      ? `${healthyLLMChannels()}/${totalLLMChannels()}`
-                      : getMetric(stat.key)}
-                  </div>
+                  <Show when={!loading()} fallback={<Skeleton width={60} height={28} />}>
+                    <div class={`text-2xl font-bold ${stat.color}`}>
+                      {stat.key === '_llm_channels'
+                        ? `${healthyLLMChannels()}/${totalLLMChannels()}`
+                        : getMetric(stat.key)}
+                    </div>
+                  </Show>
                 </div>
               </div>
             </div>
@@ -120,20 +227,67 @@ const Dashboard: Component = () => {
         </For>
       </div>
 
+      {/* Activity Trend Chart */}
+      <div class="card mb-6">
+        <div class="flex items-center justify-between mb-4">
+          <div>
+            <h2 class="text-lg font-semibold text-white">模块活跃度</h2>
+            <p class="text-sm text-dark-400 mt-1">操作量分布</p>
+          </div>
+        </div>
+        <Show when={!loading() && activityStats().length > 0} fallback={
+          <div class="h-32 flex items-center justify-center">
+            <Skeleton height={100} class="w-full" />
+          </div>
+        }>
+          <div class="space-y-3">
+            <For each={activityStats().slice(0, 5)}>
+              {(stat) => {
+                const total = activityStats().reduce((s, x) => s + x.count, 0) || 1
+                const pct = Math.round((stat.count / total) * 100)
+                return (
+                  <div class="flex items-center gap-4">
+                    <div class="w-28 text-sm text-dark-300 truncate" title={stat.module}>
+                      {stat.module.replace(/_/g, ' ')}
+                    </div>
+                    <div class="flex-1 h-6 bg-dark-700/50 rounded-lg overflow-hidden">
+                      <div
+                        class="h-full bg-gradient-to-r from-primary-500/80 to-primary-400 rounded-lg transition-all duration-500"
+                        style={{ width: `${pct}%` }}
+                      />
+                    </div>
+                    <div class="w-16 text-right text-sm text-dark-300">
+                      {stat.count.toLocaleString()}
+                    </div>
+                    <div class="w-12 text-right text-xs text-dark-500">
+                      {pct}%
+                    </div>
+                  </div>
+                )
+              }}
+            </For>
+          </div>
+        </Show>
+      </div>
+
       <div class="grid grid-cols-1 lg:grid-cols-2 gap-6 mb-6">
         {/* Service Status */}
         <div class="card">
           <h2 class="text-lg font-semibold text-white mb-4">服务状态</h2>
-          <Show when={health()} fallback={
-            <div class="flex items-center justify-center py-8">
-              <div class="loading-spinner" />
-              <span class="ml-3 text-dark-400">加载中...</span>
+          <Show when={!loading()} fallback={
+            <div class="space-y-3">
+              <For each={[1, 2, 3]}>{() => <Skeleton height={56} class="rounded-xl" />}</For>
             </div>
           }>
-            {(h) => (
+            <Show when={!error()} fallback={
+              <div class="empty-state py-8">
+                <p class="empty-state-title">加载失败</p>
+                <p class="empty-state-description">{error()}</p>
+              </div>
+            }>
               <div class="space-y-3">
-                <For each={Object.entries(h().services || {})}>
-                  {([name, status]) => (
+                <For each={Object.entries(health()?.services || {})}>
+                  {([name, status]: [string, any]) => (
                     <div class="flex items-center justify-between p-3 bg-dark-700/50 rounded-xl">
                       <div class="flex items-center gap-3">
                         <span class={`status-dot ${
@@ -150,8 +304,11 @@ const Dashboard: Component = () => {
                     </div>
                   )}
                 </For>
+                <Show when={!Object.keys(health()?.services || {}).length}>
+                  <p class="text-dark-400 text-center py-4">暂无服务数据</p>
+                </Show>
               </div>
-            )}
+            </Show>
           </Show>
         </div>
 
@@ -164,20 +321,28 @@ const Dashboard: Component = () => {
             </A>
           </div>
           <Show
-            when={workflows()?.data && workflows()!.data.length > 0}
+            when={!loading() && workflows().length > 0}
             fallback={
               <div class="empty-state py-8">
-                <svg class="empty-state-icon w-12 h-12" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-                  <path stroke-linecap="round" stroke-linejoin="round" stroke-width="1.5" d="M9 5H7a2 2 0 00-2 2v12a2 2 0 002 2h10a2 2 0 002-2V7a2 2 0 00-2-2h-2M9 5a2 2 0 002 2h2a2 2 0 002-2M9 5a2 2 0 012-2h2a2 2 0 012 2" />
-                </svg>
-                <p class="empty-state-title">暂无可用工作流</p>
-                <p class="empty-state-description">配置 n8n API Key 后可查看更多工作流</p>
+                <Show when={loading()} fallback={
+                  <>
+                    <svg class="empty-state-icon w-12 h-12" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                      <path stroke-linecap="round" stroke-linejoin="round" stroke-width="1.5" d="M9 5H7a2 2 0 00-2 2v12a2 2 0 002 2h10a2 2 0 002-2V7a2 2 0 00-2-2h-2M9 5a2 2 0 002 2h2a2 2 0 002-2M9 5a2 2 0 012-2h2a2 2 0 012 2" />
+                    </svg>
+                    <p class="empty-state-title">暂无可用工作流</p>
+                    <p class="empty-state-description">配置 n8n API Key 后可查看更多工作流</p>
+                  </>
+                }>
+                  <div class="space-y-3">
+                    <For each={[1, 2, 3]}>{() => <Skeleton height={56} class="rounded-xl" />}</For>
+                  </div>
+                </Show>
               </div>
             }
           >
             <div class="space-y-3">
-              <For each={workflows()?.data.slice(0, 5)}>
-                {(workflow) => (
+              <For each={workflows().slice(0, 5)}>
+                {(workflow: any) => (
                   <div class="flex items-center justify-between p-3 bg-dark-700/50 rounded-xl group hover:bg-dark-700/70 transition-colors">
                     <div class="flex items-center gap-3">
                       <span class={`status-dot ${
@@ -209,6 +374,7 @@ const Dashboard: Component = () => {
         </div>
       </div>
 
+      {/* LLM Proxy Status */}
       <div class="card mb-6">
         <div class="flex items-center justify-between mb-4">
           <div>
@@ -219,46 +385,29 @@ const Dashboard: Component = () => {
             查看详情 →
           </A>
         </div>
-        <Show
-          when={!llmChannels.loading}
-          fallback={
-            <div class="flex items-center justify-center py-8">
-              <div class="loading-spinner" />
-              <span class="ml-3 text-dark-400">加载中...</span>
-            </div>
-          }
-        >
-          <Show
-            when={!llmChannels.error}
-            fallback={
-              <div class="empty-state py-8">
-                <svg class="empty-state-icon w-12 h-12 text-red-400" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-                  <path stroke-linecap="round" stroke-linejoin="round" stroke-width="1.5" d="M12 8v4m0 4h.01M21 12a9 9 0 11-18 0 9 9 0 0118 0z" />
-                </svg>
-                <p class="empty-state-title">LLM Proxy 加载失败</p>
-                <p class="empty-state-description">{(llmChannels.error as Error)?.message || '请检查后端服务状态'}</p>
-              </div>
-            }
-          >
-            <div class="grid grid-cols-1 sm:grid-cols-3 gap-4">
-              <div class="p-4 bg-dark-700/50 rounded-xl">
-                <div class="text-sm text-dark-400 mb-1">健康渠道</div>
-                <div class="text-2xl font-bold text-emerald-400">
-                  {healthyLLMChannels()} / {totalLLMChannels()}
-                </div>
-              </div>
-              <div class="p-4 bg-dark-700/50 rounded-xl">
-                <div class="text-sm text-dark-400 mb-1">熔断渠道</div>
-                <div class="text-2xl font-bold text-red-400">{brokenLLMChannels()}</div>
-              </div>
-              <div class="p-4 bg-dark-700/50 rounded-xl">
-                <div class="text-sm text-dark-400 mb-1">运行结论</div>
-                <div class={`text-2xl font-bold ${brokenLLMChannels() > 0 ? 'text-amber-400' : 'text-primary-300'}`}>
-                  {totalLLMChannels() === 0 ? '未配置' : brokenLLMChannels() > 0 ? '需关注' : '正常'}
-                </div>
+        <Show when={!loading()} fallback={
+          <div class="grid grid-cols-1 sm:grid-cols-3 gap-4">
+            <For each={[1, 2, 3]}>{() => <Skeleton height={80} class="rounded-xl" />}</For>
+          </div>
+        }>
+          <div class="grid grid-cols-1 sm:grid-cols-3 gap-4">
+            <div class="p-4 bg-dark-700/50 rounded-xl">
+              <div class="text-sm text-dark-400 mb-1">健康渠道</div>
+              <div class="text-2xl font-bold text-emerald-400">
+                {healthyLLMChannels()} / {totalLLMChannels()}
               </div>
             </div>
-          </Show>
+            <div class="p-4 bg-dark-700/50 rounded-xl">
+              <div class="text-sm text-dark-400 mb-1">熔断渠道</div>
+              <div class="text-2xl font-bold text-red-400">{brokenLLMChannels()}</div>
+            </div>
+            <div class="p-4 bg-dark-700/50 rounded-xl">
+              <div class="text-sm text-dark-400 mb-1">运行结论</div>
+              <div class={`text-2xl font-bold ${brokenLLMChannels() > 0 ? 'text-amber-400' : 'text-primary-300'}`}>
+                {totalLLMChannels() === 0 ? '未配置' : brokenLLMChannels() > 0 ? '需关注' : '正常'}
+              </div>
+            </div>
+          </div>
         </Show>
       </div>
 

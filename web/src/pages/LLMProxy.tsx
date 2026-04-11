@@ -1,380 +1,108 @@
 import { A } from '@solidjs/router'
-import { Component, For, Show, createMemo, createResource, createSignal } from 'solid-js'
+import { Component, createSignal, Show, Switch, Match } from 'solid-js'
 import { llmProxyApi } from '@/api'
-import Modal from '@/components/Modal'
-import { useToast } from '@/components/Toast'
-import type { LLMChannelConfig, LLMChannelHealth, LLMChannelStatus, LLMGroupStatus, LLMModelGroupConfig, LLMModelGroupMemberConfig } from '@/types'
+import LLMProxyOverview from './llm-proxy/LLMProxyOverview'
+import LLMProxyChannels from './llm-proxy/LLMProxyChannels'
+import LLMProxyGroups from './llm-proxy/LLMProxyGroups'
+import LLMProxyConfig from './llm-proxy/LLMProxyConfig'
 
 type TabKey = 'overview' | 'channels' | 'groups' | 'config'
-type HealthFilter = 'all' | 'closed' | 'open' | 'half_open'
-type BillingFilter = 'all' | 'free' | 'paid'
-
-const formatDateTime = (value?: string) => {
-  if (!value) return '--'
-  return new Date(value).toLocaleString('zh-CN')
-}
-
-const formatPercent = (value: number) => `${Math.round(value * 100)}%`
-
-const getCircuitBadge = (state: string) => {
-  switch (state) {
-    case 'closed':
-      return 'badge-success'
-    case 'half_open':
-      return 'badge-warning'
-    case 'open':
-      return 'badge-danger'
-    default:
-      return 'badge-gray'
-  }
-}
-
-const getCircuitLabel = (state: string) => {
-  switch (state) {
-    case 'closed':
-      return '正常'
-    case 'half_open':
-      return '半开'
-    case 'open':
-      return '熔断'
-    default:
-      return state
-  }
-}
-
-const getCircuitDot = (state: string) => {
-  switch (state) {
-    case 'closed':
-      return 'status-dot-success'
-    case 'half_open':
-      return 'status-dot-warning'
-    case 'open':
-      return 'status-dot-danger'
-    default:
-      return 'status-dot-gray'
-  }
-}
-
-const getSuccessRateColor = (rate: number) => {
-  if (rate >= 0.9) return 'text-emerald-400'
-  if (rate >= 0.7) return 'text-amber-400'
-  return 'text-red-400'
-}
-
-const getProgressClass = (ratio: number) => {
-  if (ratio >= 0.7) return 'bg-emerald-500'
-  if (ratio >= 0.35) return 'bg-amber-500'
-  return 'bg-red-500'
-}
-
-const calcRatio = (current: number, total: number) => {
-  if (total <= 0) return 0
-  return Math.min(current / total, 1)
-}
 
 const LLMProxy: Component = () => {
-  const toast = useToast()
   const [activeTab, setActiveTab] = createSignal<TabKey>('overview')
-  const [healthFilter, setHealthFilter] = createSignal<HealthFilter>('all')
-  const [billingFilter, setBillingFilter] = createSignal<BillingFilter>('all')
-  const [keyword, setKeyword] = createSignal('')
-  const [busyChannel, setBusyChannel] = createSignal<string | null>(null)
-  const [busyGroup, setBusyGroup] = createSignal<string | null>(null)
+  const [refreshing, setRefreshing] = createSignal(false)
 
-  const [channels, { refetch: refetchChannels }] = createResource(() => llmProxyApi.channelsStatus())
-  const [groups, { refetch: refetchGroups }] = createResource(() => llmProxyApi.groupsStatus())
-
-  // Config tab state
-  const [channelConfigs, { refetch: refetchChannelConfigs }] = createResource(() => llmProxyApi.listChannels())
-  const [groupConfigs, { refetch: refetchGroupConfigs }] = createResource(() => llmProxyApi.listGroups())
-  const [showChannelModal, setShowChannelModal] = createSignal(false)
-  const [showGroupModal, setShowGroupModal] = createSignal(false)
-  const [editingChannel, setEditingChannel] = createSignal<LLMChannelConfig | null>(null)
-  const [editingGroup, setEditingGroup] = createSignal<LLMModelGroupConfig | null>(null)
-  const [saving, setSaving] = createSignal(false)
-
-  // Channel form state
-  const [chForm, setChForm] = createSignal({
-    name: '', base_url: '', api_key_env: '', rpm: 500, rpd: 50000,
-    priority: 1, is_free: false, is_enabled: true, models: '',
-  })
-
-  // Group form state
-  const [grpForm, setGrpForm] = createSignal({
-    name: '', description: '', strategy: 'priority-health', sticky_ttl_seconds: 600,
-    members: [] as LLMModelGroupMemberConfig[],
-  })
-
-  const refreshAll = async () => {
-    await Promise.all([refetchChannels(), refetchGroups()])
-    toast.success('LLM Proxy 状态已刷新')
+  // Fetch data directly using fetch
+  const fetchChannels = async () => {
+    const res = await fetch('/api/llm/channels/status')
+    if (!res.ok) throw new Error('Failed to fetch channels')
+    return res.json()
   }
 
-  const channelList = createMemo(() => channels()?.data || [])
-  const groupList = createMemo(() => groups()?.data || [])
+  const fetchGroups = async () => {
+    const res = await fetch('/api/llm/groups/status')
+    if (!res.ok) throw new Error('Failed to fetch groups')
+    return res.json()
+  }
 
-  const totalChannels = createMemo(() => channelList().length)
-  const healthyChannels = createMemo(() => channelList().filter((item) => item.health.state === 'closed').length)
-  const circuitBrokenChannels = createMemo(() => channelList().filter((item) => item.health.state === 'open').length)
-  const halfOpenChannels = createMemo(() => channelList().filter((item) => item.health.state === 'half_open').length)
+  const fetchChannelConfigs = async () => {
+    const res = await fetch('/api/llm/config/channels')
+    if (!res.ok) throw new Error('Failed to fetch channel configs')
+    return res.json()
+  }
 
-  const overviewStatus = createMemo(() => {
-    if (totalChannels() === 0) {
-      return {
-        label: '未配置',
-        badge: 'badge-gray',
-        description: '当前没有可用渠道数据',
-      }
-    }
+  const fetchGroupConfigs = async () => {
+    const res = await fetch('/api/llm/config/groups')
+    if (!res.ok) throw new Error('Failed to fetch group configs')
+    return res.json()
+  }
 
-    if (circuitBrokenChannels() > 0) {
-      return {
-        label: '部分降级',
-        badge: 'badge-warning',
-        description: `有 ${circuitBrokenChannels()} 个渠道处于熔断状态`,
-      }
-    }
+  // State
+  const [channelsData, setChannelsData] = createSignal<any>(null)
+  const [groupsData, setGroupsData] = createSignal<any>(null)
+  const [channelConfigsData, setChannelConfigsData] = createSignal<any>(null)
+  const [groupConfigsData, setGroupConfigsData] = createSignal<any>(null)
+  const [loading, setLoading] = createSignal(true)
+  const [error, setError] = createSignal<Error | null>(null)
 
-    if (halfOpenChannels() > 0) {
-      return {
-        label: '恢复观察中',
-        badge: 'badge-warning',
-        description: `有 ${halfOpenChannels()} 个渠道处于半开探测状态`,
-      }
-    }
-
-    return {
-      label: '运行正常',
-      badge: 'badge-success',
-      description: '所有已启用渠道均可正常服务',
-    }
-  })
-
-  const alerts = createMemo(() => {
-    const items: string[] = []
-
-    const openChannels = channelList().filter((item) => item.health.state === 'open')
-    if (openChannels.length > 0) {
-      items.push(`熔断渠道：${openChannels.map((item) => item.name).join('、')}`)
-    }
-
-    const unstableChannels = channelList().filter(
-      (item) => item.health.state !== 'open' && item.health.recent_success_rate < 0.7
-    )
-    if (unstableChannels.length > 0) {
-      items.push(`成功率偏低：${unstableChannels.map((item) => item.name).join('、')}`)
-    }
-
-    const stickyGroups = groupList().filter((group) => group.sticky_bindings > 0)
-    if (stickyGroups.length > 0) {
-      items.push(`存在粘性绑定：${stickyGroups.map((group) => `${group.name}(${group.sticky_bindings})`).join('、')}`)
-    }
-
-    return items
-  })
-
-  const filteredChannels = createMemo(() => {
-    const q = keyword().trim().toLowerCase()
-
-    return channelList().filter((channel) => {
-      const matchesHealth = healthFilter() === 'all' || channel.health.state === healthFilter()
-      const matchesBilling =
-        billingFilter() === 'all' ||
-        (billingFilter() === 'free' ? channel.is_free : !channel.is_free)
-      const matchesKeyword =
-        q === '' ||
-        channel.name.toLowerCase().includes(q) ||
-        channel.base_url.toLowerCase().includes(q) ||
-        channel.models.some((model) => model.toLowerCase().includes(q))
-
-      return matchesHealth && matchesBilling && matchesKeyword
-    })
-  })
-
-  const handleResetCircuit = async (name: string) => {
-    setBusyChannel(name)
+  // Fetch all data
+  const loadAll = async () => {
+    setLoading(true)
+    setError(null)
     try {
-      const result = await llmProxyApi.resetChannelCircuit(name)
-      toast.success(result.message)
-      await refetchChannels()
+      const [ch, gr, cc, gc] = await Promise.all([
+        fetchChannels(),
+        fetchGroups(),
+        fetchChannelConfigs(),
+        fetchGroupConfigs(),
+      ])
+      setChannelsData(ch)
+      setGroupsData(gr)
+      setChannelConfigsData(cc)
+      setGroupConfigsData(gc)
     } catch (err) {
-      toast.error('重置失败: ' + (err as Error).message)
+      setError(err instanceof Error ? err : new Error(String(err)))
     } finally {
-      setBusyChannel(null)
+      setLoading(false)
     }
   }
 
-  const handleClearSticky = async (name: string) => {
-    setBusyGroup(name)
+  // Initial load
+  loadAll()
+
+  const handleRefreshAll = async () => {
+    setRefreshing(true)
     try {
-      const result = await llmProxyApi.clearGroupSticky(name)
-      toast.success(`已清理 ${result.data.cleared} 条粘性绑定`)
-      await refetchGroups()
-    } catch (err) {
-      toast.error('清理失败: ' + (err as Error).message)
+      await loadAll()
     } finally {
-      setBusyGroup(null)
+      setRefreshing(false)
     }
   }
 
-  // --- Config CRUD handlers ---
-
-  const openChannelModal = (ch?: LLMChannelConfig) => {
-    if (ch) {
-      setEditingChannel(ch)
-      setChForm({
-        name: ch.name, base_url: ch.base_url, api_key_env: ch.api_key_env,
-        rpm: ch.rpm, rpd: ch.rpd, priority: ch.priority,
-        is_free: ch.is_free, is_enabled: ch.is_enabled, models: ch.models,
-      })
-    } else {
-      setEditingChannel(null)
-      setChForm({ name: '', base_url: '', api_key_env: '', rpm: 500, rpd: 50000, priority: 1, is_free: false, is_enabled: true, models: '[]' })
-    }
-    setShowChannelModal(true)
+  const handleRefreshChannels = async () => {
+    const data = await fetchChannels()
+    setChannelsData(data)
   }
 
-  const saveChannel = async () => {
-    setSaving(true)
-    try {
-      const form = chForm()
-      const data = { ...form }
-      const editing = editingChannel()
-      if (editing) {
-        await llmProxyApi.updateChannel(editing.id, data)
-        toast.success('渠道已更新')
-      } else {
-        await llmProxyApi.createChannel(data)
-        toast.success('渠道已创建')
-      }
-      setShowChannelModal(false)
-      await Promise.all([refetchChannelConfigs(), refetchChannels()])
-    } catch (err) {
-      toast.error('保存失败: ' + (err as Error).message)
-    } finally {
-      setSaving(false)
-    }
+  const handleRefreshGroups = async () => {
+    const data = await fetchGroups()
+    setGroupsData(data)
   }
 
-  const deleteChannel = async (id: number) => {
-    if (!confirm('确定删除此渠道？运行态将在重载后更新。')) return
-    try {
-      await llmProxyApi.deleteChannel(id)
-      toast.success('渠道已删除')
-      await Promise.all([refetchChannelConfigs(), refetchChannels()])
-    } catch (err) {
-      toast.error('删除失败: ' + (err as Error).message)
-    }
+  const handleRefreshConfigs = async () => {
+    const [cc, gc] = await Promise.all([fetchChannelConfigs(), fetchGroupConfigs()])
+    setChannelConfigsData(cc)
+    setGroupConfigsData(gc)
   }
 
-  const openGroupModal = (g?: LLMModelGroupConfig) => {
-    if (g) {
-      setEditingGroup(g)
-      setGrpForm({
-        name: g.name, description: g.description, strategy: g.strategy,
-        sticky_ttl_seconds: g.sticky_ttl_seconds,
-        members: g.members.map((m) => ({ channel_name: m.channel_name, model: m.model, weight: m.weight })),
-      })
-    } else {
-      setEditingGroup(null)
-      setGrpForm({ name: '', description: '', strategy: 'priority-health', sticky_ttl_seconds: 600, members: [] })
-    }
-    setShowGroupModal(true)
-  }
-
-  const saveGroup = async () => {
-    setSaving(true)
-    try {
-      const form = grpForm()
-      const data = { name: form.name, description: form.description, strategy: form.strategy, sticky_ttl_seconds: form.sticky_ttl_seconds, members: form.members }
-      const editing = editingGroup()
-      if (editing) {
-        await llmProxyApi.updateGroup(editing.id, data)
-        toast.success('模型组已更新')
-      } else {
-        await llmProxyApi.createGroup(data)
-        toast.success('模型组已创建')
-      }
-      setShowGroupModal(false)
-      await Promise.all([refetchGroupConfigs(), refetchGroups()])
-    } catch (err) {
-      toast.error('保存失败: ' + (err as Error).message)
-    } finally {
-      setSaving(false)
-    }
-  }
-
-  const deleteGroup = async (id: number) => {
-    if (!confirm('确定删除此模型组？')) return
-    try {
-      await llmProxyApi.deleteGroup(id)
-      toast.success('模型组已删除')
-      await Promise.all([refetchGroupConfigs(), refetchGroups()])
-    } catch (err) {
-      toast.error('删除失败: ' + (err as Error).message)
-    }
-  }
-
-  const addGroupMember = () => {
-    setGrpForm((prev) => ({ ...prev, members: [...prev.members, { channel_name: '', model: '', weight: 1 }] }))
-  }
-
-  const removeGroupMember = (index: number) => {
-    setGrpForm((prev) => ({ ...prev, members: prev.members.filter((_, i) => i !== index) }))
-  }
-
-  const updateGroupMember = (index: number, field: keyof LLMModelGroupMemberConfig, value: string | number) => {
-    setGrpForm((prev) => ({
-      ...prev,
-      members: prev.members.map((m, i) => (i === index ? { ...m, [field]: value } : m)),
-    }))
-  }
-
-  const renderProgress = (current: number, total: number, label: string) => {
-    const ratio = calcRatio(current, total)
-    return (
-      <div>
-        <div class="flex items-center justify-between text-xs text-dark-400 mb-1.5">
-          <span>{label}</span>
-          <span>
-            {current} / {total || '--'}
-          </span>
-        </div>
-        <div class="h-2 rounded-full bg-dark-700/70 overflow-hidden">
-          <div
-            class={`h-full rounded-full transition-all ${getProgressClass(ratio)}`}
-            style={{ width: `${Math.max(ratio * 100, ratio > 0 ? 6 : 0)}%` }}
-          />
-        </div>
-      </div>
-    )
-  }
-
-  const renderHealthMeta = (health: LLMChannelHealth) => (
-    <div class="grid grid-cols-1 sm:grid-cols-2 gap-3 text-sm">
-      <div class="p-3 bg-dark-700/40 rounded-xl">
-        <div class="text-dark-400 mb-1">最近成功率</div>
-        <div class={`font-semibold ${getSuccessRateColor(health.recent_success_rate)}`}>
-          {formatPercent(health.recent_success_rate)}
-        </div>
-      </div>
-      <div class="p-3 bg-dark-700/40 rounded-xl">
-        <div class="text-dark-400 mb-1">连续失败</div>
-        <div class="font-semibold text-white">{health.consecutive_fails}</div>
-      </div>
-      <div class="p-3 bg-dark-700/40 rounded-xl">
-        <div class="text-dark-400 mb-1">最近成功</div>
-        <div class="font-medium text-dark-200">{formatDateTime(health.last_success_at)}</div>
-      </div>
-      <div class="p-3 bg-dark-700/40 rounded-xl">
-        <div class="text-dark-400 mb-1">最近错误</div>
-        <div class="font-medium text-dark-200">{formatDateTime(health.last_error_at)}</div>
-      </div>
-    </div>
-  )
+  const channels = () => channelsData()?.data || []
+  const groups = () => groupsData()?.data || []
+  const channelConfigs = () => channelConfigsData()?.data || undefined
+  const groupConfigs = () => groupConfigsData()?.data || undefined
 
   return (
     <div class="animate-fade-in">
+      {/* Header */}
       <div class="flex flex-col xl:flex-row xl:items-center justify-between gap-4 mb-6">
         <div>
           <h1 class="text-2xl font-bold text-white">LLM Proxy</h1>
@@ -388,15 +116,16 @@ const LLMProxy: Component = () => {
             </svg>
             查看设置
           </A>
-          <button class="btn btn-primary" onClick={refreshAll}>
-            <svg class="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+          <button class="btn btn-primary" onClick={handleRefreshAll} disabled={refreshing()}>
+            <svg class={`w-4 h-4 ${refreshing() ? 'animate-spin' : ''}`} fill="none" stroke="currentColor" viewBox="0 0 24 24">
               <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M4 4v5h.582m15.356 2A8.001 8.001 0 004.582 9m0 0H9m11 11v-5h-.581m0 0a8.003 8.003 0 01-15.357-2m15.357 2H15" />
             </svg>
-            刷新状态
+            {refreshing() ? '刷新中...' : '刷新状态'}
           </button>
         </div>
       </div>
 
+      {/* Usage Guide */}
       <div class="card mb-6 bg-primary-500/10 border-primary-500/30">
         <div class="flex items-start gap-3">
           <svg class="w-5 h-5 text-primary-400 mt-0.5 flex-shrink-0" fill="none" stroke="currentColor" viewBox="0 0 24 24">
@@ -413,6 +142,7 @@ const LLMProxy: Component = () => {
         </div>
       </div>
 
+      {/* Tab Navigation */}
       <div class="tabs mb-6 w-fit">
         <button class={`tab ${activeTab() === 'overview' ? 'tab-active' : ''}`} onClick={() => setActiveTab('overview')}>
           总览
@@ -428,19 +158,10 @@ const LLMProxy: Component = () => {
         </button>
       </div>
 
-      <Show
-        when={!channels.loading && !groups.loading}
-        fallback={
-          <div class="card py-12">
-            <div class="flex items-center justify-center">
-              <div class="loading-spinner" />
-              <span class="ml-3 text-dark-400">加载 LLM Proxy 状态中...</span>
-            </div>
-          </div>
-        }
-      >
+      {/* Loading State */}
+      <Show when={!loading()}>
         <Show
-          when={!channels.error && !groups.error}
+          when={!error()}
           fallback={
             <div class="card py-12">
               <div class="empty-state py-4">
@@ -448,596 +169,55 @@ const LLMProxy: Component = () => {
                   <path stroke-linecap="round" stroke-linejoin="round" stroke-width="1.5" d="M12 8v4m0 4h.01M21 12a9 9 0 11-18 0 9 9 0 0118 0z" />
                 </svg>
                 <p class="empty-state-title">LLM Proxy 数据加载失败</p>
-                <p class="empty-state-description">
-                  {((channels.error || groups.error) as Error)?.message || '请检查后端服务状态'}
-                </p>
-                <button class="btn btn-secondary btn-sm mt-3" onClick={refreshAll}>重试</button>
+                <p class="empty-state-description">{error()?.message || '请检查后端服务状态'}</p>
+                <button class="btn btn-secondary btn-sm mt-3" onClick={handleRefreshAll}>重试</button>
               </div>
             </div>
           }
         >
-          <Show when={activeTab() === 'overview'}>
-            <div class="space-y-6">
-              <div class="grid grid-cols-1 sm:grid-cols-2 xl:grid-cols-4 gap-4">
-                <div class="stat-card">
-                  <div class="stat-label">渠道总数</div>
-                  <div class="stat-value">{totalChannels()}</div>
-                  <div class="stat-trend text-dark-400">已启用上游渠道</div>
-                </div>
-                <div class="stat-card">
-                  <div class="stat-label">健康渠道</div>
-                  <div class="stat-value text-emerald-400">{healthyChannels()}</div>
-                  <div class="stat-trend stat-trend-up">状态 closed</div>
-                </div>
-                <div class="stat-card">
-                  <div class="stat-label">熔断渠道</div>
-                  <div class="stat-value text-red-400">{circuitBrokenChannels()}</div>
-                  <div class="stat-trend stat-trend-down">状态 open</div>
-                </div>
-                <div class="stat-card">
-                  <div class="stat-label">模型组</div>
-                  <div class="stat-value text-primary-300">{groupList().length}</div>
-                  <div class="stat-trend text-dark-400">虚拟模型池</div>
-                </div>
-              </div>
-
-              <div class="grid grid-cols-1 xl:grid-cols-[1.3fr_1fr] gap-6">
-                <div class="card">
-                  <div class="flex items-center justify-between mb-4">
-                    <h2 class="text-lg font-semibold text-white">全局健康摘要</h2>
-                    <span class={`badge ${overviewStatus().badge}`}>{overviewStatus().label}</span>
-                  </div>
-                  <p class="text-dark-300 mb-4">{overviewStatus().description}</p>
-                  <Show
-                    when={alerts().length > 0}
-                    fallback={<div class="text-sm text-emerald-300">当前没有需要处理的告警项。</div>}
-                  >
-                    <div class="space-y-2">
-                      <For each={alerts()}>
-                        {(alert) => (
-                          <div class="flex items-start gap-2 p-3 rounded-xl bg-dark-700/50 border border-dark-600/50 text-sm text-dark-200">
-                            <span class="status-dot status-dot-warning mt-1" />
-                            <span>{alert}</span>
-                          </div>
-                        )}
-                      </For>
-                    </div>
-                  </Show>
-                </div>
-
-                <div class="card">
-                  <h2 class="text-lg font-semibold text-white mb-4">资源概览</h2>
-                  <div class="space-y-4">
-                    {renderProgress(healthyChannels(), totalChannels(), '健康渠道占比')}
-                    {renderProgress(circuitBrokenChannels(), totalChannels(), '熔断渠道占比')}
-                    {renderProgress(
-                      groupList().reduce((sum, item) => sum + item.sticky_bindings, 0),
-                      Math.max(groupList().length * 5, 1),
-                      '粘性绑定热度'
-                    )}
-                  </div>
-                </div>
-              </div>
-
-              <div>
-                <div class="flex items-center justify-between mb-4">
-                  <h2 class="text-lg font-semibold text-white">模型组摘要</h2>
-                  <span class="text-sm text-dark-400">共 {groupList().length} 个模型组</span>
-                </div>
-                <Show
-                  when={groupList().length > 0}
-                  fallback={
-                    <div class="card empty-state">
-                      <p class="empty-state-title">暂无模型组</p>
-                      <p class="empty-state-description">请在「配置」标签页中创建模型组。</p>
-                    </div>
-                  }
-                >
-                  <div class="grid grid-cols-1 xl:grid-cols-2 gap-4">
-                    <For each={groupList()}>
-                      {(group) => (
-                        <div class="card card-hover">
-                          <div class="flex items-start justify-between gap-3 mb-4">
-                            <div>
-                              <div class="text-lg font-semibold text-white">{group.name}</div>
-                              <div class="text-sm text-dark-400 mt-1">{group.description || '未填写描述'}</div>
-                            </div>
-                            <button
-                              class="btn btn-ghost btn-sm"
-                              disabled={busyGroup() === group.name}
-                              onClick={() => handleClearSticky(group.name)}
-                            >
-                              {busyGroup() === group.name ? '清理中...' : '清理粘性'}
-                            </button>
-                          </div>
-                          <div class="grid grid-cols-2 gap-3 mb-4 text-sm">
-                            <div class="p-3 bg-dark-700/40 rounded-xl">
-                              <div class="text-dark-400 mb-1">策略</div>
-                              <div class="font-medium text-white">{group.strategy}</div>
-                            </div>
-                            <div class="p-3 bg-dark-700/40 rounded-xl">
-                              <div class="text-dark-400 mb-1">粘性绑定</div>
-                              <div class="font-medium text-white">{group.sticky_bindings}</div>
-                            </div>
-                            <div class="p-3 bg-dark-700/40 rounded-xl">
-                              <div class="text-dark-400 mb-1">成员数</div>
-                              <div class="font-medium text-white">{group.members.length}</div>
-                            </div>
-                            <div class="p-3 bg-dark-700/40 rounded-xl">
-                              <div class="text-dark-400 mb-1">Sticky TTL</div>
-                              <div class="font-medium text-white">{group.sticky_ttl_seconds}s</div>
-                            </div>
-                          </div>
-                          <div class="flex items-center gap-2 flex-wrap">
-                            <For each={group.members}>
-                              {(member) => (
-                                <div class="inline-flex items-center gap-2 px-2.5 py-1.5 rounded-lg bg-dark-700/50 text-xs text-dark-200">
-                                  <span class={`status-dot ${member.available ? getCircuitDot(member.health.state) : 'status-dot-gray'}`} />
-                                  <span>{member.channel}</span>
-                                </div>
-                              )}
-                            </For>
-                          </div>
-                        </div>
-                      )}
-                    </For>
-                  </div>
-                </Show>
-              </div>
-            </div>
-          </Show>
-
-          <Show when={activeTab() === 'channels'}>
-            <div class="space-y-6">
-              <div class="card">
-                <div class="grid grid-cols-1 md:grid-cols-3 gap-4">
-                  <div>
-                    <label class="label">状态筛选</label>
-                    <select class="input" value={healthFilter()} onChange={(e) => setHealthFilter(e.currentTarget.value as HealthFilter)}>
-                      <option value="all">全部状态</option>
-                      <option value="closed">正常</option>
-                      <option value="half_open">半开</option>
-                      <option value="open">熔断</option>
-                    </select>
-                  </div>
-                  <div>
-                    <label class="label">计费类型</label>
-                    <select class="input" value={billingFilter()} onChange={(e) => setBillingFilter(e.currentTarget.value as BillingFilter)}>
-                      <option value="all">全部渠道</option>
-                      <option value="free">免费</option>
-                      <option value="paid">付费</option>
-                    </select>
-                  </div>
-                  <div>
-                    <label class="label">搜索</label>
-                    <input
-                      class="input"
-                      type="text"
-                      value={keyword()}
-                      onInput={(e) => setKeyword(e.currentTarget.value)}
-                      placeholder="渠道名 / 模型名 / URL"
-                    />
-                  </div>
-                </div>
-              </div>
-
-              <Show
-                when={filteredChannels().length > 0}
-                fallback={
-                  <div class="card empty-state">
-                    <p class="empty-state-title">没有匹配的渠道</p>
-                    <p class="empty-state-description">请调整筛选条件后重试。</p>
-                  </div>
-                }
-              >
-                <div class="space-y-4">
-                  <For each={filteredChannels()}>
-                    {(channel: LLMChannelStatus) => {
-                      const tokenRatio = calcRatio(channel.available_tokens, channel.max_tokens)
-                      const dailyRatio = calcRatio(channel.daily_used, channel.daily_limit)
-
-                      return (
-                        <div class="card card-hover">
-                          <div class="flex flex-col xl:flex-row xl:items-start justify-between gap-4 mb-4">
-                            <div>
-                              <div class="flex flex-wrap items-center gap-2 mb-2">
-                                <h2 class="text-lg font-semibold text-white">{channel.name}</h2>
-                                <span class={`badge ${channel.is_free ? 'badge-primary' : 'badge-gray'}`}>
-                                  {channel.is_free ? '免费' : '付费'}
-                                </span>
-                                <span class={`badge ${getCircuitBadge(channel.health.state)}`}>
-                                  {getCircuitLabel(channel.health.state)}
-                                </span>
-                                <span class="badge badge-gray">优先级 {channel.priority}</span>
-                              </div>
-                              <div class="text-sm text-dark-400 break-all">{channel.base_url}</div>
-                              <div class="flex flex-wrap gap-2 mt-3">
-                                <For each={channel.models}>
-                                  {(model) => <span class="badge badge-gray">{model}</span>}
-                                </For>
-                              </div>
-                            </div>
-
-                            <button
-                              class="btn btn-secondary btn-sm"
-                              disabled={busyChannel() === channel.name}
-                              onClick={() => handleResetCircuit(channel.name)}
-                            >
-                              {busyChannel() === channel.name ? '重置中...' : '重置熔断器'}
-                            </button>
-                          </div>
-
-                          <div class="grid grid-cols-1 xl:grid-cols-[1.2fr_1fr] gap-6">
-                            <div class="space-y-4">
-                              {renderProgress(channel.available_tokens, channel.max_tokens, `令牌桶 (${Math.round(tokenRatio * 100)}%)`)}
-                              {renderProgress(channel.daily_used, channel.daily_limit, `日额度 (${Math.round(dailyRatio * 100)}%)`)}
-                              <div class="grid grid-cols-2 gap-3 text-sm">
-                                <div class="p-3 bg-dark-700/40 rounded-xl">
-                                  <div class="text-dark-400 mb-1">RPM / RPD</div>
-                                  <div class="font-medium text-white">{channel.rpm_limit} / {channel.rpd_limit}</div>
-                                </div>
-                                <div class="p-3 bg-dark-700/40 rounded-xl">
-                                  <div class="text-dark-400 mb-1">补充速率</div>
-                                  <div class="font-medium text-white">{channel.refill_rate_per_s}/s</div>
-                                </div>
-                              </div>
-                            </div>
-
-                            <div class="space-y-3">
-                              {renderHealthMeta(channel.health)}
-                              <div class="p-3 bg-dark-700/40 rounded-xl text-sm">
-                                <div class="text-dark-400 mb-1">最近错误类型</div>
-                                <div class="font-medium text-dark-200">{channel.health.last_error_type || '--'}</div>
-                              </div>
-                              <Show when={channel.health.circuit_open_until}>
-                                <div class="p-3 bg-red-500/10 border border-red-500/20 rounded-xl text-sm">
-                                  <div class="text-red-300 font-medium mb-1">熔断恢复时间</div>
-                                  <div class="text-red-200">{formatDateTime(channel.health.circuit_open_until)}</div>
-                                </div>
-                              </Show>
-                            </div>
-                          </div>
-                        </div>
-                      )
-                    }}
-                  </For>
-                </div>
-              </Show>
-            </div>
-          </Show>
-
-          <Show when={activeTab() === 'groups'}>
-            <div class="space-y-4">
-              <Show
-                when={groupList().length > 0}
-                fallback={
-                  <div class="card empty-state">
-                    <p class="empty-state-title">暂无模型组</p>
-                    <p class="empty-state-description">当前配置尚未定义任何虚拟模型组。</p>
-                  </div>
-                }
-              >
-                <For each={groupList()}>
-                  {(group: LLMGroupStatus) => (
-                    <div class="card card-hover">
-                      <div class="flex flex-col xl:flex-row xl:items-start justify-between gap-4 mb-4">
-                        <div>
-                          <div class="flex items-center gap-2 flex-wrap mb-2">
-                            <h2 class="text-lg font-semibold text-white">{group.name}</h2>
-                            <span class="badge badge-primary">{group.strategy}</span>
-                            <span class="badge badge-gray">Sticky TTL {group.sticky_ttl_seconds}s</span>
-                            <span class="badge badge-gray">绑定 {group.sticky_bindings}</span>
-                          </div>
-                          <p class="text-sm text-dark-400">{group.description || '未填写描述'}</p>
-                        </div>
-                        <button
-                          class="btn btn-secondary btn-sm"
-                          disabled={busyGroup() === group.name}
-                          onClick={() => handleClearSticky(group.name)}
-                        >
-                          {busyGroup() === group.name ? '清理中...' : '清理粘性绑定'}
-                        </button>
-                      </div>
-
-                      <div class="overflow-x-auto rounded-xl border border-dark-600/50">
-                        <table class="table">
-                          <thead>
-                            <tr>
-                              <th>渠道</th>
-                              <th>模型</th>
-                              <th>权重</th>
-                              <th>可用</th>
-                              <th>状态</th>
-                              <th>成功率</th>
-                            </tr>
-                          </thead>
-                          <tbody>
-                            <For each={group.members}>
-                              {(member) => (
-                                <tr>
-                                  <td>
-                                    <div class="flex items-center gap-2">
-                                      <span class={`status-dot ${member.available ? getCircuitDot(member.health.state) : 'status-dot-gray'}`} />
-                                      <span>{member.channel}</span>
-                                    </div>
-                                  </td>
-                                  <td class="font-mono text-xs text-dark-300">{member.model}</td>
-                                  <td>{member.weight}</td>
-                                  <td>
-                                    <span class={`badge ${member.available ? 'badge-success' : 'badge-danger'}`}>
-                                      {member.available ? '可用' : '不可用'}
-                                    </span>
-                                  </td>
-                                  <td>
-                                    <span class={`badge ${getCircuitBadge(member.health.state)}`}>
-                                      {getCircuitLabel(member.health.state)}
-                                    </span>
-                                  </td>
-                                  <td>
-                                    <span class={getSuccessRateColor(member.health.recent_success_rate)}>
-                                      {formatPercent(member.health.recent_success_rate)}
-                                    </span>
-                                  </td>
-                                </tr>
-                              )}
-                            </For>
-                          </tbody>
-                        </table>
-                      </div>
-                    </div>
-                  )}
-                </For>
-              </Show>
-            </div>
-          </Show>
-
-          <Show when={activeTab() === 'config'}>
-            <div class="space-y-6">
-              {/* Channel Config */}
-              <div class="card">
-                <div class="flex items-center justify-between mb-4">
-                  <h2 class="text-lg font-semibold text-white">渠道管理</h2>
-                  <button class="btn btn-primary btn-sm" onClick={() => openChannelModal()}>
-                    <svg class="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-                      <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M12 4v16m8-8H4" />
-                    </svg>
-                    新增渠道
-                  </button>
-                </div>
-                <Show
-                  when={channelConfigs()?.data && channelConfigs()!.data.length > 0}
-                  fallback={
-                    <div class="empty-state py-8">
-                      <p class="empty-state-title">暂无渠道配置</p>
-                      <p class="empty-state-description">点击「新增渠道」添加第一个 LLM 渠道</p>
-                    </div>
-                  }
-                >
-                  <div class="overflow-x-auto rounded-xl border border-dark-600/50">
-                    <table class="table">
-                      <thead>
-                        <tr>
-                          <th>名称</th>
-                          <th>Base URL</th>
-                          <th>API Key 变量</th>
-                          <th>RPM / RPD</th>
-                          <th>优先级</th>
-                          <th>类型</th>
-                          <th>状态</th>
-                          <th>操作</th>
-                        </tr>
-                      </thead>
-                      <tbody>
-                        <For each={channelConfigs()?.data}>
-                          {(ch) => (
-                            <tr>
-                              <td class="font-medium text-white">{ch.name}</td>
-                              <td class="text-xs text-dark-300 max-w-[200px] truncate">{ch.base_url}</td>
-                              <td class="font-mono text-xs text-dark-300">{ch.api_key_env || '--'}</td>
-                              <td>{ch.rpm} / {ch.rpd}</td>
-                              <td>{ch.priority}</td>
-                              <td>
-                                <span class={`badge ${ch.is_free ? 'badge-primary' : 'badge-gray'}`}>
-                                  {ch.is_free ? '免费' : '付费'}
-                                </span>
-                              </td>
-                              <td>
-                                <span class={`badge ${ch.is_enabled ? 'badge-success' : 'badge-danger'}`}>
-                                  {ch.is_enabled ? '启用' : '禁用'}
-                                </span>
-                              </td>
-                              <td>
-                                <div class="flex items-center gap-2">
-                                  <button class="btn btn-ghost btn-sm" onClick={() => openChannelModal(ch)}>编辑</button>
-                                  <button class="btn btn-ghost btn-sm text-red-400" onClick={() => deleteChannel(ch.id)}>删除</button>
-                                </div>
-                              </td>
-                            </tr>
-                          )}
-                        </For>
-                      </tbody>
-                    </table>
-                  </div>
-                </Show>
-              </div>
-
-              {/* Group Config */}
-              <div class="card">
-                <div class="flex items-center justify-between mb-4">
-                  <h2 class="text-lg font-semibold text-white">模型组管理</h2>
-                  <button class="btn btn-primary btn-sm" onClick={() => openGroupModal()}>
-                    <svg class="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-                      <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M12 4v16m8-8H4" />
-                    </svg>
-                    新增模型组
-                  </button>
-                </div>
-                <Show
-                  when={groupConfigs()?.data && groupConfigs()!.data.length > 0}
-                  fallback={
-                    <div class="empty-state py-8">
-                      <p class="empty-state-title">暂无模型组配置</p>
-                      <p class="empty-state-description">点击「新增模型组」创建虚拟模型池</p>
-                    </div>
-                  }
-                >
-                  <div class="overflow-x-auto rounded-xl border border-dark-600/50">
-                    <table class="table">
-                      <thead>
-                        <tr>
-                          <th>名称</th>
-                          <th>描述</th>
-                          <th>策略</th>
-                          <th>Sticky TTL</th>
-                          <th>成员数</th>
-                          <th>操作</th>
-                        </tr>
-                      </thead>
-                      <tbody>
-                        <For each={groupConfigs()?.data}>
-                          {(g) => (
-                            <tr>
-                              <td class="font-medium text-white">{g.name}</td>
-                              <td class="text-sm text-dark-300 max-w-[200px] truncate">{g.description || '--'}</td>
-                              <td><span class="badge badge-primary">{g.strategy}</span></td>
-                              <td>{g.sticky_ttl_seconds}s</td>
-                              <td>{g.members?.length || 0}</td>
-                              <td>
-                                <div class="flex items-center gap-2">
-                                  <button class="btn btn-ghost btn-sm" onClick={() => openGroupModal(g)}>编辑</button>
-                                  <button class="btn btn-ghost btn-sm text-red-400" onClick={() => deleteGroup(g.id)}>删除</button>
-                                </div>
-                              </td>
-                            </tr>
-                          )}
-                        </For>
-                      </tbody>
-                    </table>
-                  </div>
-                </Show>
-              </div>
-            </div>
-          </Show>
+          {/* Tab Content */}
+          <Switch>
+            <Match when={activeTab() === 'overview'}>
+              <LLMProxyOverview
+                channels={channels()}
+                groups={groups()}
+                onRefresh={handleRefreshAll}
+                refreshing={refreshing()}
+              />
+            </Match>
+            <Match when={activeTab() === 'channels'}>
+              <LLMProxyChannels
+                channels={channels()}
+                onRefreshChannels={handleRefreshChannels}
+              />
+            </Match>
+            <Match when={activeTab() === 'groups'}>
+              <LLMProxyGroups
+                groups={groups()}
+                onRefreshGroups={handleRefreshGroups}
+              />
+            </Match>
+            <Match when={activeTab() === 'config'}>
+              <LLMProxyConfig
+                channelConfigs={channelConfigs()}
+                groupConfigs={groupConfigs()}
+                onRefreshConfigs={handleRefreshConfigs}
+                onRefreshAll={handleRefreshAll}
+              />
+            </Match>
+          </Switch>
         </Show>
       </Show>
 
-      {/* Channel Modal */}
-      <Modal open={showChannelModal()} onClose={() => setShowChannelModal(false)} title={editingChannel() ? '编辑渠道' : '新增渠道'} size="lg">
-        <div class="space-y-4">
-          <div class="grid grid-cols-1 sm:grid-cols-2 gap-4">
-            <div>
-              <label class="label">名称</label>
-              <input class="input" value={chForm().name} onInput={(e) => setChForm((p) => ({ ...p, name: e.currentTarget.value }))} placeholder="如 siliconflow" />
-            </div>
-            <div>
-              <label class="label">API Key 环境变量</label>
-              <input class="input" value={chForm().api_key_env} onInput={(e) => setChForm((p) => ({ ...p, api_key_env: e.currentTarget.value }))} placeholder="如 LLM_SILICONFLOW_API_KEY" />
-            </div>
-          </div>
-          <div>
-            <label class="label">Base URL</label>
-            <input class="input" value={chForm().base_url} onInput={(e) => setChForm((p) => ({ ...p, base_url: e.currentTarget.value }))} placeholder="如 https://api.siliconflow.cn (不含 /v1)" />
-          </div>
-          <div class="grid grid-cols-2 sm:grid-cols-4 gap-4">
-            <div>
-              <label class="label">RPM</label>
-              <input class="input" type="number" value={chForm().rpm} onInput={(e) => setChForm((p) => ({ ...p, rpm: parseInt(e.currentTarget.value) || 0 }))} />
-            </div>
-            <div>
-              <label class="label">RPD</label>
-              <input class="input" type="number" value={chForm().rpd} onInput={(e) => setChForm((p) => ({ ...p, rpd: parseInt(e.currentTarget.value) || 0 }))} />
-            </div>
-            <div>
-              <label class="label">优先级</label>
-              <input class="input" type="number" value={chForm().priority} onInput={(e) => setChForm((p) => ({ ...p, priority: parseInt(e.currentTarget.value) || 1 }))} />
-            </div>
-            <div class="flex items-end gap-4">
-              <label class="flex items-center gap-2 cursor-pointer">
-                <input type="checkbox" checked={chForm().is_free} onChange={(e) => setChForm((p) => ({ ...p, is_free: e.currentTarget.checked }))} class="w-4 h-4 rounded" />
-                <span class="text-sm text-dark-200">免费</span>
-              </label>
-              <label class="flex items-center gap-2 cursor-pointer">
-                <input type="checkbox" checked={chForm().is_enabled} onChange={(e) => setChForm((p) => ({ ...p, is_enabled: e.currentTarget.checked }))} class="w-4 h-4 rounded" />
-                <span class="text-sm text-dark-200">启用</span>
-              </label>
-            </div>
-          </div>
-          <div>
-            <label class="label">模型列表 (JSON 数组)</label>
-            <textarea class="input min-h-[80px]" value={chForm().models} onInput={(e) => setChForm((p) => ({ ...p, models: e.currentTarget.value }))} placeholder='["Qwen/Qwen3-8B", "Qwen/Qwen2.5-7B-Instruct"]' />
-          </div>
-          <div class="flex justify-end gap-3 pt-2">
-            <button class="btn btn-secondary" onClick={() => setShowChannelModal(false)}>取消</button>
-            <button class="btn btn-primary" disabled={saving()} onClick={saveChannel}>
-              {saving() ? '保存中...' : '保存'}
-            </button>
+      {/* Loading Indicator */}
+      <Show when={loading()}>
+        <div class="card py-12">
+          <div class="flex items-center justify-center">
+            <div class="loading-spinner" />
+            <span class="ml-3 text-dark-400">加载 LLM Proxy 状态中...</span>
           </div>
         </div>
-      </Modal>
-
-      {/* Group Modal */}
-      <Modal open={showGroupModal()} onClose={() => setShowGroupModal(false)} title={editingGroup() ? '编辑模型组' : '新增模型组'} size="lg">
-        <div class="space-y-4">
-          <div class="grid grid-cols-1 sm:grid-cols-2 gap-4">
-            <div>
-              <label class="label">名称</label>
-              <input class="input" value={grpForm().name} onInput={(e) => setGrpForm((p) => ({ ...p, name: e.currentTarget.value }))} placeholder="如 pool-chat-free" />
-            </div>
-            <div>
-              <label class="label">策略</label>
-              <select class="input" value={grpForm().strategy} onChange={(e) => setGrpForm((p) => ({ ...p, strategy: e.currentTarget.value }))}>
-                <option value="priority-health">priority-health</option>
-                <option value="round-robin">round-robin</option>
-              </select>
-            </div>
-          </div>
-          <div class="grid grid-cols-1 sm:grid-cols-2 gap-4">
-            <div>
-              <label class="label">描述</label>
-              <input class="input" value={grpForm().description} onInput={(e) => setGrpForm((p) => ({ ...p, description: e.currentTarget.value }))} placeholder="可选描述" />
-            </div>
-            <div>
-              <label class="label">Sticky TTL (秒)</label>
-              <input class="input" type="number" value={grpForm().sticky_ttl_seconds} onInput={(e) => setGrpForm((p) => ({ ...p, sticky_ttl_seconds: parseInt(e.currentTarget.value) || 0 }))} />
-            </div>
-          </div>
-          <div>
-            <div class="flex items-center justify-between mb-2">
-              <label class="label mb-0">成员</label>
-              <button class="btn btn-ghost btn-sm" onClick={addGroupMember}>
-                <svg class="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-                  <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M12 4v16m8-8H4" />
-                </svg>
-                添加成员
-              </button>
-            </div>
-            <Show when={grpForm().members.length > 0} fallback={<p class="text-sm text-dark-400">暂无成员，点击上方按钮添加。</p>}>
-              <div class="space-y-2">
-                <For each={grpForm().members}>
-                  {(member, index) => (
-                    <div class="grid grid-cols-[1fr_1fr_80px_40px] gap-2 items-end">
-                      <input class="input" value={member.channel_name} onInput={(e) => updateGroupMember(index(), 'channel_name', e.currentTarget.value)} placeholder="渠道名" />
-                      <input class="input" value={member.model} onInput={(e) => updateGroupMember(index(), 'model', e.currentTarget.value)} placeholder="模型名" />
-                      <input class="input" type="number" value={member.weight} onInput={(e) => updateGroupMember(index(), 'weight', parseInt(e.currentTarget.value) || 1)} placeholder="权重" />
-                      <button class="btn btn-ghost btn-sm text-red-400" onClick={() => removeGroupMember(index())}>
-                        <svg class="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-                          <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M6 18L18 6M6 6l12 12" />
-                        </svg>
-                      </button>
-                    </div>
-                  )}
-                </For>
-              </div>
-            </Show>
-          </div>
-          <div class="flex justify-end gap-3 pt-2">
-            <button class="btn btn-secondary" onClick={() => setShowGroupModal(false)}>取消</button>
-            <button class="btn btn-primary" disabled={saving()} onClick={saveGroup}>
-              {saving() ? '保存中...' : '保存'}
-            </button>
-          </div>
-        </div>
-      </Modal>
+      </Show>
     </div>
   )
 }
