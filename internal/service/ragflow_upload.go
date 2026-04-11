@@ -26,18 +26,14 @@ type RagFlowService struct {
 }
 
 // NewRagFlowService creates a new RagFlowService
-func NewRagFlowService(cfg config.RagFlowConfig, datasetRepo *repository.DatasetMappingRepository, tagRepo *repository.TagRepository) *RagFlowService {
+func NewRagFlowService(cfg config.RagFlowConfig, datasetRepo *repository.DatasetMappingRepository, tagRepo *repository.TagRepository, activityLog *ActivityLogService) *RagFlowService {
 	return &RagFlowService{
 		cfg:         cfg,
 		datasetRepo: datasetRepo,
 		tagRepo:     tagRepo,
 		client:      &http.Client{Timeout: time.Duration(cfg.Timeout) * time.Second},
+		activityLog: activityLog,
 	}
-}
-
-// SetActivityLog injects the activity log service for instrumentation.
-func (s *RagFlowService) SetActivityLog(al *ActivityLogService) {
-	s.activityLog = al
 }
 
 type UploadRequest struct {

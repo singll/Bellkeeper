@@ -67,18 +67,14 @@ type FirecrawlResponse struct {
 }
 
 // NewExtractorService creates a new ExtractorService
-func NewExtractorService(cfg config.FileIngestionConfig) *ExtractorService {
+func NewExtractorService(cfg config.FileIngestionConfig, activityLog *ActivityLogService) *ExtractorService {
 	return &ExtractorService{
 		cfg: cfg,
 		httpClient: &http.Client{
 			Timeout: time.Duration(cfg.Firecrawl.Timeout) * time.Second,
 		},
+		activityLog: activityLog,
 	}
-}
-
-// SetActivityLog sets the activity log service
-func (s *ExtractorService) SetActivityLog(log *ActivityLogService) {
-	s.activityLog = log
 }
 
 // Extract extracts content from a URL using the configured extractors

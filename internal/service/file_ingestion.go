@@ -57,6 +57,7 @@ func NewFileIngestionService(
 	classifySvc *ClassifyService,
 	tagRepo *repository.TagRepository,
 	articleRepo *repository.ArticleTagRepository,
+	activityLog *ActivityLogService,
 ) *FileIngestionService {
 	return &FileIngestionService{
 		cfg:         cfg,
@@ -65,12 +66,8 @@ func NewFileIngestionService(
 		classifySvc: classifySvc,
 		tagRepo:     tagRepo,
 		articleRepo: articleRepo,
+		activityLog: activityLog,
 	}
-}
-
-// SetActivityLog sets the activity log service
-func (s *FileIngestionService) SetActivityLog(log *ActivityLogService) {
-	s.activityLog = log
 }
 
 // IngestURL ingests content from a URL and saves it as a file

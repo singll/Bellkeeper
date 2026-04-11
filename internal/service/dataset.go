@@ -18,14 +18,9 @@ type DatasetService struct {
 	verifier DocumentVerifier
 }
 
-func NewDatasetService(repo *repository.DatasetMappingRepository, tagRepo *repository.TagRepository) *DatasetService {
-	return &DatasetService{repo: repo, tagRepo: tagRepo}
-}
-
-// SetDocumentVerifier sets a function to verify document existence in RAGFlow.
-// When set, CheckURL/BatchCheckURLs will verify matches and auto-clean stale records.
-func (s *DatasetService) SetDocumentVerifier(v DocumentVerifier) {
-	s.verifier = v
+// NewDatasetService creates a new DatasetService with optional document verifier
+func NewDatasetService(repo *repository.DatasetMappingRepository, tagRepo *repository.TagRepository, verifier DocumentVerifier) *DatasetService {
+	return &DatasetService{repo: repo, tagRepo: tagRepo, verifier: verifier}
 }
 
 func (s *DatasetService) List(page, perPage int) ([]model.DatasetMapping, int64, error) {

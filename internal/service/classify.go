@@ -21,19 +21,15 @@ type ClassifyService struct {
 }
 
 // NewClassifyService creates a new classify service
-func NewClassifyService(cfg config.ClassifyConfig, apiKey string) *ClassifyService {
+func NewClassifyService(cfg config.ClassifyConfig, apiKey string, activityLog *ActivityLogService) *ClassifyService {
 	return &ClassifyService{
 		cfg:    cfg,
 		apiKey: apiKey,
 		httpClient: &http.Client{
 			Timeout: time.Duration(cfg.Timeout) * time.Second,
 		},
+		activityLog: activityLog,
 	}
-}
-
-// SetActivityLog injects the activity log service for instrumentation.
-func (s *ClassifyService) SetActivityLog(al *ActivityLogService) {
-	s.activityLog = al
 }
 
 // ClassifyRequest represents the classification request

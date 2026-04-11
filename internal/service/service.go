@@ -26,23 +26,22 @@ type Services struct {
 
 // NewServices creates all service instances
 func NewServices(repos *repository.Repositories, cfg *config.Config, version string) *Services {
-	datasetSvc := NewDatasetService(repos.DatasetMapping, repos.Tag)
-	ragFlowSvc := NewRagFlowService(cfg.RagFlow, repos.DatasetMapping, repos.Tag)
+	// Create activity log first (used by multiple services)
 	activityLogSvc := NewActivityLogService(repos.ActivityLog)
 
-	// Wire up document verifier: DatasetService can verify documents via RagFlowService
-	datasetSvc.SetDocumentVerifier(ragFlowSvc.DocumentExistsInRagFlow)
+	// Create ragflow service with activity log
+	ragFlowSvc := NewRagFlowService(cfg.RagFlow, repos.DatasetMapping, repos.Tag, activityLogSvc)
 
-	// Wire up activity log for instrumentation
-	ragFlowSvc.SetActivityLog(activityLogSvc)
+	// Create dataset service with document verifier
+	datasetSvc := NewDatasetService(repos.DatasetMapping, repos.Tag, ragFlowSvc.DocumentExistsInRagFlow)
 
-	classifySvc := NewClassifyService(cfg.Classify, cfg.Server.APIKey)
-	classifySvc.SetActivityLog(activityLogSvc)
+	// Create classify service with activity log
+	classifySvc := NewClassifyService(cfg.Classify, cfg.Server.APIKey, activityLogSvc)
 
-	// File ingestion services
-	extractorSvc := NewExtractorService(cfg.FileIngestion)
-	extractorSvc.SetActivityLog(activityLogSvc)
+	// Create extractor service with activity log
+	extractorSvc := NewExtractorService(cfg.FileIngestion, activityLogSvc)
 
+	// Create file ingestion service with all dependencies
 	fileIngestionSvc := NewFileIngestionService(
 		cfg.FileIngestion,
 		extractorSvc,
@@ -50,12 +49,12 @@ func NewServices(repos *repository.Repositories, cfg *config.Config, version str
 		classifySvc,
 		repos.Tag,
 		repos.ArticleTag,
+		activityLogSvc,
 	)
-	fileIngestionSvc.SetActivityLog(activityLogSvc)
 
 	return &Services{
 		Tag:           NewTagService(repos.Tag),
-		RSS:           NewRSSService(repos.RSS, repos.Tag),
+		RSS:            NewRSSService(repos.RSS, repos.Tag),
 		Dataset:       datasetSvc,
 		Setting:       NewSettingService(repos.Setting),
 		RagFlow:       ragFlowSvc,
@@ -64,8 +63,8 @@ func NewServices(repos *repository.Repositories, cfg *config.Config, version str
 		LLMProxy:      NewLLMProxyService(cfg.LLMProxy, repos.LLMProxy, repos.LLMChannel, repos.LLMModelGroup),
 		Classify:      classifySvc,
 		ActivityLog:   activityLogSvc,
-		FileIngestion: fileIngestionSvc,
-		Search:        NewSearchService(repos.Tag, repos.ArticleTag, repos.RSS),
+		FileIngestion:  fileIngestionSvc,
+		Search:         NewSearchService(repos.Tag, repos.ArticleTag, repos.RSS),
 	}
 }
 
