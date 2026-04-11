@@ -1,25 +1,46 @@
-import { Component, createSignal, createEffect, onCleanup, Show, For, onMount } from 'solid-js'
+import { Component, createSignal, Show, For, onMount } from 'solid-js'
 import { A } from '@solidjs/router'
 import { healthApi, workflowsApi, llmProxyApi, logsApi } from '@/api'
 import { useToast } from '@/components/Toast'
 import { Skeleton } from '@/components/Skeleton'
-
-const REFRESH_INTERVAL = 30000 // 30 seconds
+import { useAutoRefresh } from '@/hooks/useAutoRefresh'
+import { EmptyState, EmptyStateVariants } from '@/components/EmptyState'
 
 const Dashboard: Component = () => {
   const toast = useToast()
 
-  // Auto-refresh state
-  const [autoRefresh, setAutoRefresh] = createSignal(true)
-  const [countdown, setCountdown] = createSignal(REFRESH_INTERVAL / 1000)
-  const [lastUpdated, setLastUpdated] = createSignal<Date | null>(null)
+  // Auto-refresh using the hook
+  const {
+    data: dashboardData,
+    enabled: autoRefresh,
+    setEnabled: setAutoRefresh,
+    refresh,
+    lastUpdated,
+    countdown,
+    loading: isLoading,
+    error: refreshError,
+  } = useAutoRefresh(
+    async () => {
+      const [h, w, llm, stats] = await Promise.all([
+        healthApi.detailed(),
+        workflowsApi.list(),
+        llmProxyApi.channelsStatus(),
+        logsApi.stats(),
+      ])
+      return { health: h, workflows: w, llmChannels: llm, activityStats: stats }
+    },
+    {
+      interval: 30000,
+      enabled: true,
+      showCountdown: true,
+    }
+  )
 
-  // Data state
-  const [health, setHealth] = createSignal<any>(null)
-  const [workflows, setWorkflows] = createSignal<any[]>([])
-  const [llmChannels, setLlmChannels] = createSignal<any[]>([])
-  const [activityStats, setActivityStats] = createSignal<{ module: string; count: number }[]>([])
-  const [loading, setLoading] = createSignal(true)
+  // Data state derived from hook data
+  const health = () => dashboardData()?.health
+  const workflows = () => dashboardData()?.workflows?.data || []
+  const llmChannels = () => dashboardData()?.llmChannels?.data || []
+  const activityStats = () => dashboardData()?.activityStats?.data || []
   const [error, setError] = createSignal<string | null>(null)
   const [triggeringWorkflow, setTriggeringWorkflow] = createSignal<string | null>(null)
 
@@ -48,37 +69,7 @@ const Dashboard: Component = () => {
 
   // Initial fetch
   onMount(() => {
-    fetchAll()
-  })
-
-  // Auto-refresh timer
-  let countdownInterval: number | undefined
-  let refreshInterval: number | undefined
-
-  createEffect(() => {
-    // Clear existing intervals
-    if (countdownInterval) clearInterval(countdownInterval)
-    if (refreshInterval) clearInterval(refreshInterval)
-
-    if (autoRefresh()) {
-      // Countdown timer (update every second)
-      countdownInterval = window.setInterval(() => {
-        setCountdown((c) => {
-          if (c <= 1) return REFRESH_INTERVAL / 1000
-          return c - 1
-        })
-      }, 1000)
-
-      // Refresh timer
-      refreshInterval = window.setInterval(() => {
-        fetchAll()
-      }, REFRESH_INTERVAL)
-    }
-  })
-
-  onCleanup(() => {
-    if (countdownInterval) clearInterval(countdownInterval)
-    if (refreshInterval) clearInterval(refreshInterval)
+    refresh()
   })
 
   const getMetric = (key: string): number | string => {
@@ -148,7 +139,7 @@ const Dashboard: Component = () => {
             </svg>
             {autoRefresh() ? `${countdown()}s` : '已暂停'}
           </button>
-          <button class="btn btn-secondary" onClick={() => fetchAll()}>
+          <button class="btn btn-secondary" onClick={() => refresh()}>
             <svg class="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
               <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M4 4v5h.582m15.356 2A8.001 8.001 0 004.582 9m0 0H9m11 11v-5h-.581m0 0a8.003 8.003 0 01-15.357-2m15.357 2H15" />
             </svg>
@@ -213,7 +204,7 @@ const Dashboard: Component = () => {
                 </div>
                 <div>
                   <div class="text-sm text-dark-400">{stat.label}</div>
-                  <Show when={!loading()} fallback={<Skeleton width={60} height={28} />}>
+                  <Show when={!isLoading()} fallback={<Skeleton width={60} height={28} />}>
                     <div class={`text-2xl font-bold ${stat.color}`}>
                       {stat.key === '_llm_channels'
                         ? `${healthyLLMChannels()}/${totalLLMChannels()}`
@@ -235,7 +226,7 @@ const Dashboard: Component = () => {
             <p class="text-sm text-dark-400 mt-1">操作量分布</p>
           </div>
         </div>
-        <Show when={!loading() && activityStats().length > 0} fallback={
+        <Show when={!isLoading() && activityStats().length > 0} fallback={
           <div class="h-32 flex items-center justify-center">
             <Skeleton height={100} class="w-full" />
           </div>
@@ -274,16 +265,21 @@ const Dashboard: Component = () => {
         {/* Service Status */}
         <div class="card">
           <h2 class="text-lg font-semibold text-white mb-4">服务状态</h2>
-          <Show when={!loading()} fallback={
+          <Show when={!isLoading()} fallback={
             <div class="space-y-3">
               <For each={[1, 2, 3]}>{() => <Skeleton height={56} class="rounded-xl" />}</For>
             </div>
           }>
             <Show when={!error()} fallback={
-              <div class="empty-state py-8">
-                <p class="empty-state-title">加载失败</p>
-                <p class="empty-state-description">{error()}</p>
-              </div>
+              <EmptyState
+                title="加载失败"
+                description={error() || ''}
+                icon={
+                  <svg class="w-12 h-12 text-red-500" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                    <path stroke-linecap="round" stroke-linejoin="round" stroke-width="1.5" d="M12 9v2m0 4h.01m-6.938 4h13.856c1.54 0 2.502-1.667 1.732-3L13.732 4c-.77-1.333-2.694-1.333-3.464 0L3.34 16c-.77 1.333.192 3 1.732 3z" />
+                  </svg>
+                }
+              />
             }>
               <div class="space-y-3">
                 <For each={Object.entries(health()?.services || {})}>
@@ -320,24 +316,23 @@ const Dashboard: Component = () => {
               查看全部 →
             </A>
           </div>
-          <Show
-            when={!loading() && workflows().length > 0}
+          <Show when={!isLoading() && workflows().length > 0}
             fallback={
-              <div class="empty-state py-8">
-                <Show when={loading()} fallback={
-                  <>
-                    <svg class="empty-state-icon w-12 h-12" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+              <Show when={isLoading()} fallback={
+                <EmptyState
+                  title="暂无可用工作流"
+                  description="配置 n8n API Key 后可查看更多工作流"
+                  icon={
+                    <svg class="w-12 h-12" fill="none" stroke="currentColor" viewBox="0 0 24 24">
                       <path stroke-linecap="round" stroke-linejoin="round" stroke-width="1.5" d="M9 5H7a2 2 0 00-2 2v12a2 2 0 002 2h10a2 2 0 002-2V7a2 2 0 00-2-2h-2M9 5a2 2 0 002 2h2a2 2 0 002-2M9 5a2 2 0 012-2h2a2 2 0 012 2" />
                     </svg>
-                    <p class="empty-state-title">暂无可用工作流</p>
-                    <p class="empty-state-description">配置 n8n API Key 后可查看更多工作流</p>
-                  </>
-                }>
-                  <div class="space-y-3">
-                    <For each={[1, 2, 3]}>{() => <Skeleton height={56} class="rounded-xl" />}</For>
-                  </div>
-                </Show>
-              </div>
+                  }
+                />
+              }>
+                <div class="space-y-3">
+                  <For each={[1, 2, 3]}>{() => <Skeleton height={56} class="rounded-xl" />}</For>
+                </div>
+              </Show>
             }
           >
             <div class="space-y-3">
@@ -385,7 +380,7 @@ const Dashboard: Component = () => {
             查看详情 →
           </A>
         </div>
-        <Show when={!loading()} fallback={
+        <Show when={!isLoading()} fallback={
           <div class="grid grid-cols-1 sm:grid-cols-3 gap-4">
             <For each={[1, 2, 3]}>{() => <Skeleton height={80} class="rounded-xl" />}</For>
           </div>

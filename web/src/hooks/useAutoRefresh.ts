@@ -1,4 +1,4 @@
-import { createSignal, onCleanup, Accessor } from 'solid-js'
+import { createSignal, onCleanup, Accessor, createEffect } from 'solid-js'
 
 export interface UseAutoRefreshOptions {
   /** Refresh interval in milliseconds. Default: 30000 (30s) */
@@ -7,17 +7,24 @@ export interface UseAutoRefreshOptions {
   enabled?: boolean
   /** Callback when refresh happens */
   onRefresh?: () => void | Promise<void>
+  /** Show countdown in UI. Default: true */
+  showCountdown?: boolean
 }
 
 /**
- * Hook for auto-refresh functionality
+ * Hook for auto-refresh functionality with countdown support
  *
  * @example
  * ```tsx
- * const { enabled, setEnabled, refresh } = useAutoRefresh({
+ * const { enabled, setEnabled, refresh, countdown } = useAutoRefreshState({
  *   interval: 30000,
  *   onRefresh: () => fetchData()
  * });
+ *
+ * // In JSX:
+ * <button onClick={() => setEnabled(!enabled())}>
+ *   {enabled() ? `${countdown()}s` : 'Paused'}
+ * </button>
  * ```
  */
 export function useAutoRefresh<T>(
@@ -31,16 +38,19 @@ export function useAutoRefresh<T>(
   setEnabled: (value: boolean) => void
   refresh: () => Promise<void>
   lastUpdated: Accessor<Date | undefined>
+  countdown: Accessor<number>
 } {
-  const { interval = 30000, enabled: defaultEnabled = true, onRefresh } = options
+  const { interval = 30000, enabled: defaultEnabled = true, onRefresh, showCountdown = true } = options
 
   const [data, setData] = createSignal<T | undefined>(undefined)
   const [loading, setLoading] = createSignal(false)
   const [error, setError] = createSignal<Error | undefined>(undefined)
   const [enabled, setEnabled] = createSignal(defaultEnabled)
   const [lastUpdated, setLastUpdated] = createSignal<Date | undefined>(undefined)
+  const [countdown, setCountdown] = createSignal(Math.ceil(interval / 1000))
 
   let timerId: number | undefined
+  let countdownId: number | undefined
 
   const refresh = async () => {
     setLoading(true)
@@ -49,6 +59,7 @@ export function useAutoRefresh<T>(
       const result = await fetchFn()
       setData(result)
       setLastUpdated(new Date())
+      setCountdown(Math.ceil(interval / 1000))
       onRefresh?.()
     } catch (err) {
       setError(err instanceof Error ? err : new Error(String(err)))
@@ -60,12 +71,24 @@ export function useAutoRefresh<T>(
   const startTimer = () => {
     if (timerId) return
     timerId = window.setInterval(refresh, interval)
+
+    // Start countdown if enabled
+    if (showCountdown) {
+      setCountdown(Math.ceil(interval / 1000))
+      countdownId = window.setInterval(() => {
+        setCountdown((c) => (c <= 1 ? Math.ceil(interval / 1000) : c - 1))
+      }, 1000)
+    }
   }
 
   const stopTimer = () => {
     if (timerId) {
       window.clearInterval(timerId)
       timerId = undefined
+    }
+    if (countdownId) {
+      window.clearInterval(countdownId)
+      countdownId = undefined
     }
   }
 
@@ -93,19 +116,20 @@ export function useAutoRefresh<T>(
     setEnabled,
     refresh,
     lastUpdated,
+    countdown,
   }
 }
 
 /**
- * Simplified hook for just managing auto-refresh state
+ * Simplified hook for just managing auto-refresh state with countdown
  *
  * @example
  * ```tsx
- * const { enabled, setEnabled, refresh } = useAutoRefreshState(30000);
+ * const { enabled, setEnabled, refresh, countdown } = useAutoRefreshState(30000);
  *
  * return (
  *   <button onClick={() => enabled() ? setEnabled(false) : setEnabled(true)}>
- *     {enabled() ? 'Auto-refresh ON' : 'Auto-refresh OFF'}
+ *     {enabled() ? `${countdown()}s` : 'Auto-refresh OFF'}
  *   </button>
  * );
  * ```
@@ -116,18 +140,27 @@ export function useAutoRefreshState(defaultInterval = 30000): {
   interval: Accessor<number>
   setInterval: (value: number) => void
   refresh: () => void
+  countdown: Accessor<number>
 } {
   const [enabled, setEnabled] = createSignal(true)
   const [interval, setInterval] = createSignal(defaultInterval)
   const [refreshFn, setRefreshFn] = createSignal<() => void>(() => {})
+  const [countdown, setCountdown] = createSignal(Math.ceil(defaultInterval / 1000))
 
   let timerId: number | undefined
+  let countdownId: number | undefined
 
   const startTimer = () => {
     stopTimer()
     timerId = window.setInterval(() => {
       refreshFn()()
     }, interval())
+
+    // Start countdown
+    setCountdown(Math.ceil(interval() / 1000))
+    countdownId = window.setInterval(() => {
+      setCountdown((c) => (c <= 1 ? Math.ceil(interval() / 1000) : c - 1))
+    }, 1000)
   }
 
   const stopTimer = () => {
@@ -135,9 +168,16 @@ export function useAutoRefreshState(defaultInterval = 30000): {
       window.clearInterval(timerId)
       timerId = undefined
     }
+    if (countdownId) {
+      window.clearInterval(countdownId)
+      countdownId = undefined
+    }
   }
 
-  const refresh = () => refreshFn()()
+  const refresh = () => {
+    refreshFn()()
+    setCountdown(Math.ceil(interval() / 1000))
+  }
 
   // Watch enabled state
   createEffect(() => {
@@ -166,6 +206,7 @@ export function useAutoRefreshState(defaultInterval = 30000): {
     interval,
     setInterval,
     refresh,
+    countdown,
   }
 }
 
