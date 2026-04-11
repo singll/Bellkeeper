@@ -13,6 +13,7 @@ import (
 	"github.com/singll/bellkeeper/internal/config"
 	"github.com/singll/bellkeeper/internal/model"
 	"github.com/singll/bellkeeper/internal/pkg/defaults"
+	"github.com/singll/bellkeeper/internal/pkg/httpclient"
 	"github.com/singll/bellkeeper/internal/repository"
 )
 
@@ -31,7 +32,7 @@ func NewRagFlowService(cfg config.RagFlowConfig, datasetRepo *repository.Dataset
 		cfg:         cfg,
 		datasetRepo: datasetRepo,
 		tagRepo:     tagRepo,
-		client:      &http.Client{Timeout: time.Duration(cfg.Timeout) * time.Second},
+		client:      httpclient.NewClient(time.Duration(cfg.Timeout) * time.Second),
 		activityLog: activityLog,
 	}
 }

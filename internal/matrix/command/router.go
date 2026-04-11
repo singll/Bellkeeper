@@ -6,6 +6,7 @@ import (
 	"fmt"
 	"log"
 	"strings"
+	"time"
 
 	"github.com/singll/bellkeeper/internal/config"
 	"github.com/singll/bellkeeper/internal/matrix/policy"
@@ -93,6 +94,7 @@ func (r *Router) Parse(content string) (*ParsedCommand, bool) {
 }
 
 // Route routes a parsed command to the appropriate handler
+// Note: Command logging is handled in ExecuteFromMessage for proper timing
 func (r *Router) Route(ctx context.Context, cmdCtx *Context) (*Response, error) {
 	// Find handler
 	handler, ok := r.GetHandler(cmdCtx.Command.Name)
@@ -257,12 +259,44 @@ func (r *Router) createHandlerFromDB(cmd *model.MatrixCommand) Handler {
 }
 
 // ExecuteFromMessage processes a raw Matrix message and executes if it's a command
+// This is the main entry point that handles command logging
 func (r *Router) ExecuteFromMessage(ctx context.Context, roomID, sender, eventID, content string) (*Response, bool, error) {
 	// Parse message
 	parsed, ok := r.Parse(content)
 	if !ok {
 		return nil, false, nil // Not a command
 	}
+
+	// Build args string for logging
+	argsStr := parsed.Args
+
+	// Determine handler type from registered handler
+	handlerType := ""
+	if handler, exists := r.GetHandler(parsed.Name); exists {
+		handlerType = handler.Name()
+	}
+
+	// Create log entry BEFORE execution
+	logEntry := &model.MatrixCommandLog{
+		EventID:         eventID,
+		RoomID:          roomID,
+		Sender:          sender,
+		CommandName:     parsed.Name,
+		CommandArgs:     argsStr,
+		HandlerType:     handlerType,
+		ExecutionStatus: "pending",
+		CreatedAt:       time.Now(),
+	}
+
+	// Insert log entry - use a new goroutine to avoid blocking command execution
+	// But if repos is nil, skip logging
+	if r.repos != nil {
+		if err := r.repos.MatrixCommandLog.Create(logEntry); err != nil {
+			log.Printf("[Command] failed to create log entry: %v", err)
+		}
+	}
+
+	startTime := time.Now()
 
 	// Create context
 	cmdCtx := &Context{
@@ -275,7 +309,32 @@ func (r *Router) ExecuteFromMessage(ctx context.Context, roomID, sender, eventID
 	// Route to handler
 	response, err := r.Route(ctx, cmdCtx)
 	if err != nil {
+		// Log failure
+		if r.repos != nil {
+			durationMs := int(time.Since(startTime).Milliseconds())
+			errMsg := ""
+			if err != nil {
+				errMsg = err.Error()
+			}
+			if completeErr := r.repos.MatrixCommandLog.Complete(eventID, "failed", errMsg, "", durationMs); completeErr != nil {
+				log.Printf("[Command] failed to update log entry: %v", completeErr)
+			}
+		}
 		return nil, true, err
+	}
+
+	// Update log entry with result
+	if r.repos != nil {
+		durationMs := int(time.Since(startTime).Milliseconds())
+		status := "success"
+		errMsg := ""
+		if !response.Success {
+			status = "failed"
+			errMsg = response.Message
+		}
+		if completeErr := r.repos.MatrixCommandLog.Complete(eventID, status, errMsg, "", durationMs); completeErr != nil {
+			log.Printf("[Command] failed to update log entry: %v", completeErr)
+		}
 	}
 
 	return response, true, nil

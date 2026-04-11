@@ -10,6 +10,7 @@ import (
 	"time"
 
 	"github.com/singll/bellkeeper/internal/config"
+	"github.com/singll/bellkeeper/internal/pkg/httpclient"
 )
 
 // ClassifyService handles article classification using LLM
@@ -25,9 +26,7 @@ func NewClassifyService(cfg config.ClassifyConfig, apiKey string, activityLog *A
 	return &ClassifyService{
 		cfg:    cfg,
 		apiKey: apiKey,
-		httpClient: &http.Client{
-			Timeout: time.Duration(cfg.Timeout) * time.Second,
-		},
+		httpClient: httpclient.NewClient(time.Duration(cfg.Timeout) * time.Second),
 		activityLog: activityLog,
 	}
 }

@@ -8,6 +8,8 @@ import (
 	"io"
 	"net/http"
 	"time"
+
+	"github.com/singll/bellkeeper/internal/pkg/httpclient"
 )
 
 // MemosTodoHandler handles Memos todo operations via n8n
@@ -26,9 +28,7 @@ func NewMemosTodoHandler(webhookURL string) *MemosTodoHandler {
 			usage:       "<子命令> [参数]",
 		},
 		n8nWebhookURL: webhookURL,
-		httpClient: &http.Client{
-			Timeout: 30 * time.Second,
-		},
+		httpClient: httpclient.NewClient(30 * time.Second),
 	}
 }
 

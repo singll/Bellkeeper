@@ -9,6 +9,7 @@ import (
 
 	"github.com/gin-gonic/gin"
 	"github.com/singll/bellkeeper/internal/matrix/command"
+	"github.com/singll/bellkeeper/internal/pkg/httpclient"
 )
 
 // TodoTxtHandler handles todo.txt export operations
@@ -23,9 +24,7 @@ func NewTodoTxtHandler(apiURL, apiToken string) *TodoTxtHandler {
 	return &TodoTxtHandler{
 		apiURL:   apiURL,
 		apiToken: apiToken,
-		httpClient: &http.Client{
-			Timeout: 30 * time.Second,
-		},
+		httpClient: httpclient.NewClient(30 * time.Second),
 	}
 }
 

@@ -17,6 +17,7 @@ import (
 
 	"github.com/singll/bellkeeper/internal/config"
 	"github.com/singll/bellkeeper/internal/model"
+	"github.com/singll/bellkeeper/internal/pkg/httpclient"
 	"github.com/singll/bellkeeper/internal/repository"
 )
 
@@ -178,9 +179,7 @@ func (s *LLMProxyService) loadFromDB() error {
 		ch := &Channel{
 			Config: chCfg,
 			Bucket: NewTokenBucket(chCfg.RPM, chCfg.RPD, s.cfg.DefaultBucketRPM),
-			Client: &http.Client{
-				Timeout: time.Duration(s.cfg.DefaultTimeout) * time.Second,
-			},
+			Client: httpclient.NewClient(time.Duration(s.cfg.DefaultTimeout) * time.Second),
 			Health: NewChannelHealth(s.cfg.CircuitBreaker),
 		}
 		channels[chCfg.Name] = ch

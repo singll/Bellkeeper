@@ -9,6 +9,7 @@ import (
 	"time"
 
 	"github.com/singll/bellkeeper/internal/config"
+	"github.com/singll/bellkeeper/internal/pkg/httpclient"
 	"github.com/singll/bellkeeper/internal/repository"
 )
 
@@ -26,7 +27,7 @@ func NewWorkflowService(cfg config.N8NConfig, settingRepo *repository.SettingRep
 	return &WorkflowService{
 		cfg:         cfg,
 		settingRepo: settingRepo,
-		client:      &http.Client{Timeout: time.Duration(timeout) * time.Second},
+		client:      httpclient.NewClient(time.Duration(timeout) * time.Second),
 	}
 }
 

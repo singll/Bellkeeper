@@ -8,6 +8,8 @@ import (
 	"io"
 	"net/http"
 	"time"
+
+	"github.com/singll/bellkeeper/internal/pkg/httpclient"
 )
 
 // N8NTriggerHandler triggers n8n workflow webhooks
@@ -28,9 +30,7 @@ func NewN8NTriggerHandler(name string, webhookURL string) *N8NTriggerHandler {
 		},
 		name:        name,
 		workflowURL: webhookURL,
-		httpClient: &http.Client{
-			Timeout: 30 * time.Second,
-		},
+		httpClient: httpclient.NewClient(30 * time.Second),
 	}
 }
 

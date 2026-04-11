@@ -12,6 +12,7 @@ import (
 	"time"
 
 	"github.com/singll/bellkeeper/internal/config"
+	"github.com/singll/bellkeeper/internal/pkg/httpclient"
 )
 
 // ExtractorService handles content extraction from URLs using Trafilatura and Firecrawl
@@ -70,9 +71,7 @@ type FirecrawlResponse struct {
 func NewExtractorService(cfg config.FileIngestionConfig, activityLog *ActivityLogService) *ExtractorService {
 	return &ExtractorService{
 		cfg: cfg,
-		httpClient: &http.Client{
-			Timeout: time.Duration(cfg.Firecrawl.Timeout) * time.Second,
-		},
+		httpClient: httpclient.NewClient(time.Duration(cfg.Firecrawl.Timeout) * time.Second),
 		activityLog: activityLog,
 	}
 }

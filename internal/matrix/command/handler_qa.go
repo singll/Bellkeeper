@@ -8,6 +8,8 @@ import (
 	"io"
 	"net/http"
 	"time"
+
+	"github.com/singll/bellkeeper/internal/pkg/httpclient"
 )
 
 // QAHandler handles QA operations via n8n
@@ -26,9 +28,7 @@ func NewQAHandler(webhookURL string) *QAHandler {
 			usage:       "<问题>",
 		},
 		n8nWebhookURL: webhookURL,
-		httpClient: &http.Client{
-			Timeout: 60 * time.Second,
-		},
+		httpClient: httpclient.NewClient(60 * time.Second),
 	}
 }
 

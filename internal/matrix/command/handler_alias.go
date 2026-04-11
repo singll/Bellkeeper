@@ -9,6 +9,8 @@ import (
 	"net/http"
 	"strconv"
 	"time"
+
+	"github.com/singll/bellkeeper/internal/pkg/httpclient"
 )
 
 // DirectMemosHandler handles Memos todo directly with todo.txt format
@@ -29,9 +31,7 @@ func NewDirectMemosHandler(apiURL, apiToken string) *DirectMemosHandler {
 		},
 		apiURL:   apiURL,
 		apiToken: apiToken,
-		httpClient: &http.Client{
-			Timeout: 30 * time.Second,
-		},
+		httpClient: httpclient.NewClient(30 * time.Second),
 	}
 }
 
