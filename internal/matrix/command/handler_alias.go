@@ -18,7 +18,7 @@ type DirectMemosHandler struct {
 	BaseHandler
 	apiURL     string
 	apiToken   string
-	httpClient *http.Client
+	httpClient *httpclient.Client
 }
 
 // NewDirectMemosHandler creates a direct Memos handler
@@ -31,7 +31,7 @@ func NewDirectMemosHandler(apiURL, apiToken string) *DirectMemosHandler {
 		},
 		apiURL:   apiURL,
 		apiToken: apiToken,
-		httpClient: httpclient.NewClient(30 * time.Second),
+		httpClient: httpclient.NewClientWithTimeout(30 * time.Second),
 	}
 }
 

@@ -16,7 +16,7 @@ import (
 type WorkflowService struct {
 	cfg         config.N8NConfig
 	settingRepo *repository.SettingRepository
-	client      *http.Client
+	client      *httpclient.Client
 }
 
 func NewWorkflowService(cfg config.N8NConfig, settingRepo *repository.SettingRepository) *WorkflowService {
@@ -27,7 +27,7 @@ func NewWorkflowService(cfg config.N8NConfig, settingRepo *repository.SettingRep
 	return &WorkflowService{
 		cfg:         cfg,
 		settingRepo: settingRepo,
-		client:      httpclient.NewClient(time.Duration(timeout) * time.Second),
+		client:      httpclient.NewClientWithTimeout(time.Duration(timeout) * time.Second),
 	}
 }
 

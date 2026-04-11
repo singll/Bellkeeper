@@ -17,7 +17,7 @@ type N8NTriggerHandler struct {
 	BaseHandler
 	name        string
 	workflowURL string
-	httpClient  *http.Client
+	httpClient  *httpclient.Client
 }
 
 // NewN8NTriggerHandler creates a new n8n trigger handler
@@ -30,7 +30,7 @@ func NewN8NTriggerHandler(name string, webhookURL string) *N8NTriggerHandler {
 		},
 		name:        name,
 		workflowURL: webhookURL,
-		httpClient: httpclient.NewClient(30 * time.Second),
+		httpClient: httpclient.NewClientWithTimeout(30 * time.Second),
 	}
 }
 

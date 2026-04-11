@@ -16,7 +16,7 @@ import (
 type MemosTodoHandler struct {
 	BaseHandler
 	n8nWebhookURL string
-	httpClient     *http.Client
+	httpClient     *httpclient.Client
 }
 
 // NewMemosTodoHandler creates a Memos todo handler
@@ -28,7 +28,7 @@ func NewMemosTodoHandler(webhookURL string) *MemosTodoHandler {
 			usage:       "<子命令> [参数]",
 		},
 		n8nWebhookURL: webhookURL,
-		httpClient: httpclient.NewClient(30 * time.Second),
+		httpClient: httpclient.NewClientWithTimeout(30 * time.Second),
 	}
 }
 

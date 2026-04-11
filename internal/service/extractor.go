@@ -18,7 +18,7 @@ import (
 // ExtractorService handles content extraction from URLs using Trafilatura and Firecrawl
 type ExtractorService struct {
 	cfg         config.FileIngestionConfig
-	httpClient  *http.Client
+	httpClient  *httpclient.Client
 	activityLog *ActivityLogService
 }
 
@@ -71,7 +71,7 @@ type FirecrawlResponse struct {
 func NewExtractorService(cfg config.FileIngestionConfig, activityLog *ActivityLogService) *ExtractorService {
 	return &ExtractorService{
 		cfg: cfg,
-		httpClient: httpclient.NewClient(time.Duration(cfg.Firecrawl.Timeout) * time.Second),
+		httpClient: httpclient.NewClientWithTimeout(time.Duration(cfg.Firecrawl.Timeout) * time.Second),
 		activityLog: activityLog,
 	}
 }

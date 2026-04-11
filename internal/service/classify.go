@@ -17,7 +17,7 @@ import (
 type ClassifyService struct {
 	cfg         config.ClassifyConfig
 	apiKey      string
-	httpClient  *http.Client
+	httpClient  *httpclient.Client
 	activityLog *ActivityLogService
 }
 
@@ -26,7 +26,7 @@ func NewClassifyService(cfg config.ClassifyConfig, apiKey string, activityLog *A
 	return &ClassifyService{
 		cfg:    cfg,
 		apiKey: apiKey,
-		httpClient: httpclient.NewClient(time.Duration(cfg.Timeout) * time.Second),
+		httpClient: httpclient.NewClientWithTimeout(time.Duration(cfg.Timeout) * time.Second),
 		activityLog: activityLog,
 	}
 }

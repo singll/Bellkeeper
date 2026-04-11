@@ -109,7 +109,7 @@ func (s *HealthService) Detailed() *DetailedHealth {
 // checkRagFlow checks RagFlow health with API key authentication.
 func (s *HealthService) checkRagFlow() ServiceStatus {
 	url := s.cfg.RagFlow.BaseURL + "/api/v1/datasets?page=1&limit=1"
-	client := httpclient.NewClient(time.Duration(defaults.HealthCheckTimeout) * time.Second)
+	client := httpclient.HealthCheck(time.Duration(defaults.HealthCheckTimeout) * time.Second)
 
 	req, err := http.NewRequest("GET", url, nil)
 	if err != nil {
@@ -138,7 +138,7 @@ func (s *HealthService) checkRagFlow() ServiceStatus {
 }
 
 func (s *HealthService) checkHTTPService(url string) ServiceStatus {
-	client := httpclient.NewClient(time.Duration(defaults.HealthCheckTimeout) * time.Second)
+	client := httpclient.HealthCheck(time.Duration(defaults.HealthCheckTimeout) * time.Second)
 
 	start := time.Now()
 	resp, err := client.Get(url)

@@ -16,7 +16,7 @@ import (
 type QAHandler struct {
 	BaseHandler
 	n8nWebhookURL string
-	httpClient     *http.Client
+	httpClient     *httpclient.Client
 }
 
 // NewQAHandler creates a QA handler
@@ -28,7 +28,7 @@ func NewQAHandler(webhookURL string) *QAHandler {
 			usage:       "<问题>",
 		},
 		n8nWebhookURL: webhookURL,
-		httpClient: httpclient.NewClient(60 * time.Second),
+		httpClient: httpclient.NewClientWithTimeout(60 * time.Second),
 	}
 }
 

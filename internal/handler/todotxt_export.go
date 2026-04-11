@@ -16,7 +16,7 @@ import (
 type TodoTxtHandler struct {
 	apiURL     string
 	apiToken   string
-	httpClient *http.Client
+	httpClient *httpclient.Client
 }
 
 // NewTodoTxtHandler creates a new todo.txt handler
@@ -24,7 +24,7 @@ func NewTodoTxtHandler(apiURL, apiToken string) *TodoTxtHandler {
 	return &TodoTxtHandler{
 		apiURL:   apiURL,
 		apiToken: apiToken,
-		httpClient: httpclient.NewClient(30 * time.Second),
+		httpClient: httpclient.NewClientWithTimeout(30 * time.Second),
 	}
 }
 

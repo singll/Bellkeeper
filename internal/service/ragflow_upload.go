@@ -22,7 +22,7 @@ type RagFlowService struct {
 	cfg         config.RagFlowConfig
 	datasetRepo *repository.DatasetMappingRepository
 	tagRepo     *repository.TagRepository
-	client      *http.Client
+	client      *httpclient.Client
 	activityLog *ActivityLogService
 }
 
@@ -32,7 +32,7 @@ func NewRagFlowService(cfg config.RagFlowConfig, datasetRepo *repository.Dataset
 		cfg:         cfg,
 		datasetRepo: datasetRepo,
 		tagRepo:     tagRepo,
-		client:      httpclient.NewClient(time.Duration(cfg.Timeout) * time.Second),
+		client:      httpclient.NewClientWithTimeout(time.Duration(cfg.Timeout) * time.Second),
 		activityLog: activityLog,
 	}
 }

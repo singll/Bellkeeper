@@ -126,7 +126,7 @@ func (tb *TokenBucket) Status() map[string]interface{} {
 type Channel struct {
 	Config config.ChannelConfig
 	Bucket *TokenBucket
-	Client *http.Client
+	Client *httpclient.Client
 	Health *ChannelHealth
 }
 
@@ -179,7 +179,7 @@ func (s *LLMProxyService) loadFromDB() error {
 		ch := &Channel{
 			Config: chCfg,
 			Bucket: NewTokenBucket(chCfg.RPM, chCfg.RPD, s.cfg.DefaultBucketRPM),
-			Client: httpclient.NewClient(time.Duration(s.cfg.DefaultTimeout) * time.Second),
+			Client: httpclient.NewClientWithTimeout(time.Duration(s.cfg.DefaultTimeout) * time.Second),
 			Health: NewChannelHealth(s.cfg.CircuitBreaker),
 		}
 		channels[chCfg.Name] = ch
