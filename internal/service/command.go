@@ -50,32 +50,36 @@ func (s *CommandService) registerHandlers() {
 	// Register built-in handlers
 	// (Already registered by NewRouter)
 
-	// Register n8n webhook handlers (fallback when direct handler not available)
-	if s.n8nCfg.WebhookBaseURL != "" {
-		// Memos Todo webhook
+	// Register Memos handlers
+	// Priority: DirectMemosHandler (direct API) > N8NTriggerHandler (webhook fallback)
+	if s.memosCfg.Enabled && s.memosCfg.BaseURL != "" {
+		// Direct Memos handler - talks to Memos API directly
+		directMemos := command.NewDirectMemosHandler(s.memosCfg.BaseURL, s.memosCfg.APIToken)
+		s.router.RegisterHandler(directMemos) // registers as "待办"
+		// Register shortcut aliases pointing to DirectMemosHandler
+		s.router.RegisterHandler(command.NewShortcutAliasHandler("列表", "列表", directMemos))
+		s.router.RegisterHandler(command.NewShortcutAliasHandler("新增", "新增", directMemos))
+		s.router.RegisterHandler(command.NewShortcutAliasHandler("完成", "完成", directMemos))
+		log.Printf("[Command] registered direct Memos handler with aliases")
+	} else if s.n8nCfg.WebhookBaseURL != "" {
+		// Fallback: n8n webhook
 		memosWebhook := s.n8nCfg.WebhookBaseURL + "/memos-todo"
 		memosHandler := command.NewN8NTriggerHandler("memos", memosWebhook)
 		s.router.RegisterHandler(memosHandler)
 		s.router.RegisterHandler(command.NewAliasHandler("列表", memosHandler))
 		s.router.RegisterHandler(command.NewAliasHandler("新增", memosHandler))
 		s.router.RegisterHandler(command.NewAliasHandler("完成", memosHandler))
+		log.Printf("[Command] registered n8n Memos handler with aliases")
+	}
 
-		// QA webhook
+	// Register QA handlers
+	if s.n8nCfg.WebhookBaseURL != "" {
 		qaWebhook := s.n8nCfg.WebhookBaseURL + "/qa"
 		qaHandler := command.NewQAHandler(qaWebhook)
 		s.router.RegisterHandler(qaHandler)
 		s.router.RegisterHandler(command.NewAliasHandler("问", qaHandler))
 		s.router.RegisterHandler(command.NewAliasHandler("搜", qaHandler))
 		s.router.RegisterHandler(command.NewAliasHandler("search", qaHandler))
-
-		// TODO: Add more n8n webhook handlers as needed
-	}
-
-	// Register direct handlers (takes priority over n8n handlers)
-	if s.memosCfg.Enabled && s.memosCfg.BaseURL != "" {
-		directMemos := command.NewDirectMemosHandler(s.memosCfg.BaseURL, s.memosCfg.APIToken)
-		s.router.RegisterHandler(directMemos)
-		log.Printf("[Command] registered direct Memos handler")
 	}
 
 	log.Printf("[Command] registered %d commands", len(s.router.ListCommands()))

@@ -172,6 +172,42 @@ func (h *AliasHandler) Handle(ctx context.Context, cmdCtx *Context) (*Response, 
 	return h.wrapped.Handle(ctx, cmdCtx)
 }
 
+// ShortcutAliasHandler wraps a handler and injects a subcommand into Argv/Args
+// before delegating. Used for commands like "!列表" → DirectMemosHandler with Argv[0]="列表".
+type ShortcutAliasHandler struct {
+	BaseHandler
+	subCommand string
+	wrapped    Handler
+}
+
+func NewShortcutAliasHandler(name, subCommand string, wrapped Handler) *ShortcutAliasHandler {
+	return &ShortcutAliasHandler{
+		BaseHandler: BaseHandler{
+			name:        name,
+			description: wrapped.Description(),
+			usage:       wrapped.Usage(),
+		},
+		subCommand: subCommand,
+		wrapped:    wrapped,
+	}
+}
+
+func (h *ShortcutAliasHandler) Handle(ctx context.Context, cmdCtx *Context) (*Response, error) {
+	// Clone context and command to avoid mutating the original
+	modified := *cmdCtx
+	modCmd := *cmdCtx.Command
+	// Prepend subcommand to Argv
+	modCmd.Argv = append([]string{h.subCommand}, cmdCtx.Command.Argv...)
+	// Rebuild Args with subcommand prefix
+	if cmdCtx.Command.Args != "" {
+		modCmd.Args = h.subCommand + " " + cmdCtx.Command.Args
+	} else {
+		modCmd.Args = h.subCommand
+	}
+	modified.Command = &modCmd
+	return h.wrapped.Handle(ctx, &modified)
+}
+
 // HealthHandler handles !health command - shows detailed system status
 type HealthHandler struct {
 	BaseHandler

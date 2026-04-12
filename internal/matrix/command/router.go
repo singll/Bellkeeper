@@ -122,12 +122,14 @@ func (r *Router) Route(ctx context.Context, cmdCtx *Context) (*Response, error) 
 func (r *Router) checkPermission(ctx context.Context, cmdCtx *Context) bool {
 	// Get command config from DB
 	cmd, err := r.repos.MatrixCommand.GetByName(cmdCtx.Command.Name)
-	if err != nil {
-		log.Printf("[Policy] failed to get command %s: %v", cmdCtx.Command.Name, err)
-		return false
-	}
-	if cmd == nil {
-		log.Printf("[Policy] command %s not found", cmdCtx.Command.Name)
+	if err != nil || cmd == nil {
+		// Command not in DB — allow if handler is registered (built-in/dynamic commands)
+		// Built-in commands (ping, help, status, commands, health, rooms) may not have DB entries
+		if _, exists := r.handlers[cmdCtx.Command.Name]; exists {
+			log.Printf("[Policy] command %s not in DB, allowing registered handler", cmdCtx.Command.Name)
+			return true
+		}
+		log.Printf("[Policy] command %s not found in DB or handlers", cmdCtx.Command.Name)
 		return false
 	}
 
