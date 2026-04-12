@@ -45,11 +45,18 @@ type AskService struct {
 
 // NewAskService 创建问答服务
 func NewAskService(search *FileSearchService, llmProxyURL, apiKey string) *AskService {
+	// LLM 代理已内置重试机制，这里禁用 httpclient 的重试以避免双重重试导致超时
+	client := httpclient.NewClient(&httpclient.Config{
+		Timeout:        90 * time.Second,
+		ConnectTimeout: 10 * time.Second,
+		MaxRetries:     0, // 禁用重试，LLM 代理内部已有重试逻辑
+		RetryDelay:     500 * time.Millisecond,
+	})
 	return &AskService{
 		searchService: search,
 		llmProxyURL:  llmProxyURL,
-		apiKey:      apiKey,
-		httpClient:  httpclient.NewClientWithTimeout(60 * time.Second),
+		apiKey:       apiKey,
+		httpClient:    client,
 	}
 }
 
