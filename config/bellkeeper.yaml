@@ -216,3 +216,24 @@ nats:
   streams:
     notifications: ${NATS_STREAM_NOTIFICATIONS}
     commands: ${NATS_STREAM_COMMANDS}
+
+# Meilisearch 搜索服务
+meilisearch:
+  url: http://sp-meilisearch:7700
+  api_key: ${MEILI_MASTER_KEY}
+  index: knowledge_chunks
+
+# 知识库配置
+knowledge:
+  enabled: true
+  base_path: /mnt/knowledge
+  scan_dirs:
+    - path: raw
+      layer: raw
+    - path: working
+      layer: working
+    - path: KNOWLEDGE
+      layer: knowledge
+  scan_interval: 300
+  chunk_min_size: 100
+  chunk_max_size: 600

@@ -234,11 +234,9 @@ func (r *Router) createHandlerFromDB(cmd *model.MatrixCommand) Handler {
 		return nil
 
 	case "ragflow_qa", "ragflow_search":
-		// QA handler via n8n
-		if r.n8nCfg.WebhookBaseURL != "" {
-			return NewQAHandler(r.n8nCfg.WebhookBaseURL + "/qa")
-		}
-		log.Printf("[Command] skip %s: N8N not configured", cmd.CommandName)
+		// QA handler via n8n - deprecated, use SetKnowledgeHandlers instead
+		// Skip registration here, the new knowledge handlers are registered via SetKnowledgeHandlers
+		log.Printf("[Command] skip %s: use SetKnowledgeHandlers for knowledge-based QA", cmd.CommandName)
 		return nil
 
 	case "builtin_ping":

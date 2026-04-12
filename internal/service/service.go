@@ -22,6 +22,9 @@ type Services struct {
 	// Optional services (initialized in main.go with infra dependencies)
 	Notification *NotificationService
 	MatrixAdmin  *AdminService
+	// Knowledge services adapters (for Matrix command handlers)
+	KnowledgeSearchAdapter *SearchServiceAdapter
+	KnowledgeAskAdapter    *AskServiceAdapter
 }
 
 // NewServices creates all service instances
@@ -71,4 +74,10 @@ func NewServices(repos *repository.Repositories, cfg *config.Config, version str
 // SetNotificationService sets the optional notification service
 func (s *Services) SetNotificationService(svc *NotificationService) {
 	s.Notification = svc
+}
+
+// SetKnowledgeServices sets the knowledge service adapters for Matrix command handlers
+func (s *Services) SetKnowledgeServices(searchAdapter *SearchServiceAdapter, askAdapter *AskServiceAdapter) {
+	s.KnowledgeSearchAdapter = searchAdapter
+	s.KnowledgeAskAdapter = askAdapter
 }

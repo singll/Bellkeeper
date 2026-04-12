@@ -25,6 +25,8 @@ type Handlers struct {
 	// Optional handlers
 	MatrixNotify *MatrixNotifyHandler
 	MatrixAdmin  *MatrixAdminHandler
+	// Knowledge handler (initialized in main.go)
+	Knowledge *KnowledgeHandler
 }
 
 // NewHandlers creates all handler instances

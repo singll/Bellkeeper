@@ -15,6 +15,7 @@ import (
 	"github.com/singll/bellkeeper/internal/middleware"
 	"github.com/singll/bellkeeper/internal/matrix/policy"
 	"github.com/singll/bellkeeper/internal/model"
+	"github.com/singll/bellkeeper/internal/pkg/meili"
 	"github.com/singll/bellkeeper/internal/repository"
 	"github.com/singll/bellkeeper/internal/router"
 	"github.com/singll/bellkeeper/internal/service"
@@ -99,6 +100,44 @@ func runServer(cmd *cobra.Command, args []string) {
 	services := service.NewServices(repos, cfg, version)
 	handlers := handler.NewHandlers(services, shutdownChan, cfg.Memos.BaseURL, cfg.Memos.APIToken)
 
+	// Initialize Knowledge services (Meilisearch-based search and QA)
+	var knowledgeIndexSvc *service.KnowledgeIndexService
+	var knowledgeSearchSvc *service.FileSearchService
+	var askSvc *service.AskService
+	var knowledgeSearchAdapter *service.SearchServiceAdapter
+	var knowledgeAskAdapter *service.AskServiceAdapter
+	if cfg.Knowledge.Enabled {
+		log.Println("[Knowledge] initializing knowledge services...")
+
+		// Initialize Meilisearch client
+		meiliClient, err := meili.NewClient(
+			cfg.Meilisearch.URL,
+			cfg.Meilisearch.APIKey,
+			cfg.Meilisearch.Index,
+		)
+		if err != nil {
+			log.Printf("[Knowledge] failed to initialize Meilisearch client: %v", err)
+		} else {
+			// Initialize services
+			knowledgeIndexSvc = service.NewKnowledgeIndexService(cfg.Knowledge, meiliClient)
+			knowledgeSearchSvc = service.NewFileSearchService(meiliClient)
+			askSvc = service.NewAskService(knowledgeSearchSvc, fmt.Sprintf("http://localhost:%d/api/llm/v1", cfg.Server.Port), cfg.Server.APIKey)
+
+			// Create adapters for Matrix commands
+			knowledgeSearchAdapter = service.NewSearchServiceAdapter(knowledgeSearchSvc)
+			knowledgeAskAdapter = service.NewAskServiceAdapter(askSvc)
+
+			// Initialize HTTP handlers
+			handlers.Knowledge = handler.NewKnowledgeHandler(knowledgeSearchSvc, knowledgeIndexSvc, askSvc)
+
+			// Start indexing in background
+			knowledgeIndexSvc.StartFullScan(context.Background())
+			knowledgeIndexSvc.StartIncrementalScan(context.Background())
+
+			log.Println("[Knowledge] knowledge services initialized")
+		}
+	}
+
 	// Initialize Matrix infrastructure (Redis, NATS)
 	var (
 		redisClient           *infra.RedisClient
@@ -166,6 +205,11 @@ func runServer(cmd *cobra.Command, args []string) {
 		// Wire up AdminService for admin commands
 		if services.MatrixAdmin != nil {
 			commandSvc.SetAdminService(services.MatrixAdmin)
+		}
+
+		// Wire up knowledge command handlers if available
+		if knowledgeSearchAdapter != nil && knowledgeAskAdapter != nil {
+			commandSvc.SetKnowledgeHandlers(knowledgeAskAdapter, knowledgeSearchAdapter)
 		}
 
 		matrixSyncLoop.SetCommandService(commandSvc)

@@ -44,6 +44,10 @@ func Setup(r *gin.Engine, handlers *handler.Handlers, mode string, apiKey string
 	if handlers.MatrixAdmin != nil {
 		registerMatrixAdminRoutes(api, handlers.MatrixAdmin)
 	}
+	// Knowledge routes
+	if handlers.Knowledge != nil {
+		registerKnowledgeRoutes(api, handlers.Knowledge)
+	}
 }
 
 func registerTagRoutes(api *gin.RouterGroup, h *handler.TagHandler) {
@@ -227,4 +231,13 @@ func registerTodoTxtRoutes(api *gin.RouterGroup, h *handler.TodoTxtHandler) {
 
 func registerSearchRoutes(api *gin.RouterGroup, h *handler.SearchHandler) {
 	api.GET("/search", h.Search)
+}
+
+func registerKnowledgeRoutes(api *gin.RouterGroup, h *handler.KnowledgeHandler) {
+	files := api.Group("/files")
+	files.POST("/search", h.Search)
+	files.POST("/ask", h.Ask)
+	files.GET("/stats", h.Stats)
+	files.POST("/rebuild", h.Rebuild)
+	files.GET("/health", h.Health)
 }

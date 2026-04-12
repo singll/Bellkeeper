@@ -73,14 +73,8 @@ func (s *CommandService) registerHandlers() {
 	}
 
 	// Register QA handlers
-	if s.n8nCfg.WebhookBaseURL != "" {
-		qaWebhook := s.n8nCfg.WebhookBaseURL + "/qa"
-		qaHandler := command.NewQAHandler(qaWebhook)
-		s.router.RegisterHandler(qaHandler)
-		s.router.RegisterHandler(command.NewAliasHandler("问", qaHandler))
-		s.router.RegisterHandler(command.NewAliasHandler("搜", qaHandler))
-		s.router.RegisterHandler(command.NewAliasHandler("search", qaHandler))
-	}
+	// Note: QA handlers are now registered via SetKnowledgeHandlers
+	// This allows using the new AskService and SearchService instead of n8n webhooks
 
 	log.Printf("[Command] registered %d commands", len(s.router.ListCommands()))
 }
@@ -88,6 +82,21 @@ func (s *CommandService) registerHandlers() {
 // GetRouter returns the command router
 func (s *CommandService) GetRouter() *command.Router {
 	return s.router
+}
+
+// SetKnowledgeHandlers sets the knowledge base command handlers
+// This allows using the new AskService and SearchService instead of n8n webhooks
+func (s *CommandService) SetKnowledgeHandlers(askHandler command.AskHandler, searchHandler command.SearchHandler) {
+	qaHandler := command.NewQAHandler(askHandler)
+	s.router.RegisterHandler(qaHandler)
+	s.router.RegisterHandler(command.NewAliasHandler("问", qaHandler))
+
+	searchMatrixHandler := command.NewMatrixSearchHandler(searchHandler)
+	s.router.RegisterHandler(searchMatrixHandler)
+	s.router.RegisterHandler(command.NewAliasHandler("搜", searchMatrixHandler))
+	s.router.RegisterHandler(command.NewAliasHandler("search", searchMatrixHandler))
+
+	log.Printf("[Command] registered knowledge handlers (ask and search)")
 }
 
 // ExecuteMessage processes a Matrix message and executes if it's a command

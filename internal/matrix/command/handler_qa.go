@@ -1,37 +1,30 @@
 package command
 
 import (
-	"bytes"
 	"context"
-	"encoding/json"
 	"fmt"
-	"io"
-	"net/http"
-	"time"
-
-	"github.com/singll/bellkeeper/internal/pkg/httpclient"
+	"strings"
 )
 
-// QAHandler handles QA operations via n8n
+// QAHandler 知识库问答命令处理器
 type QAHandler struct {
 	BaseHandler
-	n8nWebhookURL string
-	httpClient     *httpclient.Client
+	askHandler AskHandler
 }
 
-// NewQAHandler creates a QA handler
-func NewQAHandler(webhookURL string) *QAHandler {
+// NewQAHandler 创建问答处理器
+func NewQAHandler(askHandler AskHandler) *QAHandler {
 	return &QAHandler{
 		BaseHandler: BaseHandler{
 			name:        "qa",
 			description: "知识库问答",
 			usage:       "<问题>",
 		},
-		n8nWebhookURL: webhookURL,
-		httpClient: httpclient.NewClientWithTimeout(60 * time.Second),
+		askHandler: askHandler,
 	}
 }
 
+// Handle 处理问答命令
 func (h *QAHandler) Handle(ctx context.Context, cmdCtx *Context) (*Response, error) {
 	question := cmdCtx.Command.Args
 	if question == "" {
@@ -42,52 +35,40 @@ func (h *QAHandler) Handle(ctx context.Context, cmdCtx *Context) (*Response, err
 		}, nil
 	}
 
-	// Send to n8n
-	payload := map[string]interface{}{
-		"question": question,
-		"room_id":  cmdCtx.RoomID,
-		"sender":   cmdCtx.Sender,
-		"event_id": cmdCtx.EventID,
-	}
-
-	body, _ := json.Marshal(payload)
-	req, err := http.NewRequestWithContext(ctx, "POST", h.n8nWebhookURL, bytes.NewReader(body))
-	if err != nil {
-		return nil, err
-	}
-	req.Header.Set("Content-Type", "application/json")
-
-	// Show "thinking" response
-	resp, err := h.httpClient.Do(req)
+	answer, refs, err := h.askHandler.Ask(ctx, question)
 	if err != nil {
 		return &Response{
 			Success: false,
 			Message: fmt.Sprintf("❌ 问答服务调用失败: %v", err),
 		}, nil
 	}
-	defer resp.Body.Close()
 
-	respBody, _ := io.ReadAll(resp.Body)
+	msg := h.formatResponse(question, answer, refs)
+	return &Response{
+		Success: true,
+		Message: msg,
+		IsHTML:  false,
+	}, nil
+}
 
-	if resp.StatusCode >= 200 && resp.StatusCode < 300 {
-		var result map[string]interface{}
-		if json.Unmarshal(respBody, &result) == nil {
-			if answer, ok := result["answer"].(string); ok {
-				return &Response{
-					Success: true,
-					Message: fmt.Sprintf("**Q:** %s\n\n**A:** %s", question, answer),
-					IsHTML:  true,
-				}, nil
+// formatResponse 格式化响应
+func (h *QAHandler) formatResponse(question, answer string, refs []Reference) string {
+	var sb strings.Builder
+
+	sb.WriteString(fmt.Sprintf("**Q:** %s\n\n", question))
+	sb.WriteString(fmt.Sprintf("**A:** %s\n\n", answer))
+
+	if len(refs) > 0 {
+		sb.WriteString("📎 来源:\n")
+		seen := make(map[string]bool)
+		for _, ref := range refs {
+			if seen[ref.FilePath] {
+				continue
 			}
+			seen[ref.FilePath] = true
+			sb.WriteString(fmt.Sprintf("• %s — %s\n", ref.Title, ref.FilePath))
 		}
-		return &Response{
-			Success: true,
-			Message: string(respBody),
-		}, nil
 	}
 
-	return &Response{
-		Success: false,
-		Message: fmt.Sprintf("❌ 问答服务返回错误 (HTTP %d): %s", resp.StatusCode, string(respBody)),
-	}, nil
+	return sb.String()
 }

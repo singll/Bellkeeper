@@ -22,6 +22,8 @@ type Config struct {
 	Redis         RedisConfig         `mapstructure:"redis"`
 	NATS          NATSConfig          `mapstructure:"nats"`
 	Memos         MemosConfig         `mapstructure:"memos"`
+	Meilisearch   MeilisearchConfig   `mapstructure:"meilisearch"`
+	Knowledge     KnowledgeConfig     `mapstructure:"knowledge"`
 }
 
 type LLMProxyConfig struct {
@@ -188,6 +190,29 @@ type MemosConfig struct {
 	Enabled  bool   `mapstructure:"enabled"`
 }
 
+// MeilisearchConfig Meilisearch 搜索服务配置
+type MeilisearchConfig struct {
+	URL    string `mapstructure:"url"`
+	APIKey string `mapstructure:"api_key"`
+	Index  string `mapstructure:"index"`
+}
+
+// KnowledgeConfig 知识库索引配置
+type KnowledgeConfig struct {
+	Enabled       bool             `mapstructure:"enabled"`
+	BasePath      string           `mapstructure:"base_path"`
+	ScanDirs      []ScanDirConfig `mapstructure:"scan_dirs"`
+	ScanInterval  int             `mapstructure:"scan_interval"`
+	ChunkMinSize  int             `mapstructure:"chunk_min_size"`
+	ChunkMaxSize  int             `mapstructure:"chunk_max_size"`
+}
+
+// ScanDirConfig 扫描目录配置
+type ScanDirConfig struct {
+	Path  string `mapstructure:"path"`
+	Layer string `mapstructure:"layer"`
+}
+
 func Load(cfgFile string) (*Config, error) {
 	v := viper.New()
 
@@ -240,6 +265,9 @@ func Load(cfgFile string) (*Config, error) {
 	// Expand ${VAR} references in Memos config
 	cfg.Memos.BaseURL = os.ExpandEnv(cfg.Memos.BaseURL)
 	cfg.Memos.APIToken = os.ExpandEnv(cfg.Memos.APIToken)
+
+	// Expand ${VAR} references in Meilisearch config
+	cfg.Meilisearch.APIKey = os.ExpandEnv(cfg.Meilisearch.APIKey)
 
 	return &cfg, nil
 }
@@ -344,4 +372,21 @@ func setDefaults(v *viper.Viper) {
 	v.SetDefault("memos.enabled", false)
 	v.SetDefault("memos.base_url", "")
 	v.SetDefault("memos.api_token", "")
+
+	// Meilisearch
+	v.SetDefault("meilisearch.url", "http://sp-meilisearch:7700")
+	v.SetDefault("meilisearch.api_key", "")
+	v.SetDefault("meilisearch.index", "knowledge_chunks")
+
+	// Knowledge
+	v.SetDefault("knowledge.enabled", true)
+	v.SetDefault("knowledge.base_path", "/mnt/knowledge")
+	v.SetDefault("knowledge.scan_interval", 300)
+	v.SetDefault("knowledge.chunk_min_size", 100)
+	v.SetDefault("knowledge.chunk_max_size", 600)
+	v.SetDefault("knowledge.scan_dirs", []map[string]string{
+		{"path": "raw", "layer": "raw"},
+		{"path": "working", "layer": "working"},
+		{"path": "KNOWLEDGE", "layer": "knowledge"},
+	})
 }
