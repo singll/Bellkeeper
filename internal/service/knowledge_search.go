@@ -78,14 +78,6 @@ func (s *FileSearchService) Search(ctx context.Context, req FileSearchRequest) (
 	seenFiles := make(map[string]bool)
 
 	for _, hit := range resp.Hits {
-		// Debug: 打印第一个 hit 的原始数据
-		if len(hits) == 0 {
-			fmt.Printf("[DEBUG Search] First hit type: %T\n", hit)
-			for k, v := range hit {
-				fmt.Printf("[DEBUG Search] key=%s type=%T value=%v\n", k, v, v)
-			}
-		}
-
 		filePath := getStringValue(hit, "file_path")
 		title := getStringValue(hit, "title")
 
@@ -118,8 +110,6 @@ func (s *FileSearchService) Search(ctx context.Context, req FileSearchRequest) (
 		}
 		hits = append(hits, h)
 	}
-
-	fmt.Printf("[DEBUG Search] Final hits: %d, first file_path: '%s', title: '%s'\n", len(hits), hits[0].FilePath, hits[0].Title)
 
 	return &FileSearchResult{
 		Files:   hits,
