@@ -275,14 +275,24 @@ func (c *Client) Health(ctx context.Context) error {
 
 // convertValue 转换 Meilisearch SDK 返回的值类型
 // Meilisearch SDK 返回 json.RawMessage 和 []byte 类型，需要转换为 string
+// JSON 字符串值会带引号，需要去掉
 func convertValue(v interface{}) interface{} {
 	switch val := v.(type) {
 	case string:
 		return val
 	case json.RawMessage:
-		return string(val)
+		s := string(val)
+		// 如果是 JSON 字符串（带引号），去掉首尾引号
+		if len(s) >= 2 && s[0] == '"' && s[len(s)-1] == '"' {
+			s = s[1 : len(s)-1]
+		}
+		return s
 	case []byte:
-		return string(val)
+		s := string(val)
+		if len(s) >= 2 && s[0] == '"' && s[len(s)-1] == '"' {
+			s = s[1 : len(s)-1]
+		}
+		return s
 	default:
 		return val
 	}
