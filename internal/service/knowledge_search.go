@@ -2,6 +2,7 @@ package service
 
 import (
 	"context"
+	"encoding/json"
 	"fmt"
 	"strings"
 
@@ -77,8 +78,17 @@ func (s *FileSearchService) Search(ctx context.Context, req FileSearchRequest) (
 	seenFiles := make(map[string]bool)
 
 	for _, hit := range resp.Hits {
-		// resp.Hits is already []map[string]interface{} from meili.SearchResponse
+		// Debug: 打印第一个 hit 的原始数据
+		if len(hits) == 0 {
+			fmt.Printf("[DEBUG Search] First hit type: %T\n", hit)
+			for k, v := range hit {
+				fmt.Printf("[DEBUG Search] key=%s type=%T value=%v\n", k, v, v)
+			}
+		}
+
 		filePath := getStringValue(hit, "file_path")
+		title := getStringValue(hit, "title")
+
 		if seenFiles[filePath] {
 			continue
 		}
@@ -99,7 +109,7 @@ func (s *FileSearchService) Search(ctx context.Context, req FileSearchRequest) (
 		h := FileHit{
 			FileID:    filePath,
 			FilePath:  filePath,
-			Title:     getStringValue(hit, "title"),
+			Title:     title,
 			Layer:     getStringValue(hit, "layer"),
 			Category:  getStringValue(hit, "category"),
 			Tags:      tags,
@@ -108,6 +118,8 @@ func (s *FileSearchService) Search(ctx context.Context, req FileSearchRequest) (
 		}
 		hits = append(hits, h)
 	}
+
+	fmt.Printf("[DEBUG Search] Final hits: %d, first file_path: '%s', title: '%s'\n", len(hits), hits[0].FilePath, hits[0].Title)
 
 	return &FileSearchResult{
 		Files:   hits,
@@ -159,10 +171,17 @@ func (s *FileSearchService) extractSnippets(m map[string]interface{}) []string {
 	return snippets
 }
 
-// getStringValue 安全获取字符串值
+// getStringValue 安全获取字符串值（处理 string、json.RawMessage 和 []byte 类型）
 func getStringValue(m map[string]interface{}, key string) string {
-	if v, ok := m[key].(string); ok {
-		return v
+	if v, ok := m[key]; ok {
+		switch typed := v.(type) {
+		case string:
+			return typed
+		case json.RawMessage:
+			return string(typed)
+		case []byte:
+			return string(typed)
+		}
 	}
 	return ""
 }

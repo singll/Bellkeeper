@@ -173,14 +173,18 @@ func (s *KnowledgeIndexService) indexFile(ctx context.Context, file *FileInfo) e
 	chunks := s.splitter.SplitByHeadings(parsed.Body, parsed.Headings, file.RelPath)
 
 	if len(chunks) == 0 {
+		log.Printf("[KnowledgeIndex] skip file %s: no chunks", file.RelPath)
 		return nil
 	}
+
+	// 生成安全的文档 ID（只包含字母、数字、连字符和下划线）
+	safeID := sanitizeDocumentID(file.RelPath)
 
 	// 构建 Meilisearch 文档
 	docs := make([]map[string]interface{}, 0, len(chunks))
 	for i, chunk := range chunks {
 		doc := map[string]interface{}{
-			"id":            fmt.Sprintf("%s#%d", file.RelPath, i),
+			"id":            fmt.Sprintf("%s_%d", safeID, i),
 			"file_path":     file.RelPath,
 			"file_id":       file.RelPath,
 			"chunk_index":   i,
@@ -198,7 +202,30 @@ func (s *KnowledgeIndexService) indexFile(ctx context.Context, file *FileInfo) e
 		docs = append(docs, doc)
 	}
 
+	log.Printf("[KnowledgeIndex] indexing file %s: %d chunks", file.RelPath, len(docs))
+
 	return s.meiliClient.AddDocuments(ctx, docs)
+}
+
+// sanitizeDocumentID 生成安全的 Meilisearch 文档 ID
+// 只允许: a-z, A-Z, 0-9, -, _
+func sanitizeDocumentID(path string) string {
+	// 去掉扩展名
+	path = strings.TrimSuffix(path, ".md")
+	path = strings.TrimSuffix(path, ".txt")
+
+	var result strings.Builder
+	for _, r := range path {
+		if (r >= 'a' && r <= 'z') || (r >= 'A' && r <= 'Z') || (r >= '0' && r <= '9') || r == '-' || r == '_' {
+			result.WriteRune(r)
+		} else if r == '/' || r == '\\' {
+			result.WriteRune('_')
+		} else {
+			// 中文或其他字符，用其字节的十六进制表示
+			result.WriteString(fmt.Sprintf("_%X", r))
+		}
+	}
+	return result.String()
 }
 
 // IndexFile 索引单个文件（供外部调用）
