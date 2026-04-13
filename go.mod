@@ -4,7 +4,9 @@ go 1.25.0
 
 require (
 	github.com/gin-gonic/gin v1.9.1
+	github.com/meilisearch/meilisearch-go v0.36.1
 	github.com/microcosm-cc/bluemonday v1.0.27
+	github.com/mmcdole/gofeed v1.2.1
 	github.com/nats-io/nats.go v1.50.0
 	github.com/prometheus/client_golang v1.23.2
 	github.com/redis/go-redis/v9 v9.18.0
@@ -20,7 +22,9 @@ require (
 
 require (
 	filippo.io/edwards25519 v1.2.0 // indirect
+	github.com/PuerkitoBio/goquery v1.8.0 // indirect
 	github.com/andybalholm/brotli v1.1.1 // indirect
+	github.com/andybalholm/cascadia v1.3.1 // indirect
 	github.com/aymerick/douceur v0.2.0 // indirect
 	github.com/beorn7/perks v1.0.1 // indirect
 	github.com/bytedance/sonic v1.9.1 // indirect
@@ -52,8 +56,8 @@ require (
 	github.com/magiconair/properties v1.8.7 // indirect
 	github.com/mattn/go-colorable v0.1.14 // indirect
 	github.com/mattn/go-isatty v0.0.20 // indirect
-	github.com/meilisearch/meilisearch-go v0.36.1 // indirect
 	github.com/mitchellh/mapstructure v1.5.0 // indirect
+	github.com/mmcdole/goxpp v1.1.0 // indirect
 	github.com/modern-go/concurrent v0.0.0-20180306012644-bacd9c7ef1dd // indirect
 	github.com/modern-go/reflect2 v1.0.2 // indirect
 	github.com/munnerz/goautoneg v0.0.0-20191010083416-a7dc8b61c822 // indirect

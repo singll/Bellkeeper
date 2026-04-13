@@ -66,6 +66,16 @@ func (s *HealthService) Detailed() *DetailedHealth {
 		services["n8n"] = s.checkHTTPService(s.cfg.N8N.WebhookBaseURL + "/healthz")
 	}
 
+	// Check Meilisearch (only if enabled in knowledge config)
+	if s.cfg.Meilisearch.URL != "" {
+		services["meilisearch"] = s.checkHTTPService(s.cfg.Meilisearch.URL + "/health")
+	}
+
+	// Check RSS Fetcher status
+	services["rss_fetcher"] = ServiceStatus{
+		Status: s.checkRSSFetcher(),
+	}
+
 	// Determine overall status
 	overallStatus := "healthy"
 	for _, svc := range services {
@@ -165,4 +175,14 @@ func (s *HealthService) checkHTTPService(url string) ServiceStatus {
 		LatencyMs: latency,
 		Error:     fmt.Sprintf("HTTP %d", resp.StatusCode),
 	}
+}
+
+// checkRSSFetcher returns the status of the RSS fetcher service
+func (s *HealthService) checkRSSFetcher() string {
+	// If RSS fetcher config is not enabled, report as disabled
+	if !s.cfg.RSSFetcher.Enabled {
+		return "disabled"
+	}
+	// If enabled, report as up (the actual running status is tracked by the service itself)
+	return "up"
 }

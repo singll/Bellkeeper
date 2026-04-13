@@ -69,6 +69,10 @@ func registerRSSRoutes(api *gin.RouterGroup, h *handler.RSSHandler) {
 	api.GET("/rss/:id", h.Get)
 	api.PUT("/rss/:id", h.Update)
 	api.DELETE("/rss/:id", h.Delete)
+	// RSS Fetcher endpoints
+	api.POST("/rss/fetch/:id", h.Fetch)
+	api.POST("/rss/fetch-all", h.FetchAll)
+	api.GET("/rss/fetch-status", h.FetchStatus)
 }
 
 func registerDatasetRoutes(api *gin.RouterGroup, h *handler.DatasetHandler) {

@@ -9,6 +9,7 @@ import (
 type Services struct {
 	Tag           *TagService
 	RSS           *RSSService
+	RSSFetcher    *RSSFetcherService
 	Dataset       *DatasetService
 	Setting       *SettingService
 	RagFlow       *RagFlowService
@@ -55,19 +56,32 @@ func NewServices(repos *repository.Repositories, cfg *config.Config, version str
 		activityLogSvc,
 	)
 
+	// Create RSS fetcher service (depends on file ingestion)
+	rssFetcherSvc := NewRSSFetcherService(
+		RSSFetcherConfig{
+			Enabled:       cfg.RSSFetcher.Enabled,
+			CheckInterval: cfg.RSSFetcher.CheckInterval,
+			MaxPerBatch:   cfg.RSSFetcher.MaxPerBatch,
+			Timeout:       cfg.RSSFetcher.Timeout,
+		},
+		repos.RSS,
+		fileIngestionSvc,
+	)
+
 	return &Services{
-		Tag:           NewTagService(repos.Tag),
+		Tag:            NewTagService(repos.Tag),
 		RSS:            NewRSSService(repos.RSS, repos.Tag),
-		Dataset:       datasetSvc,
-		Setting:       NewSettingService(repos.Setting),
-		RagFlow:       ragFlowSvc,
-		Health:        NewHealthService(cfg, version, repos.Tag, repos.RSS, repos.DatasetMapping),
-		Workflow:      NewWorkflowService(cfg.N8N, repos.Setting),
-		LLMProxy:      NewLLMProxyService(cfg.LLMProxy, repos.LLMProxy, repos.LLMChannel, repos.LLMModelGroup),
-		Classify:      classifySvc,
-		ActivityLog:   activityLogSvc,
-		FileIngestion:  fileIngestionSvc,
-		Search:         NewSearchService(repos.Tag, repos.ArticleTag, repos.RSS),
+		RSSFetcher:     rssFetcherSvc,
+		Dataset:        datasetSvc,
+		Setting:        NewSettingService(repos.Setting),
+		RagFlow:        ragFlowSvc,
+		Health:         NewHealthService(cfg, version, repos.Tag, repos.RSS, repos.DatasetMapping),
+		Workflow:       NewWorkflowService(cfg.N8N, repos.Setting),
+		LLMProxy:       NewLLMProxyService(cfg.LLMProxy, repos.LLMProxy, repos.LLMChannel, repos.LLMModelGroup),
+		Classify:       classifySvc,
+		ActivityLog:    activityLogSvc,
+		FileIngestion:   fileIngestionSvc,
+		Search:          NewSearchService(repos.Tag, repos.ArticleTag, repos.RSS),
 	}
 }
 

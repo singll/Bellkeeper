@@ -18,6 +18,7 @@ type Config struct {
 	LLMProxy      LLMProxyConfig      `mapstructure:"llm_proxy"`
 	Classify      ClassifyConfig      `mapstructure:"classify"`
 	FileIngestion FileIngestionConfig `mapstructure:"file_ingestion"`
+	RSSFetcher    RSSFetcherConfig    `mapstructure:"rss_fetcher"`
 	Matrix        MatrixConfig        `mapstructure:"matrix"`
 	Redis         RedisConfig         `mapstructure:"redis"`
 	NATS          NATSConfig          `mapstructure:"nats"`
@@ -121,7 +122,6 @@ type LoggingConfig struct {
 type FeatureConfig struct {
 	AutoParse bool `mapstructure:"auto_parse"`
 	URLDedup  bool `mapstructure:"url_dedup"`
-	AISummary bool `mapstructure:"ai_summary"`
 }
 
 type ClassifyConfig struct {
@@ -158,13 +158,14 @@ type FirecrawlConfig struct {
 }
 
 type MatrixConfig struct {
-	HomeserverURL  string `mapstructure:"homeserver_url"`
-	BotUserID      string `mapstructure:"bot_user_id"`
-	BotAccessToken string `mapstructure:"bot_access_token"`
-	DeviceID       string `mapstructure:"device_id"`
-	SyncTimeout    int    `mapstructure:"sync_timeout"`     // milliseconds
-	CommandPrefix  string `mapstructure:"command_prefix"`   // comma-separated prefixes
-	MaxRetry       int    `mapstructure:"max_retry"`
+	HomeserverURL  string   `mapstructure:"homeserver_url"`
+	BotUserID      string   `mapstructure:"bot_user_id"`
+	BotAccessToken string   `mapstructure:"bot_access_token"`
+	DeviceID       string   `mapstructure:"device_id"`
+	SyncTimeout    int      `mapstructure:"sync_timeout"`     // milliseconds
+	CommandPrefix  string   `mapstructure:"command_prefix"`   // comma-separated prefixes
+	MaxRetry       int      `mapstructure:"max_retry"`
+	AdminUsers     []string `mapstructure:"admin_users"`    // list of admin user IDs
 }
 
 type RedisConfig struct {
@@ -202,9 +203,17 @@ type KnowledgeConfig struct {
 	Enabled       bool             `mapstructure:"enabled"`
 	BasePath      string           `mapstructure:"base_path"`
 	ScanDirs      []ScanDirConfig `mapstructure:"scan_dirs"`
-	ScanInterval  int             `mapstructure:"scan_interval"`
-	ChunkMinSize  int             `mapstructure:"chunk_min_size"`
-	ChunkMaxSize  int             `mapstructure:"chunk_max_size"`
+	ScanInterval  int              `mapstructure:"scan_interval"`
+	ChunkMinSize  int              `mapstructure:"chunk_min_size"`
+	ChunkMaxSize  int              `mapstructure:"chunk_max_size"`
+}
+
+// RSSFetcherConfig RSS 抓取器配置
+type RSSFetcherConfig struct {
+	Enabled       bool `mapstructure:"enabled"`
+	CheckInterval int  `mapstructure:"check_interval"` // 轮询间隔（秒）
+	MaxPerBatch   int  `mapstructure:"max_per_batch"`  // 每批最大处理 feed 数
+	Timeout       int  `mapstructure:"timeout"`        // 单个 feed 超时（秒）
 }
 
 // ScanDirConfig 扫描目录配置
@@ -310,7 +319,6 @@ func setDefaults(v *viper.Viper) {
 	// Features
 	v.SetDefault("features.auto_parse", true)
 	v.SetDefault("features.url_dedup", true)
-	v.SetDefault("features.ai_summary", false)
 
 	// LLM Proxy
 	v.SetDefault("llm_proxy.enabled", false)
@@ -356,6 +364,7 @@ func setDefaults(v *viper.Viper) {
 	v.SetDefault("matrix.sync_timeout", 30000)
 	v.SetDefault("matrix.command_prefix", "!,！")
 	v.SetDefault("matrix.max_retry", 3)
+	v.SetDefault("matrix.admin_users", []string{"@singll:matrix.singll.net"})
 
 	// Redis
 	v.SetDefault("redis.host", "sp-redis")
@@ -389,4 +398,10 @@ func setDefaults(v *viper.Viper) {
 		{"path": "working", "layer": "working"},
 		{"path": "KNOWLEDGE", "layer": "knowledge"},
 	})
+
+	// RSS Fetcher
+	v.SetDefault("rss_fetcher.enabled", true)
+	v.SetDefault("rss_fetcher.check_interval", 60)
+	v.SetDefault("rss_fetcher.max_per_batch", 5)
+	v.SetDefault("rss_fetcher.timeout", 30)
 }

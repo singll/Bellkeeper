@@ -27,7 +27,13 @@ func NewCommandService(
 	memosCfg config.MemosConfig,
 	repos *repository.Repositories,
 	client *gateway.Client,
+	adminUsers []string,
 ) *CommandService {
+	// Use provided adminUsers or fallback to default
+	if len(adminUsers) == 0 {
+		adminUsers = []string{"@singll:matrix.singll.net"}
+	}
+
 	svc := &CommandService{
 		cfg:      cfg,
 		n8nCfg:   n8nCfg,
@@ -36,8 +42,8 @@ func NewCommandService(
 		client:   client,
 	}
 
-	// Create router with command prefix and admin users
-	svc.router = command.NewRouter(cfg.CommandPrefix, repos, []string{"@singll:matrix.singll.net"})
+	// Create router with command prefix and admin users from config
+	svc.router = command.NewRouter(cfg.CommandPrefix, repos, adminUsers)
 
 	// Register command handlers
 	svc.registerHandlers()

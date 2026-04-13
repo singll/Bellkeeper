@@ -200,7 +200,7 @@ func runServer(cmd *cobra.Command, args []string) {
 		matrixSyncLoop = gateway.NewSyncLoop(matrixClient)
 
 		// Initialize Command Service and attach to sync loop
-		commandSvc := service.NewCommandService(cfg.Matrix, cfg.N8N, cfg.Memos, repos, matrixClient)
+		commandSvc := service.NewCommandService(cfg.Matrix, cfg.N8N, cfg.Memos, repos, matrixClient, cfg.Matrix.AdminUsers)
 
 		// Wire up AdminService for admin commands
 		if services.MatrixAdmin != nil {
@@ -238,6 +238,14 @@ func runServer(cmd *cobra.Command, args []string) {
 				result.Matched, result.Created, result.Skipped, result.Failed)
 		}
 	}()
+
+	// Start RSS Fetcher if enabled
+	if cfg.RSSFetcher.Enabled {
+		services.RSSFetcher.Start(context.Background())
+		log.Println("[RSSFetcher] RSS fetcher started")
+	} else {
+		log.Println("[RSSFetcher] RSS fetcher disabled (set rss_fetcher.enabled=true to enable)")
+	}
 
 	// Setup Gin
 	if cfg.Server.Mode == "release" {

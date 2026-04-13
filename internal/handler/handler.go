@@ -33,7 +33,7 @@ type Handlers struct {
 func NewHandlers(services *service.Services, shutdownChan chan struct{}, memosBaseURL, memosAPIToken string) *Handlers {
 	h := &Handlers{
 		Tag:           NewTagHandler(services.Tag),
-		RSS:           NewRSSHandler(services.RSS),
+		RSS:           NewRSSHandler(services.RSS, services.RSSFetcher),
 		Dataset:       NewDatasetHandler(services.Dataset),
 		Setting:       NewSettingHandler(services.Setting),
 		RagFlow:       NewRagFlowHandler(services.RagFlow),

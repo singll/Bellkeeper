@@ -36,7 +36,6 @@ logging:
 features:
   auto_parse: true
   url_dedup: true
-  ai_summary: false
 
 classify:
   enabled: true
@@ -204,6 +203,8 @@ matrix:
   sync_timeout: ${MATRIX_SYNC_TIMEOUT}
   command_prefix: ${MATRIX_COMMAND_PREFIX}
   max_retry: ${MATRIX_MAX_RETRY}
+  admin_users:
+    - ${MATRIX_ADMIN_USER}
 
 redis:
   host: ${REDIS_HOST}

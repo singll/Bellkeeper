@@ -359,10 +359,16 @@ func (s *WorkflowService) Trigger(name string, payload map[string]interface{}) (
 	}
 	defer resp.Body.Close()
 
-	respBody, _ := io.ReadAll(resp.Body)
+	respBody, err := io.ReadAll(resp.Body)
+	if err != nil {
+		return nil, fmt.Errorf("failed to read response body: %w", err)
+	}
 
 	var result map[string]interface{}
-	json.Unmarshal(respBody, &result)
+	if err := json.Unmarshal(respBody, &result); err != nil {
+		// Try to include raw response in error message
+		return nil, fmt.Errorf("failed to parse response: %w, body: %s", err, string(respBody))
+	}
 
 	if resp.StatusCode >= 400 {
 		return result, fmt.Errorf("trigger failed with status %d", resp.StatusCode)

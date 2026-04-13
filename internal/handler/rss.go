@@ -9,11 +9,12 @@ import (
 )
 
 type RSSHandler struct {
-	svc *service.RSSService
+	svc       *service.RSSService
+	fetcher   *service.RSSFetcherService
 }
 
-func NewRSSHandler(svc *service.RSSService) *RSSHandler {
-	return &RSSHandler{svc: svc}
+func NewRSSHandler(svc *service.RSSService, fetcher *service.RSSFetcherService) *RSSHandler {
+	return &RSSHandler{svc: svc, fetcher: fetcher}
 }
 
 type RSSRequest struct {
@@ -135,4 +136,53 @@ func (h *RSSHandler) Delete(c *gin.Context) {
 	}
 
 	response.Deleted(c)
+}
+
+// Fetch triggers manual fetch for a specific RSS feed
+func (h *RSSHandler) Fetch(c *gin.Context) {
+	id, ok := response.ParseID(c, "id")
+	if !ok {
+		return
+	}
+
+	if h.fetcher == nil {
+		response.BadRequest(c, "RSS fetcher not enabled")
+		return
+	}
+
+	if err := h.fetcher.FetchFeed(c.Request.Context(), uint(id)); err != nil {
+		response.InternalError(c, err.Error())
+		return
+	}
+
+	response.Success(c, gin.H{"message": "Feed fetch triggered"})
+}
+
+// FetchAll triggers fetch for all active RSS feeds
+func (h *RSSHandler) FetchAll(c *gin.Context) {
+	if h.fetcher == nil {
+		response.BadRequest(c, "RSS fetcher not enabled")
+		return
+	}
+
+	result, err := h.fetcher.FetchAll(c.Request.Context())
+	if err != nil {
+		response.InternalError(c, err.Error())
+		return
+	}
+
+	response.Success(c, result)
+}
+
+// FetchStatus returns the current status of the RSS fetcher
+func (h *RSSHandler) FetchStatus(c *gin.Context) {
+	if h.fetcher == nil {
+		response.Success(c, gin.H{
+			"running": false,
+			"enabled": false,
+		})
+		return
+	}
+
+	response.Success(c, h.fetcher.GetStatus())
 }

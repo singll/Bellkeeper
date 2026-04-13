@@ -136,3 +136,94 @@ func TestFileIngestionService_calculateHash(t *testing.T) {
 	// Hash should be 64 characters (SHA256 hex)
 	assert.Len(t, hash1, 64)
 }
+
+func TestIngestURLRequest_Structure(t *testing.T) {
+	req := &IngestURLRequest{
+		URL:      "https://example.com/article",
+		Title:    "Test Article",
+		Tags:     []string{"tech", "golang"},
+		Category: "development",
+		Layer:    "raw",
+	}
+
+	assert.Equal(t, "https://example.com/article", req.URL)
+	assert.Equal(t, "Test Article", req.Title)
+	assert.Len(t, req.Tags, 2)
+	assert.Contains(t, req.Tags, "tech")
+	assert.Contains(t, req.Tags, "golang")
+	assert.Equal(t, "development", req.Category)
+	assert.Equal(t, "raw", req.Layer)
+}
+
+func TestIngestURLRequest_Defaults(t *testing.T) {
+	req := &IngestURLRequest{
+		URL: "https://example.com/article",
+	}
+
+	assert.Equal(t, "https://example.com/article", req.URL)
+	assert.Empty(t, req.Title)
+	assert.Nil(t, req.Tags)
+	assert.Empty(t, req.Category)
+	assert.Empty(t, req.Layer)
+}
+
+func TestIngestURLResponse_Structure(t *testing.T) {
+	resp := &IngestURLResponse{
+		Success:      true,
+		Status:       "success",
+		FilePath:     "/mnt/knowledge/raw/test_article.md",
+		DocumentID:   "doc123",
+		DatasetID:    "ds456",
+		Title:        "Test Article",
+		Tags:         []string{"tech"},
+		Extractor:    "trafilatura",
+		ErrorMessage: "",
+	}
+
+	assert.True(t, resp.Success)
+	assert.Equal(t, "success", resp.Status)
+	assert.Equal(t, "/mnt/knowledge/raw/test_article.md", resp.FilePath)
+	assert.Equal(t, "trafilatura", resp.Extractor)
+	assert.Empty(t, resp.ErrorMessage)
+}
+
+func TestIngestURLResponse_Duplicate(t *testing.T) {
+	resp := &IngestURLResponse{
+		Success: false,
+		Status:  "duplicate",
+	}
+
+	assert.False(t, resp.Success)
+	assert.Equal(t, "duplicate", resp.Status)
+	assert.Empty(t, resp.FilePath)
+}
+
+func TestIngestURLResponse_ExtractFailed(t *testing.T) {
+	resp := &IngestURLResponse{
+		Success:      false,
+		Status:       "extract_failed",
+		ErrorMessage: "content too short",
+	}
+
+	assert.False(t, resp.Success)
+	assert.Equal(t, "extract_failed", resp.Status)
+	assert.Equal(t, "content too short", resp.ErrorMessage)
+}
+
+func TestFileIngestionService_escapeYAML(t *testing.T) {
+	// Test escapeYAML indirectly through generateFrontmatter
+	svc := &FileIngestionService{}
+	req := &IngestURLRequest{
+		Title: `Test "quoted" title with \backslash`,
+		URL:   "https://example.com",
+	}
+
+	// generateFrontmatter calls escapeYAML internally
+	frontmatter := svc.generateFrontmatter(req, &ExtractionResult{Extractor: "test"})
+
+	// Verify quotes are escaped (should not appear as unescaped quotes in the value)
+	// The frontmatter should have \" instead of raw "
+	assert.Contains(t, frontmatter, `title: "Test \`)
+	// Should not have unescaped quotes that would break YAML
+	assert.NotContains(t, frontmatter, `title: "Test "quoted"`)
+}
