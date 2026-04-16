@@ -10,33 +10,28 @@ FROM node:20-alpine AS frontend-builder
 
 WORKDIR /app/web
 
-# Install pnpm
-RUN corepack enable && corepack prepare pnpm@latest --activate
+# Install pnpm (pin version to avoid re-download)
+RUN corepack enable && corepack prepare pnpm@10 --activate
 
-# Copy package files
+# Copy package files first for layer cache
 COPY web/package.json web/pnpm-lock.yaml* ./
 
 # Install dependencies
 RUN pnpm install --frozen-lockfile || pnpm install
 
-# Copy frontend source
+# Copy frontend source and build
 COPY web/ ./
-
-# Build frontend
 RUN pnpm build
 
 # --- Stage 2: Backend Build ---
-FROM golang:1.24-alpine AS backend-builder
+FROM golang:1.25-alpine AS backend-builder
 
 WORKDIR /app
-
-# Allow auto-download of newer Go toolchain if required
-ENV GOTOOLCHAIN=auto
 
 # Install build dependencies
 RUN apk add --no-cache gcc musl-dev
 
-# Copy go mod files
+# Copy go mod files first for layer cache
 COPY go.mod go.sum ./
 RUN go mod download
 
@@ -50,19 +45,19 @@ COPY --from=frontend-builder /app/web/dist ./web/dist
 RUN CGO_ENABLED=0 GOOS=linux go build -a -installsuffix cgo -o bellkeeper ./cmd/bellkeeper
 
 # --- Stage 3: Runtime ---
-FROM alpine:3.19
+FROM alpine:3.21
 
 WORKDIR /app
 
-# Install runtime dependencies
+# Install runtime dependencies (trafilatura pinned to avoid surprises)
 RUN apk add --no-cache ca-certificates tzdata wget python3 py3-pip && \
-    pip3 install --break-system-packages --no-cache-dir trafilatura
+    pip3 install --break-system-packages --no-cache-dir trafilatura==2.0.0
 
 # Copy binary from builder
 COPY --from=backend-builder /app/bellkeeper .
 COPY --from=backend-builder /app/web/dist ./web/dist
 
-# Copy default config (will be overridden by env vars)
+# Copy default config
 COPY config/bellkeeper.yaml ./config/
 
 # Create non-root user
@@ -71,13 +66,10 @@ RUN adduser -D -g '' bellkeeper && \
 
 USER bellkeeper
 
-# Expose port
 EXPOSE 8080
 
-# Health check
 HEALTHCHECK --interval=30s --timeout=10s --start-period=10s --retries=3 \
-    CMD wget -qO /dev/null http://localhost:8080/api/health || exit 1
+    CMD wget -qO /dev/null http://127.0.0.1:8080/api/health || exit 1
 
-# Run
 ENTRYPOINT ["./bellkeeper"]
 CMD ["serve"]
