@@ -106,6 +106,7 @@ func runServer(cmd *cobra.Command, args []string) {
 	var askSvc *service.AskService
 	var knowledgeSearchAdapter *service.SearchServiceAdapter
 	var knowledgeAskAdapter *service.AskServiceAdapter
+	var knowledgeFilesSvc *service.KnowledgeFilesService
 	if cfg.Knowledge.Enabled {
 		log.Println("[Knowledge] initializing knowledge services...")
 
@@ -136,6 +137,11 @@ func runServer(cmd *cobra.Command, args []string) {
 
 			log.Println("[Knowledge] knowledge services initialized")
 		}
+
+		// Initialize Knowledge Files service (file browser)
+		knowledgeFilesSvc = service.NewKnowledgeFilesService(cfg.Knowledge)
+		handlers.KnowledgeFiles = handler.NewKnowledgeFilesHandler(knowledgeFilesSvc)
+		log.Println("[KnowledgeFiles] file browser service initialized")
 	}
 
 	// Initialize Matrix infrastructure (Redis, NATS)

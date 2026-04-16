@@ -308,3 +308,82 @@ export interface MatrixStats {
   notifications_24h: number
   active_rooms: number
 }
+
+// Knowledge Files Types
+
+export interface TreeNode {
+  name: string
+  path: string
+  type: 'dir' | 'file'
+  children?: TreeNode[]
+  size?: number
+  modified?: string
+}
+
+export interface KnowledgeFileEntry {
+  name: string
+  path: string
+  size: number
+  modified: string
+  type: string
+  layer: string
+}
+
+export interface FileContent {
+  path: string
+  name: string
+  content: string
+  size: number
+  modified: string
+}
+
+export interface FilesStats {
+  total_files: number
+  total_dirs: number
+  total_size: number
+  by_layer: Record<string, number>
+  by_type: Record<string, number>
+}
+
+// Knowledge Search Types
+
+export interface KnowledgeSearchHit {
+  file_path: string
+  title: string
+  heading: string
+  content: string
+  layer: string
+  category: string
+  tags: string[]
+  source_url?: string
+  source_domain?: string
+  highlights: string[]
+}
+
+export interface KnowledgeSearchResult {
+  files: KnowledgeSearchHit[]
+  total: number
+  query_ms: number
+}
+
+// Knowledge Ask Types
+
+export interface KnowledgeAskRequest {
+  question: string
+  layers?: string[]
+  top_k?: number
+}
+
+export interface KnowledgeAskReference {
+  title: string
+  file_path: string
+  source_url?: string
+  snippet: string
+}
+
+export interface KnowledgeAskResponse {
+  answer: string
+  references: KnowledgeAskReference[]
+  search_ms: number
+  llm_ms?: number
+}

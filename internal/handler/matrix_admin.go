@@ -69,7 +69,8 @@ func (h *MatrixAdminHandler) ListRooms(c *gin.Context) {
 		c.JSON(http.StatusInternalServerError, gin.H{"error": err.Error()})
 		return
 	}
-	c.JSON(http.StatusOK, gin.H{"rooms": rooms})
+	// Return { data: [...] } format to match frontend expectations
+	c.JSON(http.StatusOK, gin.H{"data": rooms})
 }
 
 // CreateRoom handles POST /api/matrix/admin/rooms
@@ -113,7 +114,7 @@ func (h *MatrixAdminHandler) ListChannels(c *gin.Context) {
 		c.JSON(http.StatusInternalServerError, gin.H{"error": err.Error()})
 		return
 	}
-	c.JSON(http.StatusOK, gin.H{"channels": channels})
+	c.JSON(http.StatusOK, gin.H{"data": channels})
 }
 
 // UpdateChannel handles PUT /api/matrix/admin/channels/:name
@@ -144,7 +145,7 @@ func (h *MatrixAdminHandler) ListCommands(c *gin.Context) {
 		c.JSON(http.StatusInternalServerError, gin.H{"error": err.Error()})
 		return
 	}
-	c.JSON(http.StatusOK, gin.H{"commands": commands})
+	c.JSON(http.StatusOK, gin.H{"data": commands})
 }
 
 // GetEventLogs handles GET /api/matrix/admin/events
@@ -161,7 +162,7 @@ func (h *MatrixAdminHandler) GetEventLogs(c *gin.Context) {
 		c.JSON(http.StatusInternalServerError, gin.H{"error": err.Error()})
 		return
 	}
-	c.JSON(http.StatusOK, gin.H{"events": logs})
+	c.JSON(http.StatusOK, gin.H{"data": logs})
 }
 
 // GetNotificationLogs handles GET /api/matrix/admin/notifications
@@ -178,7 +179,7 @@ func (h *MatrixAdminHandler) GetNotificationLogs(c *gin.Context) {
 		c.JSON(http.StatusInternalServerError, gin.H{"error": err.Error()})
 		return
 	}
-	c.JSON(http.StatusOK, gin.H{"notifications": logs})
+	c.JSON(http.StatusOK, gin.H{"data": logs})
 }
 
 // GetStats handles GET /api/matrix/admin/stats
@@ -203,7 +204,7 @@ func (h *MatrixAdminHandler) ListUserRoles(c *gin.Context) {
 			c.JSON(http.StatusInternalServerError, gin.H{"error": err.Error()})
 			return
 		}
-		c.JSON(http.StatusOK, gin.H{"roles": roles})
+		c.JSON(http.StatusOK, gin.H{"data": roles})
 		return
 	}
 
@@ -226,7 +227,7 @@ func (h *MatrixAdminHandler) ListUserRoles(c *gin.Context) {
 		c.JSON(http.StatusInternalServerError, gin.H{"error": err.Error()})
 		return
 	}
-	c.JSON(http.StatusOK, gin.H{"roles": roles, "total": total})
+	c.JSON(http.StatusOK, gin.H{"data": roles, "total": total})
 }
 
 // GetUserRole handles GET /api/matrix/admin/roles/:user_id

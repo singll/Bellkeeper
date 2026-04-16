@@ -91,6 +91,24 @@ const SearchIcon = () => (
   </svg>
 )
 
+const FolderIcon = () => (
+  <svg class="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+    <path stroke-linecap="round" stroke-linejoin="round" stroke-width="1.5" d="M3 7v10a2 2 0 002 2h14a2 2 0 002-2V9a2 2 0 00-2-2h-6l-2-2H5a2 2 0 00-2 2z" />
+  </svg>
+)
+
+const ArchiveIcon = () => (
+  <svg class="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+    <path stroke-linecap="round" stroke-linejoin="round" stroke-width="1.5" d="M5 8h14M5 8a2 2 0 110-4h14a2 2 0 110 4M5 8v10a2 2 0 002 2h10a2 2 0 002-2V8m-9 4h4" />
+  </svg>
+)
+
+const BookIcon = () => (
+  <svg class="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+    <path stroke-linecap="round" stroke-linejoin="round" stroke-width="1.5" d="M12 6.253v13m0-13C10.832 5.477 9.246 5 7.5 5S4.168 5.477 3 6.253v13C4.168 18.477 5.754 18 7.5 18s3.332.477 4.5 1.253m0-13C13.168 5.477 14.754 5 16.5 5c1.747 0 3.332.477 4.5 1.253v13C19.832 18.477 18.247 18 16.5 18c-1.746 0-3.332.477-4.5 1.253" />
+  </svg>
+)
+
 // Navigation groups
 const navGroups: NavGroup[] = [
   {
@@ -108,14 +126,15 @@ const navGroups: NavGroup[] = [
   },
   {
     id: 'knowledge',
-    label: '知识管理',
-    icon: <DocumentIcon />,
+    label: '知识库',
+    icon: <BookIcon />,
     defaultExpanded: true,
     items: [
-      { path: '/documents', label: 'Documents', icon: <DocumentIcon /> },
-      { path: '/datasets', label: 'Datasets', icon: <DatasetIcon /> },
-      { path: '/tags', label: 'Tags', icon: <TagIcon /> },
-      { path: '/rss', label: 'RSS Feeds', icon: <RSSIcon /> },
+      { path: '/knowledge/files', label: '文件管理', icon: <FolderIcon /> },
+      { path: '/knowledge/search', label: '知识搜索', icon: <SearchIcon /> },
+      { path: '/knowledge/ask', label: '知识问答', icon: <LLMProxyIcon /> },
+      { path: '/rss', label: '订阅源', icon: <RSSIcon /> },
+      { path: '/tags', label: '标签', icon: <TagIcon /> },
     ],
   },
   {
@@ -141,6 +160,15 @@ const navGroups: NavGroup[] = [
       { path: '/matrix/notifications', label: '通知管理', icon: <></> },
       { path: '/matrix/events', label: '事件日志', icon: <></> },
       { path: '/matrix/command-logs', label: '命令日志', icon: <></> },
+    ],
+  },
+  {
+    id: 'archive',
+    label: '归档',
+    icon: <ArchiveIcon />,
+    defaultExpanded: true,
+    items: [
+      { path: '/documents', label: '文档库', icon: <DocumentIcon /> },
     ],
   },
   {

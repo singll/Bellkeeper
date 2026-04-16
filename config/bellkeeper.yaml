@@ -186,14 +186,14 @@ file_ingestion:
 
   trafilatura:
     enabled: true
-    timeout: 15
+    timeout: 30        # 增加到 30s，给本地提取更多时间
     min_content_length: 100
 
   firecrawl:
     enabled: true
     api_url: "${FIRECRAWL_API_URL}"
-    timeout: 60
-    fallback_only: true
+    timeout: 120       # 增加到 120s，API 提取更可靠但更慢
+    fallback_only: false  # 显式关闭 fallback-only，保留备用
 
 matrix:
   homeserver_url: ${MATRIX_HOMESERVER_URL}

@@ -48,6 +48,10 @@ func Setup(r *gin.Engine, handlers *handler.Handlers, mode string, apiKey string
 	if handlers.Knowledge != nil {
 		registerKnowledgeRoutes(api, handlers.Knowledge)
 	}
+	// Knowledge Files routes (file browser)
+	if handlers.KnowledgeFiles != nil {
+		registerKnowledgeFilesRoutes(api, handlers.KnowledgeFiles)
+	}
 }
 
 func registerTagRoutes(api *gin.RouterGroup, h *handler.TagHandler) {
@@ -244,4 +248,13 @@ func registerKnowledgeRoutes(api *gin.RouterGroup, h *handler.KnowledgeHandler) 
 	files.GET("/stats", h.Stats)
 	files.POST("/rebuild", h.Rebuild)
 	files.GET("/health", h.Health)
+}
+
+func registerKnowledgeFilesRoutes(api *gin.RouterGroup, h *handler.KnowledgeFilesHandler) {
+	knowledge := api.Group("/knowledge/files")
+	knowledge.GET("/tree", h.GetTree)
+	knowledge.GET("/list", h.ListFiles)
+	knowledge.GET("/read", h.ReadFile)
+	knowledge.GET("/stats", h.GetStats)
+	knowledge.GET("/search", h.SearchFiles)
 }

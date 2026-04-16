@@ -19,6 +19,8 @@ import MatrixCommands from './pages/MatrixCommands'
 import MatrixNotifications from './pages/MatrixNotifications'
 import MatrixEvents from './pages/MatrixEvents'
 import MatrixCommandLogs from './pages/MatrixCommandLogs'
+// Knowledge pages
+import { KnowledgeFiles, KnowledgeSearch, KnowledgeAsk } from './pages/knowledge'
 import './index.css'
 
 const root = document.getElementById('root')
@@ -27,14 +29,24 @@ render(() => (
   <ToastProvider>
     <Router root={Layout}>
       <Route path="/" component={Dashboard} />
-      <Route path="/tags" component={Tags} />
+      {/* Knowledge (new file-based knowledge management) */}
+      <Route path="/knowledge/files" component={KnowledgeFiles} />
+      <Route path="/knowledge/search" component={KnowledgeSearch} />
+      <Route path="/knowledge/ask" component={KnowledgeAsk} />
+      {/* Knowledge supporting features */}
       <Route path="/rss" component={RSSFeeds} />
-      <Route path="/datasets" component={Datasets} />
+      <Route path="/tags" component={Tags} />
+      {/* Archive (RAGFlow documents) */}
       <Route path="/documents" component={Documents} />
+      {/* Datasets */}
+      <Route path="/datasets" component={Datasets} />
+      {/* AI Services */}
       <Route path="/workflows" component={Workflows} />
       <Route path="/llm-proxy" component={LLMProxy} />
+      {/* System */}
       <Route path="/logs" component={Logs} />
       <Route path="/settings" component={Settings} />
+      {/* Matrix */}
       <Route path="/matrix" component={MatrixDashboard} />
       <Route path="/matrix/rooms" component={MatrixRooms} />
       <Route path="/matrix/channels" component={MatrixChannels} />
