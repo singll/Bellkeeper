@@ -28,9 +28,6 @@ FROM golang:1.25-alpine AS backend-builder
 
 WORKDIR /app
 
-# Install build dependencies
-RUN apk add --no-cache gcc musl-dev
-
 # Copy go mod files first for layer cache
 COPY go.mod go.sum ./
 RUN go mod download
