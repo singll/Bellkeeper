@@ -28,6 +28,8 @@ FROM golang:1.25-alpine AS backend-builder
 
 WORKDIR /app
 
+ENV GOTOOLCHAIN=auto
+
 # Copy go mod files first for layer cache
 COPY go.mod go.sum ./
 RUN go mod download
