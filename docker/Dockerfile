@@ -41,7 +41,7 @@ COPY . .
 COPY --from=frontend-builder /app/web/dist ./web/dist
 
 # Build binary with embedded frontend
-RUN CGO_ENABLED=0 GOOS=linux go build -a -installsuffix cgo -o bellkeeper ./cmd/bellkeeper
+RUN go mod tidy && CGO_ENABLED=0 GOOS=linux go build -a -installsuffix cgo -o bellkeeper ./cmd/bellkeeper
 
 # --- Stage 3: Runtime ---
 FROM alpine:3.21
