@@ -4,13 +4,14 @@ import (
 	"context"
 	"encoding/json"
 	"fmt"
-	"log"
 	"time"
 
 	"maunium.net/go/mautrix"
 	"maunium.net/go/mautrix/event"
 
+	"github.com/singll/bellkeeper/internal/middleware"
 	"github.com/singll/bellkeeper/internal/model"
+	"go.uber.org/zap"
 )
 
 // SyncLoop manages the Matrix sync loop
@@ -52,14 +53,14 @@ func (s *SyncLoop) registerHandlers() {
 	// Handle room messages
 	s.syncer.OnEventType(event.EventMessage, func(ctx context.Context, evt *event.Event) {
 		if err := s.handleRoomMessage(ctx, evt); err != nil {
-			log.Printf("[Matrix] error handling message: %v", err)
+			middleware.GetLogger().Error("error handling Matrix message", zap.Error(err))
 		}
 	})
 
 	// Handle room member events (invites, joins, leaves)
 	s.syncer.OnEventType(event.StateMember, func(ctx context.Context, evt *event.Event) {
 		if err := s.handleMemberEvent(ctx, evt); err != nil {
-			log.Printf("[Matrix] error handling member event: %v", err)
+			middleware.GetLogger().Error("error handling member event", zap.Error(err))
 		}
 	})
 }
@@ -73,24 +74,24 @@ func (s *SyncLoop) Start(ctx context.Context) error {
 	}
 
 	if token != "" {
-		log.Printf("[Matrix] resuming sync from token: %s...", token[:min(len(token), 20)])
+		middleware.GetLogger().Info("resuming sync from token", zap.String("token_prefix", token[:min(len(token), 20)]))
 		s.client.client.Store.SaveNextBatch(context.Background(), s.client.client.UserID, token)
 	} else {
-		log.Printf("[Matrix] starting fresh sync (no previous token)")
+		middleware.GetLogger().Info("starting fresh sync (no previous token)")
 	}
 
 	// Also try to load from database
 	syncState, err := s.client.repos.MatrixSyncState.GetByUserID(ctx, s.client.config.BotUserID)
 	if err == nil && syncState != nil && syncState.NextBatch != "" {
-		log.Printf("[Matrix] found DB sync token: %s...", syncState.NextBatch[:min(len(syncState.NextBatch), 20)])
+		middleware.GetLogger().Info("found DB sync token", zap.String("token_prefix", syncState.NextBatch[:min(len(syncState.NextBatch), 20)]))
 		s.client.client.Store.SaveNextBatch(context.Background(), s.client.client.UserID, syncState.NextBatch)
 	}
 
 	// Start sync in background
 	go func() {
-		log.Printf("[Matrix] starting sync loop")
+		middleware.GetLogger().Info("starting sync loop")
 		if err := s.client.client.Sync(); err != nil {
-			log.Printf("[Matrix] sync stopped: %v", err)
+			middleware.GetLogger().Error("sync stopped", zap.Error(err))
 		}
 	}()
 
@@ -108,7 +109,7 @@ func (s *SyncLoop) Stop() {
 	s.stopped = true
 	close(s.stopCh)
 	s.client.client.StopSync()
-	log.Printf("[Matrix] sync loop stopped")
+	middleware.GetLogger().Info("sync loop stopped")
 }
 
 // persistTokenPeriodically saves sync token to Redis and DB every 30 seconds
@@ -120,12 +121,12 @@ func (s *SyncLoop) persistTokenPeriodically(ctx context.Context) {
 		select {
 		case <-ticker.C:
 			if err := s.persistToken(ctx); err != nil {
-				log.Printf("[Matrix] failed to persist sync token: %v", err)
+				middleware.GetLogger().Warn("failed to persist sync token", zap.Error(err))
 			}
 		case <-s.stopCh:
 			// Final save before exit
 			if err := s.persistToken(ctx); err != nil {
-				log.Printf("[Matrix] failed to persist sync token on shutdown: %v", err)
+				middleware.GetLogger().Warn("failed to persist sync token on shutdown", zap.Error(err))
 			}
 			return
 		}
@@ -171,7 +172,7 @@ func (s *SyncLoop) handleRoomMessage(ctx context.Context, evt *event.Event) erro
 		return fmt.Errorf("failed to check event processed: %w", err)
 	}
 	if processed {
-		log.Printf("[Matrix] skipping already processed event: %s", evt.ID)
+		middleware.GetLogger().Info("skipping already processed event", zap.String("event_id", evt.ID.String()))
 		return nil
 	}
 
@@ -192,7 +193,7 @@ func (s *SyncLoop) handleRoomMessage(ctx context.Context, evt *event.Event) erro
 	}
 
 	if err := s.client.repos.MatrixEvent.Create(matrixEvent); err != nil {
-		log.Printf("[Matrix] failed to store event in DB: %v", err)
+		middleware.GetLogger().Warn("failed to store event in DB", zap.Error(err))
 		// Don't return error, continue processing
 	}
 
@@ -202,12 +203,15 @@ func (s *SyncLoop) handleRoomMessage(ctx context.Context, evt *event.Event) erro
 		return nil
 	}
 
-	log.Printf("[Matrix] received message in %s from %s: %s", evt.RoomID, evt.Sender, content.Body)
+	middleware.GetLogger().Info("received message",
+		zap.String("room", evt.RoomID.String()),
+		zap.String("sender", evt.Sender.String()),
+		zap.String("body", content.Body))
 
 	// Route to command handler if command service is set
 	if s.commandService != nil {
 		if err := s.commandService.ExecuteMessage(ctx, evt.RoomID.String(), evt.Sender.String(), evt.ID.String(), content.Body); err != nil {
-			log.Printf("[Matrix] command execution failed: %v", err)
+			middleware.GetLogger().Warn("command execution failed", zap.Error(err))
 			s.client.repos.MatrixEvent.UpdateStatus(evt.ID.String(), "failed", err.Error())
 			return nil
 		}
@@ -215,7 +219,7 @@ func (s *SyncLoop) handleRoomMessage(ctx context.Context, evt *event.Event) erro
 
 	// Mark as processed
 	if err := s.client.repos.MatrixEvent.UpdateStatus(evt.ID.String(), "processed", ""); err != nil {
-		log.Printf("[Matrix] failed to update event status: %v", err)
+		middleware.GetLogger().Warn("failed to update event status", zap.Error(err))
 	}
 
 	return nil
@@ -230,7 +234,9 @@ func (s *SyncLoop) handleMemberEvent(ctx context.Context, evt *event.Event) erro
 
 	// Auto-accept invites
 	if content.Membership == event.MembershipInvite && evt.GetStateKey() == s.client.config.BotUserID {
-		log.Printf("[Matrix] received invite to room %s from %s", evt.RoomID, evt.Sender)
+		middleware.GetLogger().Info("received room invite",
+			zap.String("room", evt.RoomID.String()),
+			zap.String("sender", evt.Sender.String()))
 		if err := s.client.JoinRoom(ctx, evt.RoomID.String()); err != nil {
 			return fmt.Errorf("failed to accept invite: %w", err)
 		}

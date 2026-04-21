@@ -781,3 +781,11 @@ func (s *LLMProxyService) GetRateLimitEvents(hours int, channelName string) ([]m
 	since := time.Now().Add(-time.Duration(hours) * time.Hour)
 	return s.repo.GetRateLimitEvents(since, channelName)
 }
+
+// Stop gracefully shuts down all background goroutines (model group cleanup).
+func (s *LLMProxyService) Stop() {
+	for _, stop := range s.stopChans {
+		close(stop)
+	}
+	s.stopChans = nil
+}

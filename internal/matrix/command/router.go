@@ -4,14 +4,15 @@ import (
 	"context"
 	"encoding/json"
 	"fmt"
-	"log"
 	"strings"
 	"time"
 
 	"github.com/singll/bellkeeper/internal/config"
 	"github.com/singll/bellkeeper/internal/matrix/policy"
+	"github.com/singll/bellkeeper/internal/middleware"
 	"github.com/singll/bellkeeper/internal/model"
 	"github.com/singll/bellkeeper/internal/repository"
+	"go.uber.org/zap"
 )
 
 // Router routes commands to handlers
@@ -64,10 +65,29 @@ func (r *Router) SetPolicyChecker(checker *policy.Checker) {
 	r.policy = checker
 }
 
+// ReloadCommands clears dynamically loaded commands and reloads from the database.
+// Built-in handlers (ping, status, help) are preserved.
+func (r *Router) ReloadCommands() {
+	builtins := map[string]bool{
+		NewPingHandler().Name():   true,
+		NewStatusHandler().Name(): true,
+		NewHelpHandler(nil).Name(): true,
+	}
+
+	// Remove non-builtin handlers
+	for name := range r.handlers {
+		if !builtins[name] {
+			delete(r.handlers, name)
+		}
+	}
+
+	r.loadCommandsFromDB()
+}
+
 // RegisterHandler registers a command handler
 func (r *Router) RegisterHandler(handler Handler) {
 	r.handlers[handler.Name()] = handler
-	log.Printf("[Command] registered handler: %s", handler.Name())
+	middleware.GetLogger().Info("registered command handler", zap.String("name", handler.Name()))
 
 	// Also register aliases if defined
 	// (Future: can add alias support in Handler interface)
@@ -114,7 +134,10 @@ func (r *Router) Route(ctx context.Context, cmdCtx *Context) (*Response, error) 
 	}
 
 	// Execute handler
-	log.Printf("[Command] executing %s in room %s by %s", cmdCtx.Command.Name, cmdCtx.RoomID, cmdCtx.Sender)
+	middleware.GetLogger().Info("executing command",
+		zap.String("command", cmdCtx.Command.Name),
+		zap.String("room", cmdCtx.RoomID),
+		zap.String("sender", cmdCtx.Sender))
 	return handler.Handle(ctx, cmdCtx)
 }
 
@@ -126,23 +149,23 @@ func (r *Router) checkPermission(ctx context.Context, cmdCtx *Context) bool {
 		// Command not in DB — allow if handler is registered (built-in/dynamic commands)
 		// Built-in commands (ping, help, status, commands, health, rooms) may not have DB entries
 		if _, exists := r.handlers[cmdCtx.Command.Name]; exists {
-			log.Printf("[Policy] command %s not in DB, allowing registered handler", cmdCtx.Command.Name)
+			middleware.GetLogger().Info("command not in DB, allowing registered handler", zap.String("command", cmdCtx.Command.Name))
 			return true
 		}
-		log.Printf("[Policy] command %s not found in DB or handlers", cmdCtx.Command.Name)
+		middleware.GetLogger().Warn("command not found in DB or handlers", zap.String("command", cmdCtx.Command.Name))
 		return false
 	}
 
 	// Check room scope first
 	if cmd.RoomScope == "admin_only" && !r.policy.IsAdmin(cmdCtx.Sender) {
-		log.Printf("[Policy] command %s requires admin_only room scope", cmdCtx.Command.Name)
+		middleware.GetLogger().Warn("command requires admin_only room scope", zap.String("command", cmdCtx.Command.Name))
 		return false
 	}
 
 	// Use policy checker for permission level
 	allowed, err := r.policy.CheckCommandPermission(ctx, cmdCtx.Sender, cmdCtx.RoomID, cmdCtx.Command.Name, cmd.PermissionLevel)
 	if err != nil {
-		log.Printf("[Policy] permission check failed: %v", err)
+		middleware.GetLogger().Warn("permission check failed", zap.Error(err))
 		return false
 	}
 	return allowed
@@ -166,7 +189,7 @@ func (r *Router) SetAdminUsers(users []string) {
 func (r *Router) loadCommandsFromDB() {
 	commands, err := r.repos.MatrixCommand.List(true) // activeOnly = true
 	if err != nil {
-		log.Printf("[Command] failed to load commands from DB: %v", err)
+		middleware.GetLogger().Error("failed to load commands from DB", zap.Error(err))
 		return
 	}
 
@@ -184,7 +207,8 @@ func (r *Router) loadCommandsFromDB() {
 		}
 	}
 
-	log.Printf("[Command] loaded %d commands from DB (total: %d registered)", registered, len(r.handlers))
+	middleware.GetLogger().Info("loaded commands from DB",
+		zap.Int("new", registered), zap.Int("total", len(r.handlers)))
 }
 
 // createHandlerFromDB creates a handler instance from DB command config
@@ -207,7 +231,7 @@ func (r *Router) createHandlerFromDB(cmd *model.MatrixCommand) Handler {
 			}
 		}
 		if webhookURL == "" {
-			log.Printf("[Command] skip %s: no webhook URL configured", cmd.CommandName)
+			middleware.GetLogger().Warn("skip command: no webhook URL configured", zap.String("command", cmd.CommandName))
 			return nil
 		}
 		return NewN8NTriggerHandler(cmd.CommandName, webhookURL)
@@ -221,7 +245,7 @@ func (r *Router) createHandlerFromDB(cmd *model.MatrixCommand) Handler {
 		if r.n8nCfg.WebhookBaseURL != "" {
 			return NewN8NTriggerHandler(cmd.CommandName, r.n8nCfg.WebhookBaseURL+"/memos-todo")
 		}
-		log.Printf("[Command] skip %s: Memos not configured", cmd.CommandName)
+		middleware.GetLogger().Warn("skip command: Memos not configured", zap.String("command", cmd.CommandName))
 		return nil
 
 	case "memos_list":
@@ -236,7 +260,7 @@ func (r *Router) createHandlerFromDB(cmd *model.MatrixCommand) Handler {
 	case "ragflow_qa", "ragflow_search":
 		// QA handler via n8n - deprecated, use SetKnowledgeHandlers instead
 		// Skip registration here, the new knowledge handlers are registered via SetKnowledgeHandlers
-		log.Printf("[Command] skip %s: use SetKnowledgeHandlers for knowledge-based QA", cmd.CommandName)
+		middleware.GetLogger().Warn("skip command: use SetKnowledgeHandlers for knowledge-based QA", zap.String("command", cmd.CommandName))
 		return nil
 
 	case "builtin_ping":
@@ -253,7 +277,7 @@ func (r *Router) createHandlerFromDB(cmd *model.MatrixCommand) Handler {
 		if webhookURL, ok := config["webhook_url"].(string); ok && webhookURL != "" {
 			return NewN8NTriggerHandler(cmd.CommandName, webhookURL)
 		}
-		log.Printf("[Command] unknown handler type %s for command %s", cmd.HandlerType, cmd.CommandName)
+		middleware.GetLogger().Warn("unknown handler type", zap.String("type", cmd.HandlerType), zap.String("command", cmd.CommandName))
 		return nil
 	}
 }
@@ -292,7 +316,7 @@ func (r *Router) ExecuteFromMessage(ctx context.Context, roomID, sender, eventID
 	// But if repos is nil, skip logging
 	if r.repos != nil {
 		if err := r.repos.MatrixCommandLog.Create(logEntry); err != nil {
-			log.Printf("[Command] failed to create log entry: %v", err)
+			middleware.GetLogger().Error("failed to create command log entry", zap.Error(err))
 		}
 	}
 
@@ -317,7 +341,7 @@ func (r *Router) ExecuteFromMessage(ctx context.Context, roomID, sender, eventID
 				errMsg = err.Error()
 			}
 			if completeErr := r.repos.MatrixCommandLog.Complete(eventID, "failed", errMsg, "", durationMs); completeErr != nil {
-				log.Printf("[Command] failed to update log entry: %v", completeErr)
+				middleware.GetLogger().Error("failed to update command log entry", zap.Error(completeErr))
 			}
 		}
 		return nil, true, err
@@ -333,7 +357,7 @@ func (r *Router) ExecuteFromMessage(ctx context.Context, roomID, sender, eventID
 			errMsg = response.Message
 		}
 		if completeErr := r.repos.MatrixCommandLog.Complete(eventID, status, errMsg, "", durationMs); completeErr != nil {
-			log.Printf("[Command] failed to update log entry: %v", completeErr)
+			middleware.GetLogger().Error("failed to update command log entry", zap.Error(completeErr))
 		}
 	}
 

@@ -356,6 +356,11 @@ func (a *App) Shutdown() error {
 		}
 	}
 
+	// Core services
+	if a.services.LLMProxy != nil {
+		a.services.LLMProxy.Stop()
+	}
+
 	// Matrix infrastructure (reverse order of initialization)
 	if a.matrixSyncLoop != nil {
 		a.matrixSyncLoop.Stop()

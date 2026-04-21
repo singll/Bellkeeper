@@ -3,7 +3,6 @@ package gateway
 import (
 	"context"
 	"fmt"
-	"log"
 
 	"maunium.net/go/mautrix"
 	"maunium.net/go/mautrix/event"
@@ -11,7 +10,9 @@ import (
 
 	"github.com/singll/bellkeeper/internal/config"
 	"github.com/singll/bellkeeper/internal/matrix/infra"
+	"github.com/singll/bellkeeper/internal/middleware"
 	"github.com/singll/bellkeeper/internal/repository"
+	"go.uber.org/zap"
 )
 
 // Client wraps mautrix client with additional functionality
@@ -44,7 +45,9 @@ func NewClient(
 		return nil, fmt.Errorf("failed to authenticate with Matrix homeserver: %w", err)
 	}
 
-	log.Printf("[Matrix] authenticated as %s (device: %s)", whoami.UserID, whoami.DeviceID)
+	middleware.GetLogger().Info("authenticated with Matrix homeserver",
+		zap.String("user_id", whoami.UserID.String()),
+		zap.String("device", string(whoami.DeviceID)))
 
 	return &Client{
 		client: client,
@@ -90,7 +93,7 @@ func (c *Client) JoinRoom(ctx context.Context, roomID string) error {
 	if err != nil {
 		return fmt.Errorf("failed to join room %s: %w", roomID, err)
 	}
-	log.Printf("[Matrix] joined room: %s", roomID)
+	middleware.GetLogger().Info("joined room", zap.String("room_id", roomID))
 	return nil
 }
 
@@ -100,7 +103,7 @@ func (c *Client) LeaveRoom(ctx context.Context, roomID string) error {
 	if err != nil {
 		return fmt.Errorf("failed to leave room %s: %w", roomID, err)
 	}
-	log.Printf("[Matrix] left room: %s", roomID)
+	middleware.GetLogger().Info("left room", zap.String("room_id", roomID))
 	return nil
 }
 

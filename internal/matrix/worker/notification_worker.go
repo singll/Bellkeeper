@@ -3,7 +3,6 @@ package worker
 import (
 	"context"
 	"encoding/json"
-	"log"
 	"sync"
 	"time"
 
@@ -11,7 +10,9 @@ import (
 	"github.com/singll/bellkeeper/internal/config"
 	"github.com/singll/bellkeeper/internal/matrix/gateway"
 	"github.com/singll/bellkeeper/internal/matrix/infra"
+	"github.com/singll/bellkeeper/internal/middleware"
 	"github.com/singll/bellkeeper/internal/service"
+	"go.uber.org/zap"
 )
 
 // NotificationWorker consumes notification messages from NATS
@@ -57,7 +58,7 @@ func (w *NotificationWorker) Start(ctx context.Context) error {
 	w.running = true
 	w.mu.Unlock()
 
-	log.Printf("[NotifyWorker] starting notification worker...")
+	middleware.GetLogger().Info("starting notification worker")
 
 	// Subscribe to notifications stream
 	subject := w.cfg.Streams.Notifications + ".*" // notifications.<channel>
@@ -71,7 +72,7 @@ func (w *NotificationWorker) Start(ctx context.Context) error {
 	w.wg.Add(1)
 	go w.consumeMessages(ctx, sub)
 
-	log.Printf("[NotifyWorker] started, consuming from %s", subject)
+	middleware.GetLogger().Info("notification worker started", zap.String("subject", subject))
 	return nil
 }
 
@@ -87,7 +88,7 @@ func (w *NotificationWorker) Stop() {
 
 	close(w.stopCh)
 	w.wg.Wait()
-	log.Printf("[NotifyWorker] stopped")
+	middleware.GetLogger().Info("notification worker stopped")
 }
 
 // consumeMessages processes incoming messages
@@ -97,10 +98,10 @@ func (w *NotificationWorker) consumeMessages(ctx context.Context, sub *nats.Subs
 	for {
 		select {
 		case <-w.stopCh:
-			log.Printf("[NotifyWorker] received stop signal")
+			middleware.GetLogger().Info("notification worker received stop signal")
 			return
 		case <-ctx.Done():
-			log.Printf("[NotifyWorker] context cancelled")
+			middleware.GetLogger().Info("notification worker context cancelled")
 			return
 		default:
 			// Fetch messages with timeout
@@ -109,7 +110,7 @@ func (w *NotificationWorker) consumeMessages(ctx context.Context, sub *nats.Subs
 				if err == nats.ErrTimeout {
 					continue // normal, no messages available
 				}
-				log.Printf("[NotifyWorker] fetch error: %v", err)
+				middleware.GetLogger().Warn("notification worker fetch error", zap.Error(err))
 				time.Sleep(time.Second) // back off on error
 				continue
 			}
@@ -125,23 +126,30 @@ func (w *NotificationWorker) consumeMessages(ctx context.Context, sub *nats.Subs
 func (w *NotificationWorker) processMessage(ctx context.Context, msg *nats.Msg) {
 	var notification service.NotificationQueueMessage
 	if err := json.Unmarshal(msg.Data, &notification); err != nil {
-		log.Printf("[NotifyWorker] failed to unmarshal message: %v", err)
+		middleware.GetLogger().Error("failed to unmarshal notification message", zap.Error(err))
 		msg.Nak() // negative ack, will be redelivered
 		return
 	}
 
-	log.Printf("[NotifyWorker] processing notification %s (retry: %d)", notification.NotificationID, notification.RetryCount)
+	middleware.GetLogger().Info("processing notification",
+		zap.String("notification_id", notification.NotificationID),
+		zap.Int("retry_count", notification.RetryCount))
 
 	if err := w.sender.Send(ctx, &notification); err != nil {
-		log.Printf("[NotifyWorker] failed to send notification %s: %v", notification.NotificationID, err)
+		middleware.GetLogger().Error("failed to send notification",
+			zap.String("notification_id", notification.NotificationID),
+			zap.Error(err))
 
 		if notification.RetryCount < w.maxRetry {
 			// Will be retried via dead letter or re-queued
-			log.Printf("[NotifyWorker] notification %s will be retried (attempt %d/%d)",
-				notification.NotificationID, notification.RetryCount+1, w.maxRetry)
+			middleware.GetLogger().Warn("notification will be retried",
+				zap.String("notification_id", notification.NotificationID),
+				zap.Int("attempt", notification.RetryCount+1),
+				zap.Int("max", w.maxRetry))
 			msg.Nak() // negative ack for redelivery
 		} else {
-			log.Printf("[NotifyWorker] notification %s exceeded max retries, marking as failed", notification.NotificationID)
+			middleware.GetLogger().Warn("notification exceeded max retries",
+				zap.String("notification_id", notification.NotificationID))
 			msg.Ack() // ack to prevent infinite redelivery
 		}
 		return
@@ -149,5 +157,6 @@ func (w *NotificationWorker) processMessage(ctx context.Context, msg *nats.Msg) 
 
 	// Success
 	msg.Ack()
-	log.Printf("[NotifyWorker] successfully sent notification %s", notification.NotificationID)
+	middleware.GetLogger().Info("notification sent successfully",
+		zap.String("notification_id", notification.NotificationID))
 }

@@ -2,11 +2,12 @@ package infra
 
 import (
 	"fmt"
-	"log"
 	"time"
 
 	"github.com/nats-io/nats.go"
 	"github.com/singll/bellkeeper/internal/config"
+	"github.com/singll/bellkeeper/internal/middleware"
+	"go.uber.org/zap"
 )
 
 // NATSClient wraps NATS client with JetStream support
@@ -24,11 +25,11 @@ func NewNATSClient(cfg config.NATSConfig) (*NATSClient, error) {
 		nats.MaxReconnects(-1), // unlimited reconnects
 		nats.DisconnectErrHandler(func(_ *nats.Conn, err error) {
 			if err != nil {
-				log.Printf("[NATS] disconnected: %v", err)
+				middleware.GetLogger().Warn("NATS disconnected", zap.Error(err))
 			}
 		}),
 		nats.ReconnectHandler(func(_ *nats.Conn) {
-			log.Printf("[NATS] reconnected")
+			middleware.GetLogger().Info("NATS reconnected")
 		}),
 	}
 
@@ -87,7 +88,7 @@ func (n *NATSClient) ensureStreams() error {
 			if err != nil {
 				return fmt.Errorf("failed to create stream %s: %w", s.name, err)
 			}
-			log.Printf("[NATS] created stream: %s", s.name)
+			middleware.GetLogger().Info("created NATS stream", zap.String("name", s.name))
 		} else if err != nil {
 			return fmt.Errorf("failed to get stream info for %s: %w", s.name, err)
 		}

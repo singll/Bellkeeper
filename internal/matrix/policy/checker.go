@@ -2,9 +2,10 @@ package policy
 
 import (
 	"context"
-	"log"
 
+	"github.com/singll/bellkeeper/internal/middleware"
 	"github.com/singll/bellkeeper/internal/repository"
+	"go.uber.org/zap"
 )
 
 // Checker checks user permissions
@@ -43,15 +44,17 @@ func (c *Checker) CheckCommandPermission(ctx context.Context, userID, roomID, co
 
 	// Global admin check
 	if c.adminUsers[userID] {
-		log.Printf("[Policy] user %s is global admin, granting access", userID)
+		middleware.GetLogger().Info("user is global admin, granting access", zap.String("user_id", userID))
 		return true, nil
 	}
 
 	// Check role permission
 	allowed := role.CanExecute(permLevel)
 	if !allowed {
-		log.Printf("[Policy] denied %s (role=%s) to execute %s (require=%s) in room %s",
-			userID, role, commandName, permLevel, roomID)
+		middleware.GetLogger().Warn("permission denied",
+			zap.String("user_id", userID), zap.String("role", role.String()),
+			zap.String("command", commandName), zap.String("required", permLevel),
+			zap.String("room", roomID))
 	}
 	return allowed, nil
 }
