@@ -2,8 +2,10 @@ package service
 
 import (
 	"fmt"
-	"log"
 	"time"
+
+	"github.com/singll/bellkeeper/internal/middleware"
+	"go.uber.org/zap"
 )
 
 // --- RagFlow API Proxy Methods ---
@@ -59,9 +61,12 @@ func (s *RagFlowService) DeleteDocument(datasetID, documentID string) error {
 		return err
 	}
 
-	// Clean up local article_tags so the URL can be re-uploaded
+	// Best-effort cleanup of local article_tags so the URL can be re-uploaded.
+	// Failure here is non-fatal: stale tags won't break functionality, they just
+	// point to a deleted document. A periodic GC job can reconcile later.
 	if err := s.datasetRepo.DeleteArticleTagsByDocumentIDs([]string{documentID}); err != nil {
-		log.Printf("warn: failed to clean up article_tags for document %s: %v", documentID, err)
+		middleware.GetLogger().Warn("failed to clean up article_tags (best-effort, non-fatal)",
+			zap.String("document_id", documentID), zap.Error(err))
 	}
 
 	return nil
@@ -137,16 +142,19 @@ func (s *RagFlowService) RunParsingThrottled(datasetID string, documentIDs []str
 
 			_, err := s.RunParsing(datasetID, batch)
 			if err != nil {
-				log.Printf("warn: throttled parsing batch %d failed for dataset %s: %v", batchNum, datasetID, err)
+				middleware.GetLogger().Warn("throttled parsing batch failed",
+					zap.Int("batch", batchNum), zap.String("dataset_id", datasetID), zap.Error(err))
 			} else {
-				log.Printf("info: throttled parsing batch %d (%d docs) submitted for dataset %s", batchNum, len(batch), datasetID)
+				middleware.GetLogger().Info("throttled parsing batch submitted",
+					zap.Int("batch", batchNum), zap.Int("docs", len(batch)), zap.String("dataset_id", datasetID))
 			}
 
 			if end < total {
 				time.Sleep(time.Duration(intervalSeconds) * time.Second)
 			}
 		}
-		log.Printf("info: throttled parsing completed for dataset %s (%d docs in batches of %d)", datasetID, total, batchSize)
+		middleware.GetLogger().Info("throttled parsing completed",
+			zap.String("dataset_id", datasetID), zap.Int("total_docs", total), zap.Int("batch_size", batchSize))
 	}()
 }
 
@@ -172,9 +180,11 @@ func (s *RagFlowService) BatchDeleteDocuments(datasetID string, documentIDs []st
 		return err
 	}
 
-	// Clean up local article_tags
+	// Best-effort cleanup of local article_tags. Failure is non-fatal:
+	// stale tags only affect dedup, not core functionality.
 	if err := s.datasetRepo.DeleteArticleTagsByDocumentIDs(documentIDs); err != nil {
-		log.Printf("warn: failed to clean up article_tags for %d documents: %v", len(documentIDs), err)
+		middleware.GetLogger().Warn("failed to clean up article_tags (best-effort, non-fatal)",
+			zap.Int("document_count", len(documentIDs)), zap.Error(err))
 	}
 
 	return nil

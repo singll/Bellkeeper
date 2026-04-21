@@ -5,16 +5,17 @@ import (
 	"encoding/json"
 	"fmt"
 	"io"
-	"log"
 	"net/http"
 	"strings"
 	"sync"
 	"time"
+
+	"github.com/singll/bellkeeper/internal/middleware"
+	"github.com/singll/bellkeeper/internal/pkg/defaults"
+	"go.uber.org/zap"
 )
 
 // --- Smart Parsing Queue ---
-
-var parseTasks sync.Map // taskID -> *ParseTask
 
 type batchResolution struct {
 	Succeeded    []string
@@ -113,7 +114,7 @@ func (t *ParseTask) addLog(msg string) {
 	t.Log = append(t.Log, entry)
 	t.mu.Unlock()
 
-	log.Printf("info: [parse-queue %s] %s", id, msg)
+	middleware.GetLogger().Info("parse-queue", zap.String("task_id", id), zap.String("msg", msg))
 }
 
 func (t *ParseTask) snapshot() *ParseTask {
@@ -428,19 +429,19 @@ func (t *ParseTask) refreshCountsLocked() {
 // Returns the task ID for progress tracking.
 func (s *RagFlowService) RunParsingQueue(items []ParseQueueItem, cfg ParseQueueConfig) string {
 	if cfg.BatchSize <= 0 {
-		cfg.BatchSize = 3
+		cfg.BatchSize = defaults.ParseQueueDefaultBatchSize
 	}
 	if cfg.InitialDelay <= 0 {
-		cfg.InitialDelay = 15
+		cfg.InitialDelay = defaults.ParseQueueDefaultInitialDelay
 	}
 	if cfg.PollInterval <= 0 {
-		cfg.PollInterval = 10
+		cfg.PollInterval = defaults.ParseQueueDefaultPollInterval
 	}
 	if cfg.SoftTimeout <= 0 {
 		cfg.SoftTimeout = cfg.PollTimeout
 	}
 	if cfg.SoftTimeout <= 0 {
-		cfg.SoftTimeout = 300
+		cfg.SoftTimeout = defaults.ParseQueueDefaultSoftTimeout
 	}
 	if cfg.HardTimeout <= 0 {
 		cfg.HardTimeout = maxInt(cfg.SoftTimeout*2, cfg.SoftTimeout+300)
@@ -452,7 +453,7 @@ func (s *RagFlowService) RunParsingQueue(items []ParseQueueItem, cfg ParseQueueC
 		cfg.MaxRecoveryAttempts = cfg.MaxRetries
 	}
 	if cfg.MaxRecoveryAttempts <= 0 {
-		cfg.MaxRecoveryAttempts = 3
+		cfg.MaxRecoveryAttempts = defaults.ParseQueueDefaultMaxRecoveryAttempts
 	}
 
 	totalDocs := 0
@@ -472,7 +473,7 @@ func (s *RagFlowService) RunParsingQueue(items []ParseQueueItem, cfg ParseQueueC
 		docStates:    make(map[string]*ParseDocState),
 	}
 	task.initDocStates(items)
-	parseTasks.Store(taskID, task)
+	s.parseTasks.Store(taskID, task)
 
 	if s.activityLog != nil {
 		s.activityLog.LogActivity(LogActivityParams{
@@ -490,7 +491,7 @@ func (s *RagFlowService) RunParsingQueue(items []ParseQueueItem, cfg ParseQueueC
 
 // GetParseTask returns a snapshot of the parse task, or nil if not found.
 func (s *RagFlowService) GetParseTask(taskID string) *ParseTask {
-	v, ok := parseTasks.Load(taskID)
+	v, ok := s.parseTasks.Load(taskID)
 	if !ok {
 		return nil
 	}
@@ -501,7 +502,7 @@ func (s *RagFlowService) GetParseTask(taskID string) *ParseTask {
 // ListParseTasks returns snapshots of all parse tasks currently tracked in memory.
 func (s *RagFlowService) ListParseTasks() []*ParseTask {
 	var out []*ParseTask
-	parseTasks.Range(func(_, v any) bool {
+	s.parseTasks.Range(func(_, v any) bool {
 		task := v.(*ParseTask)
 		snap := task.snapshot()
 		out = append(out, snap)
@@ -1224,7 +1225,8 @@ func (s *RagFlowService) sendParseNotification(task *ParseTask, webhookURL, room
 		"html":    html,
 	}
 	if _, err := s.notifyPost(webhookURL, payload); err != nil {
-		log.Printf("warn: [parse-queue %s] notification failed: %v", task.ID, err)
+		middleware.GetLogger().Warn("parse-queue notification failed",
+			zap.String("task_id", task.ID), zap.Error(err))
 	}
 }
 

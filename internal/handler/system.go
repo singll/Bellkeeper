@@ -5,6 +5,7 @@ import (
 	"time"
 
 	"github.com/gin-gonic/gin"
+	"github.com/singll/bellkeeper/internal/pkg/response"
 )
 
 // SystemHandler handles system-level operations like restart
@@ -21,7 +22,7 @@ func NewSystemHandler(shutdownChan chan struct{}) *SystemHandler {
 // Returns 202 Accepted immediately, then signals main to shut down.
 // Docker's restart policy will bring the container back up.
 func (h *SystemHandler) Restart(c *gin.Context) {
-	c.JSON(http.StatusAccepted, gin.H{
+	response.Raw(c, http.StatusAccepted, gin.H{
 		"message": "Server is restarting...",
 	})
 

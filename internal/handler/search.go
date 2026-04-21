@@ -1,11 +1,10 @@
 package handler
 
 import (
-	"net/http"
 	"strconv"
 
 	"github.com/gin-gonic/gin"
-
+	"github.com/singll/bellkeeper/internal/pkg/response"
 	"github.com/singll/bellkeeper/internal/service"
 )
 
@@ -23,13 +22,13 @@ func NewSearchHandler(svc *service.SearchService) *SearchHandler {
 func (h *SearchHandler) Search(c *gin.Context) {
 	query := c.Query("q")
 	if query == "" {
-		c.JSON(http.StatusBadRequest, gin.H{"error": "q parameter is required"})
+		response.BadRequest(c, "q parameter is required")
 		return
 	}
 
 	scope := c.DefaultQuery("scope", "all")
 	if scope != "all" && scope != "tags" && scope != "documents" && scope != "rss" {
-		c.JSON(http.StatusBadRequest, gin.H{"error": "scope must be one of: all, tags, documents, rss"})
+		response.BadRequest(c, "scope must be one of: all, tags, documents, rss")
 		return
 	}
 
@@ -40,9 +39,9 @@ func (h *SearchHandler) Search(c *gin.Context) {
 
 	result, err := h.svc.Search(query, scope, limit)
 	if err != nil {
-		c.JSON(http.StatusInternalServerError, gin.H{"error": err.Error()})
+		response.InternalError(c, err.Error())
 		return
 	}
 
-	c.JSON(http.StatusOK, gin.H{"success": true, "data": result})
+	response.Success(c, result)
 }

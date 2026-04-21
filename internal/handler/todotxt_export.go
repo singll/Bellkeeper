@@ -10,6 +10,7 @@ import (
 	"github.com/gin-gonic/gin"
 	"github.com/singll/bellkeeper/internal/matrix/command"
 	"github.com/singll/bellkeeper/internal/pkg/httpclient"
+	"github.com/singll/bellkeeper/internal/pkg/response"
 )
 
 // TodoTxtHandler handles todo.txt export operations
@@ -31,20 +32,14 @@ func NewTodoTxtHandler(apiURL, apiToken string) *TodoTxtHandler {
 // Export exports all todos in todo.txt format (JSON response)
 func (h *TodoTxtHandler) Export(c *gin.Context) {
 	if h.apiURL == "" || h.apiToken == "" {
-		c.JSON(http.StatusBadRequest, gin.H{
-			"success": false,
-			"message": "Memos API not configured",
-		})
+		response.BadRequest(c, "Memos API not configured")
 		return
 	}
 
 	url := h.apiURL + "/api/v1/memos"
 	req, err := http.NewRequestWithContext(c.Request.Context(), "GET", url, nil)
 	if err != nil {
-		c.JSON(http.StatusInternalServerError, gin.H{
-			"success": false,
-			"message": "Failed to create request: " + err.Error(),
-		})
+		response.InternalError(c, "Failed to create request: "+err.Error())
 		return
 	}
 	req.Header.Set("Authorization", "Bearer "+h.apiToken)
@@ -52,10 +47,7 @@ func (h *TodoTxtHandler) Export(c *gin.Context) {
 
 	resp, err := h.httpClient.Do(req)
 	if err != nil {
-		c.JSON(http.StatusInternalServerError, gin.H{
-			"success": false,
-			"message": "Failed to call Memos API: " + err.Error(),
-		})
+		response.InternalError(c, "Failed to call Memos API: "+err.Error())
 		return
 	}
 	defer resp.Body.Close()
@@ -63,10 +55,7 @@ func (h *TodoTxtHandler) Export(c *gin.Context) {
 	body, _ := io.ReadAll(resp.Body)
 
 	if resp.StatusCode >= 400 {
-		c.JSON(http.StatusBadGateway, gin.H{
-			"success": false,
-			"message": "Memos API error: " + string(body),
-		})
+		response.Error(c, http.StatusBadGateway, "Memos API error: "+string(body))
 		return
 	}
 
@@ -82,10 +71,7 @@ func (h *TodoTxtHandler) Export(c *gin.Context) {
 	}
 
 	if err := json.Unmarshal(body, &result); err != nil {
-		c.JSON(http.StatusInternalServerError, gin.H{
-			"success": false,
-			"message": "Failed to parse Memos response: " + err.Error(),
-		})
+		response.InternalError(c, "Failed to parse Memos response: "+err.Error())
 		return
 	}
 
@@ -131,8 +117,7 @@ func (h *TodoTxtHandler) Export(c *gin.Context) {
 		}
 	}
 
-	c.JSON(http.StatusOK, gin.H{
-		"success":    true,
+	response.Success(c, gin.H{
 		"todo.txt":   strings.Join(todoLines, "\n"),
 		"done.txt":   strings.Join(doneLines, "\n"),
 		"todo_count": len(todoLines),

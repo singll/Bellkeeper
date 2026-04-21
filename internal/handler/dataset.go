@@ -1,8 +1,6 @@
 package handler
 
 import (
-	"net/http"
-
 	"github.com/gin-gonic/gin"
 	"github.com/singll/bellkeeper/internal/model"
 	"github.com/singll/bellkeeper/internal/pkg/defaults"
@@ -161,10 +159,7 @@ func (h *DatasetHandler) GetAll(c *gin.Context) {
 		dict[m.Name] = m
 	}
 
-	c.JSON(http.StatusOK, gin.H{
-		"data": mappings,
-		"dict": dict,
-	})
+	response.Success(c, gin.H{"list": mappings, "dict": dict})
 }
 
 // GetByName returns a dataset mapping by its name
@@ -196,10 +191,7 @@ func (h *DatasetHandler) RecommendByTag(c *gin.Context) {
 		return
 	}
 
-	c.JSON(http.StatusOK, gin.H{
-		"data":       mapping,
-		"match_type": matchType,
-	})
+	response.Success(c, gin.H{"mapping": mapping, "match_type": matchType})
 }
 
 // AddArticleTags creates article-tag associations
@@ -284,7 +276,7 @@ func (h *DatasetHandler) CheckURL(c *gin.Context) {
 			response.InternalError(c, err.Error())
 			return
 		}
-		c.JSON(http.StatusOK, gin.H{"results": results})
+		response.Success(c, gin.H{"results": results})
 		return
 	}
 
@@ -299,5 +291,5 @@ func (h *DatasetHandler) CheckURL(c *gin.Context) {
 		response.InternalError(c, err.Error())
 		return
 	}
-	c.JSON(http.StatusOK, result)
+	response.Success(c, result)
 }

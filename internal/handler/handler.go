@@ -1,6 +1,7 @@
 package handler
 
 import (
+	"github.com/singll/bellkeeper/internal/pkg/defaults"
 	"github.com/singll/bellkeeper/internal/service"
 )
 
@@ -56,9 +57,7 @@ func NewHandlers(services *service.Services, shutdownChan chan struct{}, memosBa
 		h.MatrixNotify = NewMatrixNotifyHandler(services.Notification)
 	}
 	if services.MatrixAdmin != nil {
-		// Matrix domain from config - default to matrix.singll.net
-		matrixDomain := "matrix.singll.net"
-		h.MatrixAdmin = NewMatrixAdminHandler(services.MatrixAdmin, matrixDomain)
+		h.MatrixAdmin = NewMatrixAdminHandler(services.MatrixAdmin, defaults.DefaultMatrixDomain)
 	}
 
 	return h

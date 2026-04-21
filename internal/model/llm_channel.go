@@ -4,6 +4,8 @@ import (
 	"encoding/json"
 	"time"
 
+	"github.com/singll/bellkeeper/internal/middleware"
+	"go.uber.org/zap"
 	"gorm.io/gorm"
 )
 
@@ -35,12 +37,22 @@ func (c *LLMChannel) GetModels() []string {
 	if c.Models == "" {
 		return models
 	}
-	json.Unmarshal([]byte(c.Models), &models)
+	if err := json.Unmarshal([]byte(c.Models), &models); err != nil {
+		middleware.GetLogger().Warn("failed to parse models JSON for channel",
+			zap.String("channel", c.Name), zap.Error(err))
+		return []string{}
+	}
 	return models
 }
 
 // SetModels serializes a slice of model names into JSON.
 func (c *LLMChannel) SetModels(models []string) {
-	data, _ := json.Marshal(models)
+	data, err := json.Marshal(models)
+	if err != nil {
+		middleware.GetLogger().Warn("failed to marshal models for channel",
+			zap.String("channel", c.Name), zap.Error(err))
+		c.Models = "[]"
+		return
+	}
 	c.Models = string(data)
 }

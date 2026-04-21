@@ -5,7 +5,6 @@ import (
 	"encoding/json"
 	"fmt"
 	"io"
-	"log"
 	"math"
 	"math/rand"
 	"net/http"
@@ -16,9 +15,11 @@ import (
 	"time"
 
 	"github.com/singll/bellkeeper/internal/config"
+	"github.com/singll/bellkeeper/internal/middleware"
 	"github.com/singll/bellkeeper/internal/model"
 	"github.com/singll/bellkeeper/internal/pkg/httpclient"
 	"github.com/singll/bellkeeper/internal/repository"
+	"go.uber.org/zap"
 )
 
 // --- Token Bucket Rate Limiter ---
@@ -158,7 +159,7 @@ func NewLLMProxyService(cfg config.LLMProxyConfig, repo *repository.LLMProxyRepo
 	}
 
 	if err := svc.loadFromDB(); err != nil {
-		log.Printf("llm-proxy: failed to load config from DB: %v", err)
+		middleware.GetLogger().Error("failed to load llm-proxy config from DB", zap.Error(err))
 	}
 
 	return svc
@@ -210,11 +211,13 @@ func (s *LLMProxyService) loadFromDB() error {
 		gCfg := dbGroupToConfig(dbGroup)
 		group, err := NewModelGroup(gCfg, channels)
 		if err != nil {
-			log.Printf("llm-proxy: error initializing model group %q: %v", gCfg.Name, err)
+			middleware.GetLogger().Error("error initializing model group",
+				zap.String("group", gCfg.Name), zap.Error(err))
 			continue
 		}
 		if len(group.Members) == 0 {
-			log.Printf("llm-proxy: warning: model group %q has no valid members, skipping", gCfg.Name)
+			middleware.GetLogger().Warn("model group has no valid members, skipping",
+				zap.String("group", gCfg.Name))
 			continue
 		}
 		modelGroups[gCfg.Name] = group
@@ -222,8 +225,9 @@ func (s *LLMProxyService) loadFromDB() error {
 		stop := group.StartCleanup(1 * time.Minute)
 		stopChans = append(stopChans, stop)
 
-		log.Printf("llm-proxy: initialized model group %q with %d members (strategy=%s, sticky_ttl=%ds)",
-			gCfg.Name, len(group.Members), gCfg.Strategy, gCfg.StickyTTLSeconds)
+		middleware.GetLogger().Info("initialized model group",
+			zap.String("group", gCfg.Name), zap.Int("members", len(group.Members)),
+			zap.String("strategy", gCfg.Strategy), zap.Int("sticky_ttl_seconds", gCfg.StickyTTLSeconds))
 	}
 
 	s.channels = channels
@@ -231,8 +235,9 @@ func (s *LLMProxyService) loadFromDB() error {
 	s.modelGroups = modelGroups
 	s.stopChans = stopChans
 
-	log.Printf("llm-proxy: loaded %d channels for %d models, %d model groups from DB",
-		len(channels), len(modelMap), len(modelGroups))
+	middleware.GetLogger().Info("loaded llm-proxy config from DB",
+		zap.Int("channels", len(channels)), zap.Int("models", len(modelMap)),
+		zap.Int("model_groups", len(modelGroups)))
 	return nil
 }
 
@@ -410,8 +415,9 @@ func (s *LLMProxyService) ProxyRequest(
 		}
 		ch.Health.RecordFailure(classifyError(statusCode, err))
 		lastErr = err
-		log.Printf("llm-proxy: channel %s returned %d for model %s, trying next",
-			ch.Config.Name, statusCode, modelName)
+		middleware.GetLogger().Warn("channel returned error, trying next",
+			zap.String("channel", ch.Config.Name), zap.Int("status", statusCode),
+			zap.String("model", modelName))
 	}
 
 	return statusCode, respBody, respHeaders, lastErr
@@ -466,8 +472,9 @@ func (s *LLMProxyService) proxyViaGroup(
 		if taskKey != "" && group.Sticky != nil {
 			group.Sticky.Remove(taskKey)
 		}
-		log.Printf("llm-proxy: group %q channel %s (model %s) failed with %d, trying next member",
-			group.Config.Name, ch.Config.Name, realModel, statusCode)
+		middleware.GetLogger().Warn("group channel failed, trying next member",
+			zap.String("group", group.Config.Name), zap.String("channel", ch.Config.Name),
+			zap.String("model", realModel), zap.Int("status", statusCode))
 	}
 
 	return 503, []byte(`{"error":"all group members exhausted for: ` + modelName + `"}`), nil, nil
@@ -506,8 +513,9 @@ func (s *LLMProxyService) tryChannel(
 				if waitTime > maxWait {
 					waitTime = maxWait
 				}
-				log.Printf("llm-proxy: bucket throttle on %s, wait %v (attempt %d/%d)",
-					ch.Config.Name, waitTime, attempt+1, maxRetries)
+				middleware.GetLogger().Warn("bucket throttle, waiting",
+					zap.String("channel", ch.Config.Name), zap.Duration("wait", waitTime),
+					zap.Int("attempt", attempt+1), zap.Int("max_retries", maxRetries))
 				time.Sleep(waitTime)
 				continue
 			}
@@ -556,8 +564,9 @@ func (s *LLMProxyService) tryChannel(
 
 		if resp.StatusCode == 429 && attempt < maxRetries {
 			backoff := s.calculateBackoff(attempt)
-			log.Printf("llm-proxy: upstream 429 on %s, backoff %v (attempt %d/%d)",
-				ch.Config.Name, backoff, attempt+1, maxRetries)
+			middleware.GetLogger().Warn("upstream 429, backing off",
+				zap.String("channel", ch.Config.Name), zap.Duration("backoff", backoff),
+				zap.Int("attempt", attempt+1), zap.Int("max_retries", maxRetries))
 			time.Sleep(backoff)
 			continue
 		}
@@ -604,7 +613,10 @@ func extractModelFromBody(body []byte) string {
 	var req struct {
 		Model string `json:"model"`
 	}
-	json.Unmarshal(body, &req)
+	if err := json.Unmarshal(body, &req); err != nil {
+		middleware.GetLogger().Warn("failed to extract model from body", zap.Error(err))
+		return ""
+	}
 	return req.Model
 }
 
@@ -615,7 +627,10 @@ func extractTokenUsage(body []byte) (prompt, comp int) {
 			CompletionTokens int `json:"completion_tokens"`
 		} `json:"usage"`
 	}
-	json.Unmarshal(body, &resp)
+	if err := json.Unmarshal(body, &resp); err != nil {
+		middleware.GetLogger().Warn("failed to extract token usage", zap.Error(err))
+		return 0, 0
+	}
 	return resp.Usage.PromptTokens, resp.Usage.CompletionTokens
 }
 
@@ -641,7 +656,7 @@ func (s *LLMProxyService) logRequest(channelName, modelName, path string, status
 			CreatedAt:    time.Now(),
 		}
 		if err := s.repo.CreateLog(entry); err != nil {
-			log.Printf("warn: failed to log llm proxy request: %v", err)
+			middleware.GetLogger().Warn("failed to log llm proxy request", zap.Error(err))
 		}
 	}()
 }

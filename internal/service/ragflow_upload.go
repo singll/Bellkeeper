@@ -5,16 +5,18 @@ import (
 	"encoding/json"
 	"fmt"
 	"io"
-	"log"
 	"mime/multipart"
 	"net/http"
+	"sync"
 	"time"
 
 	"github.com/singll/bellkeeper/internal/config"
+	"github.com/singll/bellkeeper/internal/middleware"
 	"github.com/singll/bellkeeper/internal/model"
 	"github.com/singll/bellkeeper/internal/pkg/defaults"
 	"github.com/singll/bellkeeper/internal/pkg/httpclient"
 	"github.com/singll/bellkeeper/internal/repository"
+	"go.uber.org/zap"
 )
 
 // RagFlowService handles all RagFlow interactions
@@ -24,6 +26,7 @@ type RagFlowService struct {
 	tagRepo     *repository.TagRepository
 	client      *httpclient.Client
 	activityLog *ActivityLogService
+	parseTasks  sync.Map // taskID -> *ParseTask
 }
 
 // NewRagFlowService creates a new RagFlowService
@@ -90,7 +93,8 @@ func (s *RagFlowService) UploadWithRouting(req *UploadRequest) (*UploadResponse,
 		mapping, err := s.datasetRepo.GetByName(req.DatasetID)
 		if err == nil && mapping.DatasetID != "" {
 			datasetID = mapping.DatasetID
-			log.Printf("info: dataset routed by LLM recommendation %q -> %s", req.DatasetID, datasetID)
+			middleware.GetLogger().Info("dataset routed by LLM recommendation",
+			zap.String("dataset_name", req.DatasetID), zap.String("dataset_id", datasetID))
 		}
 	}
 
@@ -118,12 +122,14 @@ func (s *RagFlowService) UploadWithRouting(req *UploadRequest) (*UploadResponse,
 		mapping, err := s.datasetRepo.GetByName(req.Category)
 		if err == nil && mapping.DatasetID != "" {
 			datasetID = mapping.DatasetID
-			log.Printf("info: dataset routed by category name %q -> %s", req.Category, datasetID)
+			middleware.GetLogger().Info("dataset routed by category name",
+				zap.String("category", req.Category), zap.String("dataset_id", datasetID))
 		} else {
 			mapping, err = s.datasetRepo.GetByDisplayName(req.Category)
 			if err == nil && mapping.DatasetID != "" {
 				datasetID = mapping.DatasetID
-				log.Printf("info: dataset routed by category display_name %q -> %s", req.Category, datasetID)
+				middleware.GetLogger().Info("dataset routed by category display_name",
+					zap.String("category", req.Category), zap.String("dataset_id", datasetID))
 			}
 		}
 	}
@@ -163,7 +169,12 @@ func (s *RagFlowService) UploadWithRouting(req *UploadRequest) (*UploadResponse,
 		}
 		if docID != "" {
 			for _, tagName := range req.Tags {
-				tag, _ := s.tagRepo.GetByName(tagName)
+				tag, err := s.tagRepo.GetByName(tagName)
+				if err != nil {
+					middleware.GetLogger().Warn("failed to find tag for article-tag association",
+						zap.String("tag_name", tagName), zap.Error(err))
+					continue
+				}
 				if tag != nil {
 					if err := s.datasetRepo.CreateArticleTag(&model.ArticleTag{
 						DocumentID:   docID,
@@ -172,7 +183,8 @@ func (s *RagFlowService) UploadWithRouting(req *UploadRequest) (*UploadResponse,
 						ArticleTitle: req.Title,
 						ArticleURL:  req.URL,
 					}); err != nil {
-						log.Printf("warn: failed to create article-tag association for doc %s tag %s: %v", docID, tagName, err)
+						middleware.GetLogger().Warn("failed to create article-tag association",
+							zap.String("document_id", docID), zap.String("tag_name", tagName), zap.Error(err))
 					}
 				}
 			}

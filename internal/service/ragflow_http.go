@@ -133,12 +133,12 @@ func (s *RagFlowService) downloadDocument(url string) (string, string, error) {
 func (s *RagFlowService) buildSafeParserProfile(filename string) (string, map[string]interface{}, bool) {
 	return defaults.DefaultParserID, map[string]interface{}{
 		"layout_recognize":    "naive",
-		"chunk_token_num":      64,
-		"delimiter":            "\n!?;。？！",
+		"chunk_token_num":      defaults.ParserDefaultChunkTokenNum,
+		"delimiter":            defaults.ParserDefaultDelimiter,
 		"auto_keywords":        0,
 		"auto_questions":       0,
 		"html4excel":           false,
-		"topn_tags":            3,
+		"topn_tags":            defaults.ParserDefaultTopNTags,
 		"table_context_size":  0,
 		"image_context_size":   0,
 		"raptor": map[string]interface{}{

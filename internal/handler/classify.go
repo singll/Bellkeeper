@@ -29,7 +29,7 @@ func (h *ClassifyHandler) ClassifyArticle(c *gin.Context) {
 	result, err := h.svc.ClassifyArticle(&req)
 	if err != nil {
 		// Return empty result on error (caller will use fallback)
-		c.JSON(http.StatusOK, gin.H{
+		response.Raw(c, http.StatusOK, gin.H{
 			"primary_domain": "",
 			"tags":           []string{},
 			"dataset_id":     "",
@@ -40,7 +40,7 @@ func (h *ClassifyHandler) ClassifyArticle(c *gin.Context) {
 	}
 
 	// Return flat JSON (not wrapped in "data") so n8n can read fields directly
-	c.JSON(http.StatusOK, gin.H{
+	response.Raw(c, http.StatusOK, gin.H{
 		"primary_domain": result.PrimaryDomain,
 		"tags":           result.Tags,
 		"dataset_id":     result.DatasetID,

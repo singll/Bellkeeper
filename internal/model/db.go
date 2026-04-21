@@ -2,11 +2,12 @@ package model
 
 import (
 	"encoding/json"
-	"log"
 	"strings"
 	"time"
 
 	"github.com/singll/bellkeeper/internal/config"
+	"github.com/singll/bellkeeper/internal/middleware"
+	"go.uber.org/zap"
 	"gorm.io/driver/postgres"
 	"gorm.io/gorm"
 	"gorm.io/gorm/logger"
@@ -86,7 +87,7 @@ func SeedLLMProxyConfig(db *gorm.DB, cfg config.LLMProxyConfig) error {
 		return nil // DB already has data, skip seeding
 	}
 
-	log.Println("info: seeding LLM proxy config from YAML (first-time migration)...")
+	middleware.GetLogger().Info("seeding LLM proxy config from YAML (first-time migration)")
 
 	// Seed channels
 	for _, ch := range cfg.Channels {
@@ -96,7 +97,12 @@ func SeedLLMProxyConfig(db *gorm.DB, cfg config.LLMProxyConfig) error {
 			apiKeyEnv = apiKeyEnv[2 : len(apiKeyEnv)-1]
 		}
 
-		modelsJSON, _ := json.Marshal(ch.Models)
+		modelsJSON, err := json.Marshal(ch.Models)
+		if err != nil {
+			middleware.GetLogger().Warn("failed to marshal models for LLM channel",
+				zap.String("channel", ch.Name), zap.Error(err))
+			continue
+		}
 		channel := LLMChannel{
 			Name:      ch.Name,
 			BaseURL:   ch.BaseURL,
@@ -109,10 +115,12 @@ func SeedLLMProxyConfig(db *gorm.DB, cfg config.LLMProxyConfig) error {
 			Models:    string(modelsJSON),
 		}
 		if err := db.Create(&channel).Error; err != nil {
-			log.Printf("warn: failed to seed LLM channel %q: %v", ch.Name, err)
+			middleware.GetLogger().Warn("failed to seed LLM channel",
+				zap.String("channel", ch.Name), zap.Error(err))
 			continue
 		}
-		log.Printf("info: seeded LLM channel %q (%d models)", ch.Name, len(ch.Models))
+		middleware.GetLogger().Info("seeded LLM channel",
+			zap.String("channel", ch.Name), zap.Int("models", len(ch.Models)))
 	}
 
 	// Seed model groups
@@ -135,10 +143,12 @@ func SeedLLMProxyConfig(db *gorm.DB, cfg config.LLMProxyConfig) error {
 			})
 		}
 		if err := db.Create(&group).Error; err != nil {
-			log.Printf("warn: failed to seed LLM model group %q: %v", g.Name, err)
+			middleware.GetLogger().Warn("failed to seed LLM model group",
+				zap.String("group", g.Name), zap.Error(err))
 			continue
 		}
-		log.Printf("info: seeded LLM model group %q (%d members)", g.Name, len(g.Members))
+		middleware.GetLogger().Info("seeded LLM model group",
+			zap.String("group", g.Name), zap.Int("members", len(g.Members)))
 	}
 
 	return nil
@@ -201,7 +211,8 @@ func SeedDatasetMappings(db *gorm.DB) error {
 		if result.Error != nil {
 			tag = Tag{Name: s.TagName, Color: s.TagColor}
 			if err := db.Create(&tag).Error; err != nil {
-				log.Printf("warn: failed to seed tag %q: %v", s.TagName, err)
+				middleware.GetLogger().Warn("failed to seed tag",
+					zap.String("tag", s.TagName), zap.Error(err))
 				continue
 			}
 		}
@@ -219,10 +230,12 @@ func SeedDatasetMappings(db *gorm.DB) error {
 				ParserID:    "naive",
 			}
 			if err := db.Create(&mapping).Error; err != nil {
-				log.Printf("warn: failed to seed dataset mapping %q: %v", s.Name, err)
+				middleware.GetLogger().Warn("failed to seed dataset mapping",
+					zap.String("name", s.Name), zap.Error(err))
 				continue
 			}
-			log.Printf("info: seeded dataset mapping %q (display: %s)", s.Name, s.DisplayName)
+			middleware.GetLogger().Info("seeded dataset mapping",
+				zap.String("name", s.Name), zap.String("display", s.DisplayName))
 		}
 
 		// Ensure tag-dataset association exists
@@ -232,7 +245,8 @@ func SeedDatasetMappings(db *gorm.DB) error {
 			Count(&count)
 		if count == 0 {
 			if err := db.Model(&mapping).Association("Tags").Append(&tag); err != nil {
-				log.Printf("warn: failed to associate tag %q with dataset %q: %v", s.TagName, s.Name, err)
+				middleware.GetLogger().Warn("failed to associate tag with dataset",
+					zap.String("tag", s.TagName), zap.String("dataset", s.Name), zap.Error(err))
 			}
 		}
 	}

@@ -14,6 +14,12 @@ func Success(c *gin.Context, data interface{}) {
 	c.JSON(http.StatusOK, gin.H{"data": data})
 }
 
+// Raw sends a response with a custom status code and raw data (no wrapping).
+// Use for proxy passthrough endpoints that return upstream API raw responses.
+func Raw(c *gin.Context, status int, data interface{}) {
+	c.JSON(status, data)
+}
+
 // Created sends a 201 response with data payload.
 func Created(c *gin.Context, data interface{}) {
 	c.JSON(http.StatusCreated, gin.H{"data": data})

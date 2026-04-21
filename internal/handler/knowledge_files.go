@@ -1,9 +1,8 @@
 package handler
 
 import (
-	"net/http"
-
 	"github.com/gin-gonic/gin"
+	"github.com/singll/bellkeeper/internal/pkg/response"
 	"github.com/singll/bellkeeper/internal/service"
 )
 
@@ -25,11 +24,11 @@ func (h *KnowledgeFilesHandler) GetTree(c *gin.Context) {
 
 	tree, err := h.filesSvc.GetTree(path)
 	if err != nil {
-		c.JSON(http.StatusInternalServerError, gin.H{"error": err.Error()})
+		response.InternalError(c, err.Error())
 		return
 	}
 
-	c.JSON(http.StatusOK, gin.H{"data": tree})
+	response.Success(c, tree)
 }
 
 // ListFiles handles GET /api/knowledge/files/list
@@ -42,11 +41,11 @@ func (h *KnowledgeFilesHandler) ListFiles(c *gin.Context) {
 
 	files, err := h.filesSvc.ListFiles(path, layer)
 	if err != nil {
-		c.JSON(http.StatusInternalServerError, gin.H{"error": err.Error()})
+		response.InternalError(c, err.Error())
 		return
 	}
 
-	c.JSON(http.StatusOK, gin.H{"data": files})
+	response.Success(c, files)
 }
 
 // ReadFile handles GET /api/knowledge/files/read
@@ -55,28 +54,28 @@ func (h *KnowledgeFilesHandler) ListFiles(c *gin.Context) {
 func (h *KnowledgeFilesHandler) ReadFile(c *gin.Context) {
 	path := c.Query("path")
 	if path == "" {
-		c.JSON(http.StatusBadRequest, gin.H{"error": "path parameter is required"})
+		response.BadRequest(c, "path parameter is required")
 		return
 	}
 
 	content, err := h.filesSvc.ReadFile(path)
 	if err != nil {
-		c.JSON(http.StatusNotFound, gin.H{"error": err.Error()})
+		response.NotFound(c, err.Error())
 		return
 	}
 
-	c.JSON(http.StatusOK, gin.H{"data": content})
+	response.Success(c, content)
 }
 
 // GetStats handles GET /api/knowledge/files/stats
 func (h *KnowledgeFilesHandler) GetStats(c *gin.Context) {
 	stats, err := h.filesSvc.GetStats()
 	if err != nil {
-		c.JSON(http.StatusInternalServerError, gin.H{"error": err.Error()})
+		response.InternalError(c, err.Error())
 		return
 	}
 
-	c.JSON(http.StatusOK, gin.H{"data": stats})
+	response.Success(c, stats)
 }
 
 // SearchFiles handles GET /api/knowledge/files/search
@@ -85,15 +84,15 @@ func (h *KnowledgeFilesHandler) GetStats(c *gin.Context) {
 func (h *KnowledgeFilesHandler) SearchFiles(c *gin.Context) {
 	pattern := c.Query("q")
 	if pattern == "" {
-		c.JSON(http.StatusBadRequest, gin.H{"error": "q parameter is required"})
+		response.BadRequest(c, "q parameter is required")
 		return
 	}
 
 	files, err := h.filesSvc.SearchFiles(pattern)
 	if err != nil {
-		c.JSON(http.StatusInternalServerError, gin.H{"error": err.Error()})
+		response.InternalError(c, err.Error())
 		return
 	}
 
-	c.JSON(http.StatusOK, gin.H{"data": files})
+	response.Success(c, files)
 }

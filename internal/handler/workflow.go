@@ -87,7 +87,7 @@ func (h *WorkflowHandler) Trigger(c *gin.Context) {
 
 	result, err := h.svc.Trigger(name, payload)
 	if err != nil {
-		c.JSON(http.StatusInternalServerError, gin.H{"error": err.Error(), "data": result})
+		response.Error(c, http.StatusInternalServerError, err.Error())
 		return
 	}
 

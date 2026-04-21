@@ -4,6 +4,7 @@ import (
 	"net/http"
 
 	"github.com/gin-gonic/gin"
+	"github.com/singll/bellkeeper/internal/pkg/response"
 	"github.com/singll/bellkeeper/internal/service"
 )
 
@@ -21,70 +22,49 @@ func NewMatrixNotifyHandler(svc *service.NotificationService) *MatrixNotifyHandl
 func (h *MatrixNotifyHandler) Send(c *gin.Context) {
 	var req service.NotificationRequest
 	if err := c.ShouldBindJSON(&req); err != nil {
-		c.JSON(http.StatusBadRequest, gin.H{
-			"success": false,
-			"message":  "invalid request: " + err.Error(),
-		})
+		response.BadRequest(c, "invalid request: "+err.Error())
 		return
 	}
 
 	resp, err := h.svc.Send(c.Request.Context(), &req)
 	if err != nil {
-		c.JSON(http.StatusInternalServerError, gin.H{
-			"success": false,
-			"message": "failed to queue notification: " + err.Error(),
-		})
+		response.InternalError(c, "failed to queue notification: "+err.Error())
 		return
 	}
 
 	if !resp.Success {
-		c.JSON(http.StatusBadRequest, resp)
+		response.Error(c, http.StatusBadRequest, resp.Message)
 		return
 	}
 
-	c.JSON(http.StatusAccepted, resp)
+	response.Raw(c, http.StatusAccepted, resp)
 }
 
 // GetStatus handles GET /api/matrix/notify/:id
 func (h *MatrixNotifyHandler) GetStatus(c *gin.Context) {
 	id := c.Param("id")
 	if id == "" {
-		c.JSON(http.StatusBadRequest, gin.H{
-			"success": false,
-			"message":  "notification id is required",
-		})
+		response.BadRequest(c, "notification id is required")
 		return
 	}
 
 	notification, err := h.svc.GetStatus(c.Request.Context(), id)
 	if err != nil {
-		c.JSON(http.StatusNotFound, gin.H{
-			"success": false,
-			"message":  "notification not found",
-		})
+		response.NotFound(c, "notification not found")
 		return
 	}
 
-	c.JSON(http.StatusOK, gin.H{
-		"success":        true,
-		"notification":   notification,
-	})
+	response.Success(c, gin.H{"notification": notification})
 }
 
 // ListChannels handles GET /api/matrix/notify/channels
 func (h *MatrixNotifyHandler) ListChannels(c *gin.Context) {
 	channels := h.svc.GetChannels(c.Request.Context())
-	c.JSON(http.StatusOK, gin.H{
-		"success":  true,
-		"channels": channels,
-	})
+	response.Success(c, gin.H{"channels": channels})
 }
 
 // ReloadChannels handles POST /api/matrix/notify/channels/reload
 func (h *MatrixNotifyHandler) ReloadChannels(c *gin.Context) {
 	h.svc.ReloadChannels(c.Request.Context())
-	c.JSON(http.StatusOK, gin.H{
-		"success": true,
-		"message": "channels reloaded",
-	})
+	response.Message(c, "channels reloaded")
 }

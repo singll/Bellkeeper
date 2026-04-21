@@ -47,10 +47,7 @@ func (h *RagFlowHandler) UploadWithRouting(c *gin.Context) {
 		return
 	}
 
-	c.JSON(http.StatusOK, gin.H{
-		"data":       resp,
-		"dataset_id": datasetID,
-	})
+	response.Success(c, gin.H{"upload": resp, "dataset_id": datasetID})
 }
 
 func (h *RagFlowHandler) IngestObsidianNote(c *gin.Context) {
@@ -87,7 +84,7 @@ func (h *RagFlowHandler) CheckURL(c *gin.Context) {
 		return
 	}
 
-	c.JSON(http.StatusOK, result)
+	response.Success(c, result)
 }
 
 func (h *RagFlowHandler) ListDocuments(c *gin.Context) {
@@ -107,7 +104,7 @@ func (h *RagFlowHandler) ListDocuments(c *gin.Context) {
 		return
 	}
 
-	c.JSON(http.StatusOK, result)
+	response.Raw(c, http.StatusOK, result)
 }
 
 func (h *RagFlowHandler) DeleteDocument(c *gin.Context) {
@@ -138,7 +135,7 @@ func (h *RagFlowHandler) ListDatasets(c *gin.Context) {
 		response.InternalError(c, err.Error())
 		return
 	}
-	c.JSON(http.StatusOK, result)
+	response.Raw(c, http.StatusOK, result)
 }
 
 // GetDataset gets a single dataset (proxy passthrough)
@@ -149,7 +146,7 @@ func (h *RagFlowHandler) GetDataset(c *gin.Context) {
 		response.InternalError(c, err.Error())
 		return
 	}
-	c.JSON(http.StatusOK, result)
+	response.Raw(c, http.StatusOK, result)
 }
 
 // CreateDataset creates a new RagFlow dataset (proxy passthrough)
@@ -172,7 +169,7 @@ func (h *RagFlowHandler) CreateDataset(c *gin.Context) {
 		response.InternalError(c, err.Error())
 		return
 	}
-	c.JSON(http.StatusCreated, result)
+	response.Raw(c, http.StatusCreated, result)
 }
 
 // UpdateDataset updates a RagFlow dataset (proxy passthrough)
@@ -189,7 +186,7 @@ func (h *RagFlowHandler) UpdateDataset(c *gin.Context) {
 		response.InternalError(c, err.Error())
 		return
 	}
-	c.JSON(http.StatusOK, result)
+	response.Raw(c, http.StatusOK, result)
 }
 
 // DeleteDataset deletes a RagFlow dataset
@@ -218,7 +215,7 @@ func (h *RagFlowHandler) RunParsing(c *gin.Context) {
 		response.InternalError(c, err.Error())
 		return
 	}
-	c.JSON(http.StatusOK, result)
+	response.Raw(c, http.StatusOK, result)
 }
 
 // RunParsingThrottled submits documents for parsing in rate-controlled batches.
@@ -236,7 +233,7 @@ func (h *RagFlowHandler) RunParsingThrottled(c *gin.Context) {
 
 	h.svc.RunParsingThrottled(req.DatasetID, req.DocumentIDs, req.BatchSize, req.IntervalSeconds)
 
-	c.JSON(http.StatusOK, gin.H{
+	response.Success(c, gin.H{
 		"message":          "throttled parsing started",
 		"total_documents":  len(req.DocumentIDs),
 		"batch_size":       req.BatchSize,
@@ -262,7 +259,7 @@ func (h *RagFlowHandler) RunParsingSmart(c *gin.Context) {
 
 	taskID := h.svc.RunParsingQueue(req.Items, req.Config)
 
-	c.JSON(http.StatusOK, gin.H{
+	response.Success(c, gin.H{
 		"task_id":         taskID,
 		"message":         "smart parsing accepted and tracked until terminal result",
 		"total_documents": total,
@@ -277,7 +274,7 @@ func (h *RagFlowHandler) GetParseTaskStatus(c *gin.Context) {
 		response.NotFound(c, "task not found")
 		return
 	}
-	c.JSON(http.StatusOK, task)
+	response.Success(c, task)
 }
 
 // ListParseTasks returns all tracked parse tasks.
@@ -302,7 +299,7 @@ func (h *RagFlowHandler) StopParsing(c *gin.Context) {
 		response.InternalError(c, err.Error())
 		return
 	}
-	c.JSON(http.StatusOK, result)
+	response.Raw(c, http.StatusOK, result)
 }
 
 // GetParsingStatus gets document parsing status (proxy passthrough)
@@ -319,7 +316,7 @@ func (h *RagFlowHandler) GetParsingStatus(c *gin.Context) {
 		response.InternalError(c, err.Error())
 		return
 	}
-	c.JSON(http.StatusOK, result)
+	response.Raw(c, http.StatusOK, result)
 }
 
 // BatchUpload uploads multiple documents
@@ -334,7 +331,7 @@ func (h *RagFlowHandler) BatchUpload(c *gin.Context) {
 	}
 
 	results, errors := h.svc.BatchUpload(req.DatasetID, req.Documents)
-	c.JSON(http.StatusOK, gin.H{
+	response.Success(c, gin.H{
 		"results": results,
 		"errors":  errors,
 	})
@@ -355,9 +352,7 @@ func (h *RagFlowHandler) BatchDeleteDocuments(c *gin.Context) {
 		response.InternalError(c, err.Error())
 		return
 	}
-	c.JSON(http.StatusOK, gin.H{
-		"message": fmt.Sprintf("deleted %d documents", len(req.DocumentIDs)),
-	})
+	response.Message(c, fmt.Sprintf("deleted %d documents", len(req.DocumentIDs)))
 }
 
 // TransferDocument transfers a document between datasets
@@ -397,7 +392,7 @@ func (h *RagFlowHandler) UpdateDocumentMetadata(c *gin.Context) {
 		response.InternalError(c, err.Error())
 		return
 	}
-	c.JSON(http.StatusOK, result)
+	response.Raw(c, http.StatusOK, result)
 }
 
 // UpdateDocumentParserConfig updates document parser method and parser_config.
@@ -422,7 +417,7 @@ func (h *RagFlowHandler) UpdateDocumentParserConfig(c *gin.Context) {
 		response.InternalError(c, err.Error())
 		return
 	}
-	c.JSON(http.StatusOK, result)
+	response.Raw(c, http.StatusOK, result)
 }
 
 // ListChunks lists chunks for a document (proxy passthrough)
@@ -442,7 +437,7 @@ func (h *RagFlowHandler) ListChunks(c *gin.Context) {
 		response.InternalError(c, err.Error())
 		return
 	}
-	c.JSON(http.StatusOK, result)
+	response.Raw(c, http.StatusOK, result)
 }
 
 // DeleteChunks deletes specific chunks (proxy passthrough)
@@ -462,7 +457,7 @@ func (h *RagFlowHandler) DeleteChunks(c *gin.Context) {
 		response.InternalError(c, err.Error())
 		return
 	}
-	c.JSON(http.StatusOK, result)
+	response.Raw(c, http.StatusOK, result)
 }
 
 // BatchTransferDocuments transfers multiple documents between datasets
@@ -482,7 +477,7 @@ func (h *RagFlowHandler) BatchTransferDocuments(c *gin.Context) {
 		response.InternalError(c, err.Error())
 		return
 	}
-	c.JSON(http.StatusOK, result)
+	response.Raw(c, http.StatusOK, result)
 }
 
 // SyncDatasets synchronizes local dataset mappings with RAGFlow,
@@ -493,7 +488,7 @@ func (h *RagFlowHandler) SyncDatasets(c *gin.Context) {
 		response.InternalError(c, err.Error())
 		return
 	}
-	c.JSON(http.StatusOK, gin.H{
+	response.Success(c, gin.H{
 		"message": "dataset sync completed",
 		"result":  result,
 	})
