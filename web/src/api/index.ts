@@ -444,10 +444,29 @@ export const matrixApi = {
 }
 
 // Search API
+export interface SearchResultTag {
+  id: number
+  name: string
+  color?: string
+  description?: string
+}
+
+export interface SearchResultDocument {
+  id: string
+  article_title: string
+  article_url?: string
+}
+
+export interface SearchResultRSSFeed {
+  id: number
+  name: string
+  description?: string
+}
+
 export interface SearchResult {
-  tags: any[]
-  documents: any[]
-  rss_feeds: any[]
+  tags: SearchResultTag[]
+  documents: SearchResultDocument[]
+  rss_feeds: SearchResultRSSFeed[]
   total_count: number
 }
 

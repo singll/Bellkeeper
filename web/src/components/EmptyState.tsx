@@ -58,8 +58,8 @@ export const EmptyState: Component<EmptyStateProps> = (props) => {
 export const EmptyStateVariants = {
   NoData: (props?: Partial<EmptyStateProps>) => (
     <EmptyState
-      title="No data available"
-      description="There's nothing here yet. Try adding some content first."
+      title="暂无数据"
+      description="这里还没有内容，尝试先添加一些数据。"
       {...props}
     />
   ),
@@ -81,8 +81,8 @@ export const EmptyStateVariants = {
           />
         </svg>
       }
-      title="No results found"
-      description="Try adjusting your search or filter criteria."
+      title="未找到结果"
+      description="尝试调整搜索或筛选条件。"
       {...props}
     />
   ),
@@ -104,9 +104,9 @@ export const EmptyStateVariants = {
           />
         </svg>
       }
-      title="Something went wrong"
-      description="An error occurred while loading the data."
-      action={props?.onRetry ? { label: 'Try Again', onClick: props.onRetry } : undefined}
+      title="出现错误"
+      description="加载数据时发生错误。"
+      action={props?.onRetry ? { label: '重试', onClick: props.onRetry } : undefined}
       {...props}
     />
   ),
@@ -128,8 +128,8 @@ export const EmptyStateVariants = {
           />
         </svg>
       }
-      title="Loading..."
-      description="Please wait while we fetch the data."
+      title="加载中..."
+      description="请稍候，正在获取数据。"
       {...props}
     />
   ),

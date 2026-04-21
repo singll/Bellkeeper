@@ -1,10 +1,8 @@
 import type { LLMChannelHealth, LLMModelGroupMemberConfig } from '@/types'
+import { formatDate } from '@/utils/format'
 
-// Date/Time formatting
-export const formatDateTime = (value?: string) => {
-  if (!value) return '--'
-  return new Date(value).toLocaleString('zh-CN')
-}
+// Re-export shared formatting functions
+export { formatDate as formatDateTime } from '@/utils/format'
 
 export const formatPercent = (value: number) => `${Math.round(value * 100)}%`
 

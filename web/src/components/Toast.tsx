@@ -23,8 +23,14 @@ let toastId = 0
 
 export const ToastProvider: ParentComponent = (props) => {
   const [toasts, setToasts] = createSignal<Toast[]>([])
+  const timers = new Map<number, ReturnType<typeof setTimeout>>()
 
   const removeToast = (id: number) => {
+    const timer = timers.get(id)
+    if (timer) {
+      clearTimeout(timer)
+      timers.delete(id)
+    }
     setToasts((prev) => prev.filter((t) => t.id !== id))
   }
 
@@ -33,7 +39,11 @@ export const ToastProvider: ParentComponent = (props) => {
     setToasts((prev) => [...prev, { id, type, message, duration }])
 
     if (duration > 0) {
-      setTimeout(() => removeToast(id), duration)
+      const timer = setTimeout(() => {
+        timers.delete(id)
+        removeToast(id)
+      }, duration)
+      timers.set(id, timer)
     }
   }
 

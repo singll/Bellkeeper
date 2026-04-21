@@ -4,6 +4,8 @@ import { useToast } from '@/components/Toast'
 import Modal from '@/components/Modal'
 import type { DatasetMapping } from '@/types'
 
+const PAGE_SIZE = 20
+
 const Documents: Component = () => {
   const toast = useToast()
   const [datasets, setDatasets] = createSignal<DatasetMapping[]>([])
@@ -55,7 +57,7 @@ const Documents: Component = () => {
     setError('')
     setSelectedDocs(new Set())
     try {
-      const res = await ragflowApi.listDocuments(dsId, page(), 20)
+      const res = await ragflowApi.listDocuments(dsId, page(), PAGE_SIZE)
       if (res.code === 0 && res.data) {
         setDocuments(res.data.docs || [])
         setTotal(res.data.total || 0)
@@ -80,7 +82,7 @@ const Documents: Component = () => {
       setSelectedDocs(new Set())
       await loadDocuments()
     } catch (err) {
-      toast.error('删除失败: ' + (err as Error).message)
+      toast.error('删除失败: ' + (err instanceof Error ? err.message : String(err)))
     }
   }
 
@@ -95,7 +97,7 @@ const Documents: Component = () => {
       setSelectedDocs(new Set())
       await loadDocuments()
     } catch (err) {
-      toast.error('批量删除失败: ' + (err as Error).message)
+      toast.error('批量删除失败: ' + (err instanceof Error ? err.message : String(err)))
     }
   }
 
@@ -186,7 +188,7 @@ const Documents: Component = () => {
       setUrlCheckResult(null)
       await loadDocuments()
     } catch (err) {
-      toast.error('上传失败: ' + (err as Error).message)
+      toast.error('上传失败: ' + (err instanceof Error ? err.message : String(err)))
     } finally {
       setUploading(false)
     }
@@ -389,7 +391,7 @@ const Documents: Component = () => {
       </div>
 
       {/* Pagination */}
-      <Show when={total() > 20}>
+      <Show when={total() > PAGE_SIZE}>
         <div class="flex items-center justify-between mt-4">
           <div class="text-sm text-dark-400">
             共 <span class="text-dark-200 font-medium">{total()}</span> 条记录
@@ -403,11 +405,11 @@ const Documents: Component = () => {
               上一页
             </button>
             <span class="btn btn-ghost btn-sm cursor-default">
-              {page()} / {Math.ceil(total() / 20)}
+              {page()} / {Math.ceil(total() / PAGE_SIZE)}
             </span>
             <button
               class="btn btn-secondary btn-sm"
-              disabled={page() >= Math.ceil(total() / 20)}
+              disabled={page() >= Math.ceil(total() / PAGE_SIZE)}
               onClick={() => setPage((p) => p + 1)}
             >
               下一页

@@ -1,11 +1,11 @@
 import { Component, createSignal, Show, For, createEffect, onCleanup } from 'solid-js'
 import { useNavigate } from '@solidjs/router'
-import { search } from '../api'
+import { search, type SearchResultTag, type SearchResultDocument, type SearchResultRSSFeed } from '../api'
 
-interface SearchResult {
-  tags: any[]
-  documents: any[]
-  rss_feeds: any[]
+interface SearchResults {
+  tags: SearchResultTag[]
+  documents: SearchResultDocument[]
+  rss_feeds: SearchResultRSSFeed[]
 }
 
 interface GlobalSearchProps {
@@ -16,7 +16,7 @@ interface GlobalSearchProps {
 const GlobalSearch: Component<GlobalSearchProps> = (props) => {
   const navigate = useNavigate()
   const [query, setQuery] = createSignal('')
-  const [results, setResults] = createSignal<SearchResult | null>(null)
+  const [results, setResults] = createSignal<SearchResults | null>(null)
   const [loading, setLoading] = createSignal(false)
   const [activeTab, setActiveTab] = createSignal<'all' | 'tags' | 'documents' | 'rss'>('all')
   let inputRef: HTMLInputElement | undefined
@@ -113,7 +113,7 @@ const GlobalSearch: Component<GlobalSearchProps> = (props) => {
                 type="text"
                 value={query()}
                 onInput={(e) => setQuery(e.currentTarget.value)}
-                placeholder="Search documents, tags, RSS feeds..."
+                placeholder="搜索文档、标签、RSS 订阅源..."
                 class="flex-1 bg-transparent border-none outline-none text-dark-100 placeholder-dark-400 text-lg"
               />
               <Show when={loading()}>
@@ -128,9 +128,9 @@ const GlobalSearch: Component<GlobalSearchProps> = (props) => {
             <div class="p-2 border-b border-dark-600">
               <div class="flex gap-2">
                 <For each={[
-                  { id: 'all', label: 'All' },
-                  { id: 'tags', label: 'Tags' },
-                  { id: 'documents', label: 'Documents' },
+                  { id: 'all', label: '全部' },
+                  { id: 'tags', label: '标签' },
+                  { id: 'documents', label: '文档' },
                   { id: 'rss', label: 'RSS' },
                 ] as const}>
                   {(tab) => (
@@ -153,7 +153,7 @@ const GlobalSearch: Component<GlobalSearchProps> = (props) => {
               <Show when={getFilteredResults()?.tags.length}>
                 <div class="mb-4">
                   <div class="px-3 py-2 text-xs font-medium text-dark-500 uppercase tracking-wider">
-                    Tags
+                    标签
                   </div>
                   <For each={getFilteredResults()?.tags}>
                     {(tag) => (
@@ -178,7 +178,7 @@ const GlobalSearch: Component<GlobalSearchProps> = (props) => {
               <Show when={getFilteredResults()?.documents.length}>
                 <div class="mb-4">
                   <div class="px-3 py-2 text-xs font-medium text-dark-500 uppercase tracking-wider">
-                    Documents
+                    文档
                   </div>
                   <For each={getFilteredResults()?.documents}>
                     {(doc) => (
@@ -202,7 +202,7 @@ const GlobalSearch: Component<GlobalSearchProps> = (props) => {
               <Show when={getFilteredResults()?.rss_feeds.length}>
                 <div>
                   <div class="px-3 py-2 text-xs font-medium text-dark-500 uppercase tracking-wider">
-                    RSS Feeds
+                    RSS 订阅
                   </div>
                   <For each={getFilteredResults()?.rss_feeds}>
                     {(feed) => (
@@ -231,7 +231,7 @@ const GlobalSearch: Component<GlobalSearchProps> = (props) => {
               <svg class="w-12 h-12 mx-auto mb-3 opacity-50" fill="none" stroke="currentColor" viewBox="0 0 24 24">
                 <path stroke-linecap="round" stroke-linejoin="round" stroke-width="1.5" d="M9.172 16.172a4 4 0 015.656 0M9 10h.01M15 10h.01M21 12a9 9 0 11-18 0 9 9 0 0118 0z" />
               </svg>
-              <p class="text-sm">No results found for "{query()}"</p>
+              <p class="text-sm">未找到"{query()}"的结果</p>
             </div>
           </Show>
 
@@ -241,8 +241,8 @@ const GlobalSearch: Component<GlobalSearchProps> = (props) => {
               <svg class="w-12 h-12 mx-auto mb-3 opacity-50" fill="none" stroke="currentColor" viewBox="0 0 24 24">
                 <path stroke-linecap="round" stroke-linejoin="round" stroke-width="1.5" d="M21 21l-6-6m2-5a7 7 0 11-14 0 7 7 0 0114 0z" />
               </svg>
-              <p class="text-sm">Type to search across documents, tags, and RSS feeds</p>
-              <p class="text-xs text-dark-500 mt-2">Press <kbd class="px-1 py-0.5 bg-dark-700 rounded">Tab</kbd> to switch tabs</p>
+              <p class="text-sm">输入内容以搜索文档、标签和 RSS 订阅</p>
+              <p class="text-xs text-dark-500 mt-2">按 <kbd class="px-1 py-0.5 bg-dark-700 rounded">Tab</kbd> 键切换标签</p>
             </div>
           </Show>
         </div>

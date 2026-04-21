@@ -85,6 +85,42 @@ const ChevronIcon = () => (
   </svg>
 )
 
+const MatrixRoomIcon = () => (
+  <svg class="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+    <path stroke-linecap="round" stroke-linejoin="round" stroke-width="1.5" d="M19 21V5a2 2 0 00-2-2H7a2 2 0 00-2 2v16m14 0H5m14 0h2m-14 0H5m5-8h4m-4 4h4" />
+  </svg>
+)
+
+const MatrixChannelIcon = () => (
+  <svg class="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+    <path stroke-linecap="round" stroke-linejoin="round" stroke-width="1.5" d="M8.111 16.404a5.5 5.5 0 017.778 0M12 20h.01m-7.08-7.071c3.904-3.905 10.236-3.905 14.141 0M1.394 9.393c5.857-5.857 15.355-5.857 21.213 0" />
+  </svg>
+)
+
+const MatrixCommandIcon = () => (
+  <svg class="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+    <path stroke-linecap="round" stroke-linejoin="round" stroke-width="1.5" d="M8 9l3 3-3 3m5 0h3M5 20h14a2 2 0 002-2V6a2 2 0 00-2-2H5a2 2 0 00-2 2v12a2 2 0 002 2z" />
+  </svg>
+)
+
+const MatrixNotificationIcon = () => (
+  <svg class="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+    <path stroke-linecap="round" stroke-linejoin="round" stroke-width="1.5" d="M15 17h5l-1.405-1.405A2.032 2.032 0 0118 14.158V11a6.002 6.002 0 00-4-5.659V5a2 2 0 10-4 0v.341C7.67 6.165 6 8.388 6 11v3.159c0 .538-.214 1.055-.595 1.436L4 17h5m6 0v1a3 3 0 11-6 0v-1m6 0H9" />
+  </svg>
+)
+
+const MatrixEventIcon = () => (
+  <svg class="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+    <path stroke-linecap="round" stroke-linejoin="round" stroke-width="1.5" d="M9 19v-6a2 2 0 00-2-2H5a2 2 0 00-2 2v6a2 2 0 002 2h2a2 2 0 002-2zm0 0V9a2 2 0 012-2h2a2 2 0 012 2v10m-6 0a2 2 0 002 2h2a2 2 0 002-2m0 0V5a2 2 0 012-2h2a2 2 0 012 2v14a2 2 0 01-2 2h-2a2 2 0 01-2-2z" />
+  </svg>
+)
+
+const MatrixCommandLogIcon = () => (
+  <svg class="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+    <path stroke-linecap="round" stroke-linejoin="round" stroke-width="1.5" d="M9 5H7a2 2 0 00-2 2v12a2 2 0 002 2h10a2 2 0 002-2V7a2 2 0 00-2-2h-2M9 5a2 2 0 002 2h2a2 2 0 002-2M9 5a2 2 0 012-2h2a2 2 0 012 2m-3 7h3m-3 4h3m-6-4h.01M9 16h.01" />
+  </svg>
+)
+
 const SearchIcon = () => (
   <svg class="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
     <path stroke-linecap="round" stroke-linejoin="round" stroke-width="1.5" d="M21 21l-6-6m2-5a7 7 0 11-14 0 7 7 0 0114 0z" />
@@ -154,12 +190,12 @@ const navGroups: NavGroup[] = [
     defaultExpanded: true,
     items: [
       { path: '/matrix', label: '总览', icon: <MatrixIcon /> },
-      { path: '/matrix/rooms', label: '房间管理', icon: <></> },
-      { path: '/matrix/channels', label: '频道管理', icon: <></> },
-      { path: '/matrix/commands', label: '命令管理', icon: <></> },
-      { path: '/matrix/notifications', label: '通知管理', icon: <></> },
-      { path: '/matrix/events', label: '事件日志', icon: <></> },
-      { path: '/matrix/command-logs', label: '命令日志', icon: <></> },
+      { path: '/matrix/rooms', label: '房间管理', icon: <MatrixRoomIcon /> },
+      { path: '/matrix/channels', label: '频道管理', icon: <MatrixChannelIcon /> },
+      { path: '/matrix/commands', label: '命令管理', icon: <MatrixCommandIcon /> },
+      { path: '/matrix/notifications', label: '通知管理', icon: <MatrixNotificationIcon /> },
+      { path: '/matrix/events', label: '事件日志', icon: <MatrixEventIcon /> },
+      { path: '/matrix/command-logs', label: '命令日志', icon: <MatrixCommandLogIcon /> },
     ],
   },
   {
@@ -177,8 +213,8 @@ const navGroups: NavGroup[] = [
     icon: <SettingsIcon />,
     defaultExpanded: true,
     items: [
-      { path: '/logs', label: 'Logs', icon: <LogsIcon /> },
-      { path: '/settings', label: 'Settings', icon: <SettingsIcon /> },
+      { path: '/logs', label: '日志', icon: <LogsIcon /> },
+      { path: '/settings', label: '设置', icon: <SettingsIcon /> },
     ],
   },
 ]
@@ -253,7 +289,7 @@ const Layout: Component<RouteSectionProps> = (props) => {
   })
 
   return (
-    <div class="min-h-screen flex" onKeyDown={handleKeyDown}>
+    <div class="min-h-screen flex">
       {/* Mobile Menu Button */}
       <button
         class="lg:hidden fixed top-4 left-4 z-50 btn btn-icon btn-secondary"

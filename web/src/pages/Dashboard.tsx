@@ -1,4 +1,4 @@
-import { Component, createSignal, Show, For, onMount } from 'solid-js'
+import { Component, createSignal, createMemo, Show, For, onMount } from 'solid-js'
 import { A } from '@solidjs/router'
 import { healthApi, workflowsApi, llmProxyApi, logsApi } from '@/api'
 import { useToast } from '@/components/Toast'
@@ -79,9 +79,9 @@ const Dashboard: Component = () => {
     return typeof value === 'number' ? value : '--'
   }
 
-  const healthyLLMChannels = () => llmChannels().filter((channel) => channel.health.state === 'closed').length
-  const brokenLLMChannels = () => llmChannels().filter((channel) => channel.health.state === 'open').length
-  const totalLLMChannels = () => llmChannels().length
+  const healthyLLMChannels = createMemo(() => llmChannels().filter((channel) => channel.health.state === 'closed').length)
+  const brokenLLMChannels = createMemo(() => llmChannels().filter((channel) => channel.health.state === 'open').length)
+  const totalLLMChannels = createMemo(() => llmChannels().length)
 
   const handleTriggerWorkflow = async (name: string) => {
     setTriggeringWorkflow(name)
@@ -89,35 +89,29 @@ const Dashboard: Component = () => {
       await workflowsApi.trigger(name, {})
       toast.success(`工作流 "${name}" 已触发`)
     } catch (err) {
-      toast.error('触发失败: ' + (err as Error).message)
+      toast.error('触发失败: ' + (err instanceof Error ? err.message : String(err)))
     } finally {
       setTriggeringWorkflow(null)
     }
   }
 
-  // Activity trend chart data (mock 7-day data based on stats)
-  const getActivityChartData = () => {
+  // Activity chart data using real stats from API
+  const activityChartData = createMemo(() => {
     const stats = activityStats()
-    const modules = ['ragflow_upload', 'ragflow_parse', 'rss_fetch', 'llm_call', 'matrix_event']
     const total = stats.reduce((sum, s) => sum + s.count, 0) || 1
+    return stats.slice(0, 5).map((stat) => ({
+      label: stat.module.replace(/_/g, ' '),
+      value: stat.count,
+      percentage: Math.round((stat.count / total) * 100),
+    }))
+  })
 
-    // Distribute total across 7 days with some variation
-    return modules.slice(0, 5).map((mod, i) => ({
-      label: mod.replace(/_/g, ' '),
-      value: Math.max(1, Math.round(total * (0.3 + Math.random() * 0.4))),
-      percentage: 0,
-    })).map((item, _, arr) => {
-      const arrTotal = arr.reduce((s, i) => s + i.value, 0) || 1
-      return { ...item, percentage: Math.round((item.value / arrTotal) * 100) }
-    })
-  }
-
-  const stats = [
+  const stats = createMemo(() => [
     { label: '标签数量', key: 'tags_count', icon: 'M7 7h.01M7 3h5c.512 0 1.024.195 1.414.586l7 7a2 2 0 010 2.828l-7 7a2 2 0 01-2.828 0l-7-7A1.994 1.994 0 013 12V7a4 4 0 014-4z', color: 'text-primary-400' },
     { label: 'RSS 订阅', key: 'rss_feeds_count', icon: 'M6 5c7.18 0 13 5.82 13 13M6 11a7 7 0 017 7m-6 0a1 1 0 11-2 0 1 1 0 012 0z', color: 'text-orange-400' },
     { label: '知识库映射', key: 'datasets_count', icon: 'M19 11H5m14 0a2 2 0 012 2v6a2 2 0 01-2 2H5a2 2 0 01-2-2v-6a2 2 0 012-2m14 0V9a2 2 0 00-2-2M5 11V9a2 2 0 012-2m0 0V5a2 2 0 012-2h6a2 2 0 012 2v2M7 7h10', color: 'text-purple-400' },
     { label: 'LLM 渠道', key: '_llm_channels', icon: 'M13 10V3L4 14h7v7l9-11h-7z', color: 'text-cyan-400' },
-  ]
+  ])
 
   return (
     <div class="animate-fade-in">
@@ -193,7 +187,7 @@ const Dashboard: Component = () => {
 
       {/* Stats Grid */}
       <div class="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-4 mb-6">
-        <For each={stats}>
+        <For each={stats()}>
           {(stat) => (
             <div class="card card-hover">
               <div class="flex items-center gap-3">
@@ -232,30 +226,26 @@ const Dashboard: Component = () => {
           </div>
         }>
           <div class="space-y-3">
-            <For each={activityStats().slice(0, 5)}>
-              {(stat) => {
-                const total = activityStats().reduce((s, x) => s + x.count, 0) || 1
-                const pct = Math.round((stat.count / total) * 100)
-                return (
-                  <div class="flex items-center gap-4">
-                    <div class="w-28 text-sm text-dark-300 truncate" title={stat.module}>
-                      {stat.module.replace(/_/g, ' ')}
-                    </div>
-                    <div class="flex-1 h-6 bg-dark-700/50 rounded-lg overflow-hidden">
-                      <div
-                        class="h-full bg-gradient-to-r from-primary-500/80 to-primary-400 rounded-lg transition-all duration-500"
-                        style={{ width: `${pct}%` }}
-                      />
-                    </div>
-                    <div class="w-16 text-right text-sm text-dark-300">
-                      {stat.count.toLocaleString()}
-                    </div>
-                    <div class="w-12 text-right text-xs text-dark-500">
-                      {pct}%
-                    </div>
+            <For each={activityChartData()}>
+              {(item) => (
+                <div class="flex items-center gap-4">
+                  <div class="w-28 text-sm text-dark-300 truncate" title={item.label}>
+                    {item.label}
                   </div>
-                )
-              }}
+                  <div class="flex-1 h-6 bg-dark-700/50 rounded-lg overflow-hidden">
+                    <div
+                      class="h-full bg-gradient-to-r from-primary-500/80 to-primary-400 rounded-lg transition-all duration-500"
+                      style={{ width: `${item.percentage}%` }}
+                    />
+                  </div>
+                  <div class="w-16 text-right text-sm text-dark-300">
+                    {item.value.toLocaleString()}
+                  </div>
+                  <div class="w-12 text-right text-xs text-dark-500">
+                    {item.percentage}%
+                  </div>
+                </div>
+              )}
             </For>
           </div>
         </Show>
@@ -283,7 +273,7 @@ const Dashboard: Component = () => {
             }>
               <div class="space-y-3">
                 <For each={Object.entries(health()?.services || {})}>
-                  {([name, status]: [string, any]) => (
+                  {([name, status]) => (
                     <div class="flex items-center justify-between p-3 bg-dark-700/50 rounded-xl">
                       <div class="flex items-center gap-3">
                         <span class={`status-dot ${
@@ -337,7 +327,7 @@ const Dashboard: Component = () => {
           >
             <div class="space-y-3">
               <For each={workflows().slice(0, 5)}>
-                {(workflow: any) => (
+                {(workflow) => (
                   <div class="flex items-center justify-between p-3 bg-dark-700/50 rounded-xl group hover:bg-dark-700/70 transition-colors">
                     <div class="flex items-center gap-3">
                       <span class={`status-dot ${

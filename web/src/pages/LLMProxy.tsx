@@ -1,5 +1,6 @@
 import { A } from '@solidjs/router'
-import { Component, createSignal, Show, Switch, Match } from 'solid-js'
+import { Component, createSignal, Show, Switch, Match, onMount } from 'solid-js'
+import type { LLMChannelStatus, LLMGroupStatus, LLMChannelConfig, LLMModelGroupConfig } from '@/types'
 import { llmProxyApi } from '@/api'
 import LLMProxyOverview from './llm-proxy/LLMProxyOverview'
 import LLMProxyChannels from './llm-proxy/LLMProxyChannels'
@@ -13,35 +14,35 @@ const LLMProxy: Component = () => {
   const [refreshing, setRefreshing] = createSignal(false)
 
   // Fetch data directly using fetch
-  const fetchChannels = async () => {
+  const fetchChannels = async (): Promise<{ data: LLMChannelStatus[] }> => {
     const res = await fetch('/api/llm/channels/status')
     if (!res.ok) throw new Error('Failed to fetch channels')
     return res.json()
   }
 
-  const fetchGroups = async () => {
+  const fetchGroups = async (): Promise<{ data: LLMGroupStatus[] }> => {
     const res = await fetch('/api/llm/groups/status')
     if (!res.ok) throw new Error('Failed to fetch groups')
     return res.json()
   }
 
-  const fetchChannelConfigs = async () => {
+  const fetchChannelConfigs = async (): Promise<{ data: LLMChannelConfig[] }> => {
     const res = await fetch('/api/llm/config/channels')
     if (!res.ok) throw new Error('Failed to fetch channel configs')
     return res.json()
   }
 
-  const fetchGroupConfigs = async () => {
+  const fetchGroupConfigs = async (): Promise<{ data: LLMModelGroupConfig[] }> => {
     const res = await fetch('/api/llm/config/groups')
     if (!res.ok) throw new Error('Failed to fetch group configs')
     return res.json()
   }
 
   // State
-  const [channelsData, setChannelsData] = createSignal<any>(null)
-  const [groupsData, setGroupsData] = createSignal<any>(null)
-  const [channelConfigsData, setChannelConfigsData] = createSignal<any>(null)
-  const [groupConfigsData, setGroupConfigsData] = createSignal<any>(null)
+  const [channelsData, setChannelsData] = createSignal<{ data: LLMChannelStatus[] } | null>(null)
+  const [groupsData, setGroupsData] = createSignal<{ data: LLMGroupStatus[] } | null>(null)
+  const [channelConfigsData, setChannelConfigsData] = createSignal<{ data: LLMChannelConfig[] } | null>(null)
+  const [groupConfigsData, setGroupConfigsData] = createSignal<{ data: LLMModelGroupConfig[] } | null>(null)
   const [loading, setLoading] = createSignal(true)
   const [error, setError] = createSignal<Error | null>(null)
 
@@ -68,7 +69,9 @@ const LLMProxy: Component = () => {
   }
 
   // Initial load
-  loadAll()
+  onMount(() => {
+    loadAll()
+  })
 
   const handleRefreshAll = async () => {
     setRefreshing(true)

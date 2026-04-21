@@ -366,6 +366,28 @@ export interface KnowledgeSearchResult {
   query_ms: number
 }
 
+// LLM Proxy Fetch Response Types (for raw fetch in LLMProxy.tsx)
+
+export interface LLMProxyFetchResponse<T> {
+  data: T[]
+}
+
+export interface LLMProxyChannelFetchResponse {
+  data: LLMChannelStatus[]
+}
+
+export interface LLMProxyGroupFetchResponse {
+  data: LLMGroupStatus[]
+}
+
+export interface LLMProxyChannelConfigFetchResponse {
+  data: LLMChannelConfig[]
+}
+
+export interface LLMProxyGroupConfigFetchResponse {
+  data: LLMModelGroupConfig[]
+}
+
 // Knowledge Ask Types
 
 export interface KnowledgeAskRequest {

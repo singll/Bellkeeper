@@ -1,20 +1,11 @@
-import { Component, createSignal, createResource, For, Show } from 'solid-js'
+import { Component, createResource, For, Show } from 'solid-js'
 import { matrixApi } from '@/api'
 import type { MatrixStats, MatrixEvent } from '@/types'
+import { formatDateShort } from '@/utils/format'
 
 const MatrixDashboard: Component = () => {
   const [stats] = createResource(() => matrixApi.getStats())
   const [events] = createResource(() => matrixApi.listEvents({ page: 1, page_size: 10 }))
-
-  const formatTime = (time: string) => {
-    const d = new Date(time)
-    return d.toLocaleString('zh-CN', {
-      month: '2-digit',
-      day: '2-digit',
-      hour: '2-digit',
-      minute: '2-digit',
-    })
-  }
 
   const statCards = () => [
     { label: '房间总数', value: stats()?.rooms ?? 0, icon: 'home' },
@@ -116,7 +107,7 @@ const MatrixDashboard: Component = () => {
               {(event) => (
                 <div class="px-6 py-3 flex items-center justify-between hover:bg-dark-800/50 transition-colors">
                   <div class="flex items-center gap-4">
-                    <span class="text-sm text-dark-400">{formatTime(event.created_at)}</span>
+                    <span class="text-sm text-dark-400">{formatDateShort(event.created_at)}</span>
                     <span class={`badge ${event.type === 'command' ? 'badge-blue' : 'badge-green'}`}>
                       {event.type === 'command' ? '命令' : event.type}
                     </span>
