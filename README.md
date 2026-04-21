@@ -336,6 +336,7 @@ Config → DB → Repositories → Services → Handlers → Router
 | [doc/ENHANCEMENT-PLAN.md](doc/ENHANCEMENT-PLAN.md) | **增强规划** — 当前开发方向、4 个阶段的详细实施方案 | 参与开发前必读 |
 | [doc/PROGRESS.md](doc/PROGRESS.md) | **进度跟踪** — 每项任务的验收检查清单 | 开发中随时对照 |
 | [doc/DEVELOPMENT-GUIDE.md](doc/DEVELOPMENT-GUIDE.md) | **开发规范** — 架构说明、编码标准、禁止事项 | 写代码前必读 |
+| [doc/ASSISTANT-GUIDELINES.md](doc/ASSISTANT-GUIDELINES.md) | **AI 助手守则** — 「完成」的定义、验证要求、禁止事项 | AI 协作时参照 |
 | [doc/API.md](doc/API.md) | **API 参考** — 完整 REST API 文档 | 对接/调试时查阅 |
 | [doc/ARCHITECTURE.md](doc/ARCHITECTURE.md) | **架构总览** — 系统定位、模块职责、技术选型 | 了解全局 |
 | [doc/LLM_PROXY_GUIDE.md](doc/LLM_PROXY_GUIDE.md) | **LLM 代理池** — 渠道配置、模型组、熔断器使用 | 配置 LLM 时查阅 |
