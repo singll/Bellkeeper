@@ -55,6 +55,7 @@ func AutoMigrate(db *gorm.DB) error {
 		&MatrixNotification{},
 		&MatrixCommandLog{},
 		&MatrixSyncState{},
+		&MatrixUserRole{},
 	); err != nil {
 		return err
 	}
