@@ -147,6 +147,10 @@ func registerWorkflowRoutes(api *gin.RouterGroup, h *handler.WorkflowHandler) {
 
 func registerSystemRoutes(api *gin.RouterGroup, h *handler.SystemHandler) {
 	api.POST("/system/restart", h.Restart)
+	api.GET("/system/disk", h.DiskUsage)
+	api.GET("/system/containers", h.ContainerList)
+	api.POST("/system/containers/:name/restart", h.ContainerRestart)
+	api.POST("/system/backup", h.BackupRun)
 }
 
 func registerLLMProxyRoutes(api *gin.RouterGroup, h *handler.LLMProxyHandler) {
