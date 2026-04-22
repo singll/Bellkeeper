@@ -23,6 +23,7 @@ type Handlers struct {
 	Config        *ConfigHandler
 	TodoTxt       *TodoTxtHandler
 	Search        *SearchHandler
+	Report        *ReportHandler
 	// Optional handlers
 	MatrixNotify *MatrixNotifyHandler
 	MatrixAdmin  *MatrixAdminHandler
@@ -50,6 +51,7 @@ func NewHandlers(services *service.Services, shutdownChan chan struct{}, memosBa
 		Config:        NewConfigHandler(services.LLMProxy),
 		TodoTxt:       NewTodoTxtHandler(memosBaseURL, memosAPIToken),
 		Search:        NewSearchHandler(services.Search),
+		Report:        NewReportHandler(services.Report),
 	}
 
 	// Set optional handlers

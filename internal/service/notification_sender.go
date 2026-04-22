@@ -1,6 +1,7 @@
 package service
 
 import (
+	"bytes"
 	"context"
 	"fmt"
 	"log"
@@ -9,6 +10,7 @@ import (
 
 	"github.com/singll/bellkeeper/internal/matrix/gateway"
 	"github.com/singll/bellkeeper/internal/repository"
+	"github.com/yuin/goldmark"
 )
 
 // NotificationSender sends notifications to Matrix
@@ -125,94 +127,13 @@ func stripHTML(html string) string {
 	return strings.TrimSpace(string(result))
 }
 
-// markdownToHTML converts basic markdown to HTML
+// markdownToHTML converts markdown to HTML using goldmark.
 func markdownToHTML(md string) string {
-	html := md
-
-	// Headers
-	html = strings.ReplaceAll(html, "<", "&lt;")
-	html = strings.ReplaceAll(html, ">", "&gt;")
-
-	// Unescape first for headers
-	html = strings.ReplaceAll(html, "&lt;h1&gt;", "<h1>")
-	html = strings.ReplaceAll(html, "&lt;/h1&gt;", "</h1>")
-	html = strings.ReplaceAll(html, "&lt;h2&gt;", "<h2>")
-	html = strings.ReplaceAll(html, "&lt;/h2&gt;", "</h2>")
-	html = strings.ReplaceAll(html, "&lt;h3&gt;", "<h3>")
-	html = strings.ReplaceAll(html, "&lt;/h3&gt;", "</h3>")
-
-	// Headers (must come after angle bracket escaping)
-	lines := strings.Split(html, "\n")
-	for i, line := range lines {
-		trimmed := strings.TrimSpace(line)
-		if strings.HasPrefix(trimmed, "### ") {
-			lines[i] = "<h3>" + strings.TrimPrefix(trimmed, "### ") + "</h3>"
-		} else if strings.HasPrefix(trimmed, "## ") {
-			lines[i] = "<h2>" + strings.TrimPrefix(trimmed, "## ") + "</h2>"
-		} else if strings.HasPrefix(trimmed, "# ") {
-			lines[i] = "<h1>" + strings.TrimPrefix(trimmed, "# ") + "</h1>"
-		}
+	var buf bytes.Buffer
+	if err := goldmark.Convert([]byte(md), &buf); err != nil {
+		return md
 	}
-	html = strings.Join(lines, "\n")
-
-	// Bold
-	html = strings.ReplaceAll(html, "**", "<strong>")
-	html = strings.ReplaceAll(html, "__", "<strong>")
-	// Close bold (simplified - replace odd occurrences)
-	parts := strings.Split(html, "<strong>")
-	if len(parts) > 1 {
-		for i := 1; i < len(parts); i++ {
-			parts[i] = strings.Replace(parts[i], "<strong>", "", 1) // close previous
-		}
-		html = strings.Join(parts, "</strong><strong>")
-		// Now close all
-		html = strings.ReplaceAll(html, "<strong>", "")
-		html = strings.ReplaceAll(html, "</strong>", "")
-		// Re-process
-		for i, part := range strings.Split(md, "**") {
-			if i%2 == 1 {
-				html += "<strong>" + part + "</strong>"
-			} else {
-				html += part
-			}
-		}
-	}
-
-	// Italic
-	html = strings.ReplaceAll(html, "_text_", "<em>text</em>")
-	html = strings.ReplaceAll(html, "*", "<em>")
-	html = strings.ReplaceAll(html, "</em><em>", "")
-
-	// Code blocks
-	for strings.Contains(html, "```") {
-		html = strings.Replace(html, "```", "<pre>", 1)
-		html = strings.Replace(html, "```", "</pre>", 1)
-	}
-
-	// Inline code
-	html = strings.ReplaceAll(html, "`", "<code>")
-
-	// Links [text](url)
-	for strings.Contains(html, "[") && strings.Contains(html, "](") {
-		start := strings.Index(html, "[")
-		linkStart := strings.Index(html, "][")
-		urlStart := linkStart + 2
-		urlEnd := strings.Index(html[urlStart:], ")")
-		if urlStart > 0 && urlEnd > 0 {
-			text := html[start+1 : linkStart]
-			url := html[urlStart : urlStart+urlEnd]
-			html = html[:start] + fmt.Sprintf(`<a href="%s">%s</a>`, url, text) + html[urlStart+urlEnd+1:]
-		} else {
-			break
-		}
-	}
-
-	// Line breaks
-	html = strings.ReplaceAll(html, "\n\n", "</p><p>")
-	html = "<p>" + html + "</p>"
-	html = strings.ReplaceAll(html, "<p></p>", "")
-
-	return html
+	return buf.String()
 }
 
 // escapeHTML escapes special HTML characters

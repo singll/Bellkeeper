@@ -66,3 +66,35 @@ func (h *ActivityLogHandler) Stats(c *gin.Context) {
 	}
 	response.Success(c, stats)
 }
+
+// CreateRequest represents a request to create an activity log entry.
+type CreateRequest struct {
+	Module     string `json:"module" binding:"required"`
+	Action     string `json:"action" binding:"required"`
+	Status     string `json:"status" binding:"required"`
+	Summary    string `json:"summary"`
+	Detail     any    `json:"detail"`
+	RefID      string `json:"ref_id"`
+	DurationMs int    `json:"duration_ms"`
+}
+
+// Create handles POST /api/logs
+func (h *ActivityLogHandler) Create(c *gin.Context) {
+	var req CreateRequest
+	if err := c.ShouldBindJSON(&req); err != nil {
+		response.BadRequest(c, "invalid request: "+err.Error())
+		return
+	}
+
+	h.svc.LogActivity(service.LogActivityParams{
+		Module:     req.Module,
+		Action:     req.Action,
+		Status:     req.Status,
+		Summary:    req.Summary,
+		Detail:     req.Detail,
+		RefID:      req.RefID,
+		DurationMs: req.DurationMs,
+	})
+
+	response.Success(c, gin.H{"message": "activity logged"})
+}

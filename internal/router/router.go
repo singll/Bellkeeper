@@ -52,6 +52,10 @@ func Setup(r *gin.Engine, handlers *handler.Handlers, mode string, apiKey string
 	if handlers.KnowledgeFiles != nil {
 		registerKnowledgeFilesRoutes(api, handlers.KnowledgeFiles)
 	}
+	// Report routes
+	if handlers.Report != nil {
+		registerReportRoutes(api, handlers.Report)
+	}
 }
 
 func registerTagRoutes(api *gin.RouterGroup, h *handler.TagHandler) {
@@ -185,6 +189,7 @@ func registerActivityLogRoutes(api *gin.RouterGroup, h *handler.ActivityLogHandl
 	api.GET("/logs", h.List)
 	api.GET("/logs/modules", h.Modules)
 	api.GET("/logs/stats", h.Stats)
+	api.POST("/logs", h.Create)
 }
 
 func registerFileIngestionRoutes(api *gin.RouterGroup, h *handler.FileIngestionHandler) {
@@ -239,6 +244,11 @@ func registerTodoTxtRoutes(api *gin.RouterGroup, h *handler.TodoTxtHandler) {
 
 func registerSearchRoutes(api *gin.RouterGroup, h *handler.SearchHandler) {
 	api.GET("/search", h.Search)
+}
+
+func registerReportRoutes(api *gin.RouterGroup, h *handler.ReportHandler) {
+	reports := api.Group("/reports")
+	reports.POST("/write", h.Write)
 }
 
 func registerKnowledgeRoutes(api *gin.RouterGroup, h *handler.KnowledgeHandler) {
