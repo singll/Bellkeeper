@@ -113,6 +113,15 @@ func (s *NotificationService) Send(ctx context.Context, req *NotificationRequest
 		}, nil
 	}
 
+	// Guard against empty RoomID — silent failure is worse than an explicit error
+	if roomID == "" {
+		envHint := fmt.Sprintf("BELLKEEPER_MATRIX_ROOM_%s", req.Channel)
+		return &NotificationResponse{
+			Success: false,
+			Message: fmt.Sprintf("channel '%s' has no RoomID configured - set via admin API or %s env var", req.Channel, envHint),
+		}, nil
+	}
+
 	// Set default message type
 	if req.MessageType == "" {
 		req.MessageType = "text"

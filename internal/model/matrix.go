@@ -2,6 +2,7 @@ package model
 
 import (
 	"log"
+	"os"
 	"time"
 
 	"gorm.io/gorm"
@@ -170,13 +171,13 @@ func SeedMatrixPlatform(db *gorm.DB) error {
 	// For now, we just create the structure. Actual room registration
 	// will happen when the Matrix gateway starts.
 
-	// Seed default channels (logical channels that will be mapped to rooms)
+	// Seed default channels (logical channels mapped to rooms via env vars)
 	// Note: Config uses "{}" instead of "" because PostgreSQL jsonb rejects empty strings
 	channels := []MatrixChannel{
-		{ChannelName: "alerts", RoomID: "", IsActive: true, Priority: 100, Config: "{}"},
-		{ChannelName: "daily", RoomID: "", IsActive: true, Priority: 50, Config: "{}"},
-		{ChannelName: "todo", RoomID: "", IsActive: true, Priority: 30, Config: "{}"},
-		{ChannelName: "qa", RoomID: "", IsActive: true, Priority: 30, Config: "{}"},
+		{ChannelName: "alerts", RoomID: os.Getenv("BELLKEEPER_MATRIX_ROOM_ALERTS"), IsActive: true, Priority: 100, Config: "{}"},
+		{ChannelName: "daily", RoomID: os.Getenv("BELLKEEPER_MATRIX_ROOM_DAILY"), IsActive: true, Priority: 50, Config: "{}"},
+		{ChannelName: "todo", RoomID: os.Getenv("BELLKEEPER_MATRIX_ROOM_TODO"), IsActive: true, Priority: 30, Config: "{}"},
+		{ChannelName: "qa", RoomID: os.Getenv("BELLKEEPER_MATRIX_ROOM_QA"), IsActive: true, Priority: 30, Config: "{}"},
 	}
 
 	for _, ch := range channels {
