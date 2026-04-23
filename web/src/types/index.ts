@@ -388,6 +388,51 @@ export interface LLMProxyGroupConfigFetchResponse {
   data: LLMModelGroupConfig[]
 }
 
+// LogCenter Types
+
+export interface LogEntry {
+  id: number
+  source_id: number
+  source?: LogSource
+  module: string
+  action: string
+  level: string
+  status: string
+  summary: string
+  detail?: Record<string, unknown>
+  ref_id?: string
+  duration_ms?: number
+  trace_id?: string
+  created_at: string
+}
+
+export interface LogSource {
+  id: number
+  name: string
+  source_type: string
+  description: string
+  is_active: boolean
+  created_at: string
+  updated_at: string
+}
+
+export interface LogAlertRule {
+  id: number
+  name: string
+  condition: { module: string; level: string; threshold: number; window_minutes: number }
+  notify_channel: string
+  is_active: boolean
+  created_at: string
+}
+
+export interface DashboardData {
+  by_level: { level: string; count: number }[]
+  by_module: { module: string; count: number }[]
+  by_source: { source_id: number; source_name: string; count: number }[]
+  by_hour: { hour: string; level: string; count: number }[]
+  top_errors: { module: string; count: number }[]
+}
+
 // Knowledge Ask Types
 
 export interface KnowledgeAskRequest {

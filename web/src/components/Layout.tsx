@@ -213,7 +213,7 @@ const navGroups: NavGroup[] = [
     icon: <SettingsIcon />,
     defaultExpanded: true,
     items: [
-      { path: '/logs', label: '日志', icon: <LogsIcon /> },
+      { path: '/logs', label: '日志中心', icon: <LogsIcon /> },
       { path: '/settings', label: '设置', icon: <SettingsIcon /> },
     ],
   },

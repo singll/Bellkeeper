@@ -480,3 +480,67 @@ export const search = async (
   )
   return response.data
 }
+
+// LogCenter API
+export const logCenterApi = {
+  listEntries: (params: { module?: string; level?: string; status?: string; keyword?: string; source_id?: number; page?: number; limit?: number } = {}) => {
+    const p = new URLSearchParams()
+    if (params.module) p.set('module', params.module)
+    if (params.level) p.set('level', params.level)
+    if (params.status) p.set('status', params.status)
+    if (params.keyword) p.set('keyword', params.keyword)
+    if (params.source_id) p.set('source_id', String(params.source_id))
+    if (params.page) p.set('page', String(params.page))
+    if (params.limit) p.set('limit', String(params.limit))
+    return request<{ data: { items: import('@/types').LogEntry[]; total: number; page: number; limit: number } }>(`/logs/entries?${p}`)
+  },
+
+  getEntry: (id: number) =>
+    request<{ data: import('@/types').LogEntry }>(`/logs/entries/${id}`),
+
+  // Sources
+  listSources: () =>
+    request<{ data: import('@/types').LogSource[] }>('/logs/sources'),
+
+  registerSource: (data: { name: string; source_type: string; description?: string }) =>
+    request<{ data: import('@/types').LogSource & { api_key?: string } }>('/logs/sources', {
+      method: 'POST',
+      body: JSON.stringify(data),
+    }),
+
+  updateSource: (id: number, data: Partial<{ name: string; source_type: string; description: string; is_active: boolean }>) =>
+    request<{ data: import('@/types').LogSource }>(`/logs/sources/${id}`, {
+      method: 'PUT',
+      body: JSON.stringify(data),
+    }),
+
+  deleteSource: (id: number) =>
+    request<{ message: string }>(`/logs/sources/${id}`, { method: 'DELETE' }),
+
+  // Dashboard
+  getDashboard: (period = '24h') =>
+    request<{ data: import('@/types').DashboardData }>(`/logs/dashboard/${period}`),
+
+  // Alerts
+  listAlerts: () =>
+    request<{ data: import('@/types').LogAlertRule[] }>('/logs/alerts'),
+
+  createAlert: (data: { name: string; condition: Record<string, unknown>; notify_channel: string }) =>
+    request<{ data: import('@/types').LogAlertRule }>('/logs/alerts', {
+      method: 'POST',
+      body: JSON.stringify(data),
+    }),
+
+  updateAlert: (id: number, data: Partial<{ name: string; condition: Record<string, unknown>; notify_channel: string; is_active: boolean }>) =>
+    request<{ data: import('@/types').LogAlertRule }>(`/logs/alerts/${id}`, {
+      method: 'PUT',
+      body: JSON.stringify(data),
+    }),
+
+  deleteAlert: (id: number) =>
+    request<{ message: string }>(`/logs/alerts/${id}`, { method: 'DELETE' }),
+
+  // Parse tasks
+  listParseTasks: () =>
+    request<{ data: import('@/types').ParseTask[] }>('/ragflow/documents/parse/tasks'),
+}

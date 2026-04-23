@@ -11,7 +11,7 @@ import Datasets from './pages/Datasets'
 import Documents from './pages/Documents'
 import Workflows from './pages/Workflows'
 import LLMProxy from './pages/LLMProxy'
-import Logs from './pages/Logs'
+import LogCenter from './pages/LogCenter'
 import Settings from './pages/Settings'
 import MatrixDashboard from './pages/MatrixDashboard'
 import MatrixRooms from './pages/MatrixRooms'
@@ -47,7 +47,7 @@ render(() => (
         <Route path="/workflows" component={Workflows} />
         <Route path="/llm-proxy" component={LLMProxy} />
         {/* System */}
-        <Route path="/logs" component={Logs} />
+        <Route path="/logs" component={LogCenter} />
         <Route path="/settings" component={Settings} />
         {/* Matrix */}
         <Route path="/matrix" component={MatrixDashboard} />
