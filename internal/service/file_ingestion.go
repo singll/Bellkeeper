@@ -38,15 +38,17 @@ type IngestURLRequest struct {
 
 // IngestURLResponse represents the response from URL ingestion
 type IngestURLResponse struct {
-	Success      bool     `json:"success"`
-	Status       string   `json:"status"` // "success", "duplicate", "extract_failed"
-	FilePath     string   `json:"file_path,omitempty"`
-	DocumentID   string   `json:"document_id,omitempty"`
-	DatasetID    string   `json:"dataset_id,omitempty"`
-	Title        string   `json:"title,omitempty"`
-	Tags         []string `json:"tags,omitempty"`
-	Extractor    string   `json:"extractor,omitempty"`
-	ErrorMessage string   `json:"error_message,omitempty"`
+	Success        bool     `json:"success"`
+	Status         string   `json:"status"` // "success", "duplicate", "duplicate_content", "extract_failed"
+	FilePath       string   `json:"file_path,omitempty"`
+	DocumentID     string   `json:"document_id,omitempty"`
+	DatasetID      string   `json:"dataset_id,omitempty"`
+	Title          string   `json:"title,omitempty"`
+	Tags           []string `json:"tags,omitempty"`
+	Extractor      string   `json:"extractor,omitempty"`
+	ExistingTitle  string   `json:"existing_title,omitempty"`  // for duplicate_content: title of existing article
+	ExistingURL    string   `json:"existing_url,omitempty"`    // for duplicate_content: URL of existing article
+	ErrorMessage   string   `json:"error_message,omitempty"`
 }
 
 // NewFileIngestionService creates a new FileIngestionService
@@ -105,7 +107,24 @@ func (s *FileIngestionService) IngestURL(req *IngestURLRequest) (*IngestURLRespo
 		req.Title = extraction.Title
 	}
 
-	// 3. 分类标签（可选）
+	// 3. 内容哈希去重 — 在写入文件之前检查是否已有相同内容
+	contentHash := s.calculateHash(extraction.Content)
+	existingArticle, hashErr := s.articleRepo.GetByContentHash(contentHash)
+	if hashErr == nil && existingArticle != nil {
+		// 哈希匹配：内容已存在，跳过写入
+		s.logIngestion(req.URL, "duplicate_content", fmt.Sprintf("Content hash matches existing article: %s (%s)", existingArticle.ArticleTitle, existingArticle.ArticleURL))
+		return &IngestURLResponse{
+			Success:       false,
+			Status:        "duplicate_content",
+			ExistingTitle: existingArticle.ArticleTitle,
+			ExistingURL:   existingArticle.ArticleURL,
+		}, nil
+	} else if hashErr != nil {
+		// DB 查询失败，不阻止入库，仅记录日志后继续
+		s.logIngestion(req.URL, "hash_check_failed", fmt.Sprintf("Content hash DB check failed: %v", hashErr))
+	}
+
+	// 4. 分类标签（可选）
 	if s.classifySvc != nil && len(req.Tags) == 0 {
 		classifyResult, err := s.classifySvc.ClassifyArticle(&ClassifyRequest{
 			Title:   req.Title,
@@ -120,13 +139,13 @@ func (s *FileIngestionService) IngestURL(req *IngestURLRequest) (*IngestURLRespo
 		}
 	}
 
-	// 4. 生成 frontmatter
+	// 5. 生成 frontmatter
 	frontmatter := s.generateFrontmatter(req, extraction)
 
-	// 5. 生成文件名
+	// 6. 生成文件名
 	filename := s.generateFilename(req.Title)
 
-	// 6. 确定路径
+	// 7. 确定路径
 	layer := req.Layer
 	if layer == "" {
 		layer = s.cfg.DefaultLayer
@@ -140,19 +159,18 @@ func (s *FileIngestionService) IngestURL(req *IngestURLRequest) (*IngestURLRespo
 
 	filePath := filepath.Join(layerDir, filename)
 
-	// 7. 写入文件
+	// 8. 写入文件
 	content := frontmatter + "\n\n" + extraction.Content
 	if err := os.WriteFile(filePath, []byte(content), 0644); err != nil {
 		return nil, fmt.Errorf("failed to write file: %w", err)
 	}
 
-	// 8. 计算内容哈希
-	contentHash := s.calculateHash(extraction.Content)
+	// 9. 内容哈希已在步骤 3 计算，直接使用
 
-	// 9. 提取域名
+	// 10. 提取域名
 	sourceDomain := s.extractDomain(req.URL)
 
-	// 10. 记录元数据
+	// 11. 记录元数据
 	article := &model.ArticleTag{
 		ArticleURL:   req.URL,
 		ArticleTitle: req.Title,
@@ -170,7 +188,7 @@ func (s *FileIngestionService) IngestURL(req *IngestURLRequest) (*IngestURLRespo
 		s.logIngestion(req.URL, "db_failed", fmt.Sprintf("file created but DB record failed: %v", err))
 	}
 
-	// 11. 记录日志
+	// 12. 记录日志
 	s.logIngestion(req.URL, "success", fmt.Sprintf("入库成功: %s (提取器: %s)", req.Title, extraction.Extractor))
 
 	return &IngestURLResponse{

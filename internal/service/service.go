@@ -10,6 +10,7 @@ type Services struct {
 	Tag           *TagService
 	RSS           *RSSService
 	RSSFetcher    *RSSFetcherService
+	Crawler       *CrawlService
 	Dataset       *DatasetService
 	Setting       *SettingService
 	RagFlow       *RagFlowService
@@ -18,6 +19,7 @@ type Services struct {
 	LLMProxy      *LLMProxyService
 	Classify      *ClassifyService
 	ActivityLog   *ActivityLogService
+	LogCenter     *LogCenterService
 	FileIngestion *FileIngestionService
 	Search        *SearchService
 	Report        *ReportService
@@ -33,6 +35,12 @@ type Services struct {
 func NewServices(repos *repository.Repositories, cfg *config.Config, version string) *Services {
 	// Create activity log first (used by multiple services)
 	activityLogSvc := NewActivityLogService(repos.ActivityLog)
+
+	// Create log center service
+	logCenterSvc := NewLogCenterService(repos.LogEntry, repos.LogSource, repos.LogAlertRule)
+
+	// Wire LogCenter into ActivityLog for delegation
+	activityLogSvc.SetLogCenter(logCenterSvc)
 
 	// Create ragflow service with activity log
 	ragFlowSvc := NewRagFlowService(cfg.RagFlow, repos.DatasetMapping, repos.Tag, activityLogSvc)
@@ -69,10 +77,17 @@ func NewServices(repos *repository.Repositories, cfg *config.Config, version str
 		fileIngestionSvc,
 	)
 
+	// Wire activity log into RSS fetcher
+	rssFetcherSvc.SetActivityLogService(activityLogSvc)
+
+	// Create crawl service (wraps RSS fetcher with management operations)
+	crawlSvc := NewCrawlService(rssFetcherSvc, repos.RSS, activityLogSvc)
+
 	return &Services{
 		Tag:            NewTagService(repos.Tag),
 		RSS:            NewRSSService(repos.RSS, repos.Tag),
 		RSSFetcher:     rssFetcherSvc,
+		Crawler:        crawlSvc,
 		Dataset:        datasetSvc,
 		Setting:        NewSettingService(repos.Setting),
 		RagFlow:        ragFlowSvc,
@@ -81,7 +96,8 @@ func NewServices(repos *repository.Repositories, cfg *config.Config, version str
 		LLMProxy:       NewLLMProxyService(cfg.LLMProxy, repos.LLMProxy, repos.LLMChannel, repos.LLMModelGroup),
 		Classify:       classifySvc,
 		ActivityLog:    activityLogSvc,
-		FileIngestion:   fileIngestionSvc,
+		LogCenter:      logCenterSvc,
+		FileIngestion:  fileIngestionSvc,
 		Search:          NewSearchService(repos.Tag, repos.ArticleTag, repos.RSS),
 		Report:          NewReportService(cfg.FileIngestion.BasePath),
 	}

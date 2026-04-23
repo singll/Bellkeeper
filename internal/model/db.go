@@ -48,6 +48,9 @@ func AutoMigrate(db *gorm.DB) error {
 		&LLMModelGroup{},
 		&LLMModelGroupMember{},
 		&ActivityLog{},
+		&LogSource{},
+		&LogEntry{},
+		&LogAlertRule{},
 		&MatrixRoom{},
 		&MatrixChannel{},
 		&MatrixCommand{},
@@ -56,6 +59,8 @@ func AutoMigrate(db *gorm.DB) error {
 		&MatrixCommandLog{},
 		&MatrixSyncState{},
 		&MatrixUserRole{},
+			&CrawlSource{},
+			&CrawlJob{},
 	); err != nil {
 		return err
 	}
@@ -65,6 +70,10 @@ func AutoMigrate(db *gorm.DB) error {
 	}
 
 	if err := SeedDatasetMappings(db); err != nil {
+		return err
+	}
+
+	if err := SeedLogSources(db); err != nil {
 		return err
 	}
 
@@ -180,6 +189,31 @@ func SeedSettings(db *gorm.DB) error {
 			if err := db.Create(&s).Error; err != nil {
 				return err
 			}
+		}
+	}
+
+	return nil
+}
+
+// SeedLogSources creates default log sources if they don't exist.
+func SeedLogSources(db *gorm.DB) error {
+	defaults := []LogSource{
+		{Name: "bellkeeper-core", SourceType: "internal", Description: "Bellkeeper core modules"},
+		{Name: "n8n-workflows", SourceType: "n8n", Description: "n8n automation workflows"},
+		{Name: "matrix-bot", SourceType: "internal", Description: "Matrix bot commands"},
+	}
+
+	for _, s := range defaults {
+		var count int64
+		db.Model(&LogSource{}).Where("name = ?", s.Name).Count(&count)
+		if count == 0 {
+			if err := db.Create(&s).Error; err != nil {
+				middleware.GetLogger().Warn("failed to seed log source",
+					zap.String("name", s.Name), zap.Error(err))
+				continue
+			}
+			middleware.GetLogger().Info("seeded log source",
+				zap.String("name", s.Name), zap.String("type", s.SourceType))
 		}
 	}
 

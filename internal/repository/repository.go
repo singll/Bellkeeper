@@ -14,6 +14,9 @@ type Repositories struct {
 	LLMChannel     *LLMChannelRepository
 	LLMModelGroup  *LLMModelGroupRepository
 	ActivityLog    *ActivityLogRepository
+	LogSource      *LogSourceRepository
+	LogEntry       *LogEntryRepository
+	LogAlertRule   *LogAlertRuleRepository
 	ArticleTag     *ArticleTagRepository
 	// Matrix Platform
 	MatrixRoom         *MatrixRoomRepository
@@ -37,6 +40,9 @@ func NewRepositories(db *gorm.DB) *Repositories {
 		LLMChannel:     NewLLMChannelRepository(db),
 		LLMModelGroup:  NewLLMModelGroupRepository(db),
 		ActivityLog:    NewActivityLogRepository(db),
+		LogSource:      NewLogSourceRepository(db),
+		LogEntry:       NewLogEntryRepository(db),
+		LogAlertRule:   NewLogAlertRuleRepository(db),
 		ArticleTag:     NewArticleTagRepository(db),
 		// Matrix Platform
 		MatrixRoom:         NewMatrixRoomRepository(db),

@@ -31,11 +31,13 @@ func Setup(r *gin.Engine, handlers *handler.Handlers, mode string, apiKey string
 	registerLLMProxyRoutes(api, handlers.LLMProxy)
 	registerClassifyRoutes(api, handlers.Classify)
 	registerActivityLogRoutes(api, handlers.ActivityLog)
+	registerLogCenterRoutes(api, handlers.LogCenter)
 	registerFileIngestionRoutes(api, handlers.FileIngestion)
 	registerLogLevelRoutes(api, handlers.LogLevel)
 	registerConfigRoutes(api, handlers.Config)
 	registerTodoTxtRoutes(api, handlers.TodoTxt)
 	registerSearchRoutes(api, handlers.Search)
+	registerCrawlerRoutes(api, handlers.Crawler)
 
 	// Matrix notification routes
 	if handlers.MatrixNotify != nil {
@@ -271,4 +273,34 @@ func registerKnowledgeFilesRoutes(api *gin.RouterGroup, h *handler.KnowledgeFile
 	knowledge.GET("/read", h.ReadFile)
 	knowledge.GET("/stats", h.GetStats)
 	knowledge.GET("/search", h.SearchFiles)
+}
+
+func registerCrawlerRoutes(api *gin.RouterGroup, h *handler.CrawlerHandler) {
+	crawl := api.Group("/crawl")
+	crawl.GET("/sources/health", h.SourceHealth)
+	crawl.POST("/sources/:id/resume", h.ResumeSource)
+	crawl.POST("/sources/:id/pause", h.PauseSource)
+	crawl.GET("/jobs", h.CrawlJobs)
+	crawl.POST("/fetch/:sourceId", h.FetchSource)
+}
+
+func registerLogCenterRoutes(api *gin.RouterGroup, h *handler.LogCenterHandler) {
+	logs := api.Group("/logs")
+	// Entries
+	logs.POST("/entries", h.CreateEntry)
+	logs.GET("/entries", h.ListEntries)
+	logs.GET("/entries/:id", h.GetEntry)
+	// Sources
+	logs.GET("/sources", h.ListSources)
+	logs.POST("/sources", h.RegisterSource)
+	logs.PUT("/sources/:id", h.UpdateSource)
+	logs.DELETE("/sources/:id", h.DeleteSource)
+	// Dashboard
+	logs.GET("/dashboard", h.GetDashboard)
+	logs.GET("/dashboard/:period", h.GetDashboardByPeriod)
+	// Alert rules
+	logs.GET("/alerts", h.ListAlertRules)
+	logs.POST("/alerts", h.CreateAlertRule)
+	logs.PUT("/alerts/:id", h.UpdateAlertRule)
+	logs.DELETE("/alerts/:id", h.DeleteAlertRule)
 }

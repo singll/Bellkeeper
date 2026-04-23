@@ -18,12 +18,14 @@ type Handlers struct {
 	LLMProxy      *LLMProxyHandler
 	Classify      *ClassifyHandler
 	ActivityLog   *ActivityLogHandler
+	LogCenter     *LogCenterHandler
 	FileIngestion *FileIngestionHandler
 	LogLevel      *LogLevelHandler
 	Config        *ConfigHandler
 	TodoTxt       *TodoTxtHandler
 	Search        *SearchHandler
 	Report        *ReportHandler
+	Crawler       *CrawlerHandler
 	// Optional handlers
 	MatrixNotify *MatrixNotifyHandler
 	MatrixAdmin  *MatrixAdminHandler
@@ -33,7 +35,7 @@ type Handlers struct {
 }
 
 // NewHandlers creates all handler instances
-func NewHandlers(services *service.Services, shutdownChan chan struct{}, memosBaseURL, memosAPIToken string) *Handlers {
+func NewHandlers(services *service.Services, shutdownChan chan struct{}, apiKey, memosBaseURL, memosAPIToken string) *Handlers {
 	h := &Handlers{
 		Tag:           NewTagHandler(services.Tag),
 		RSS:           NewRSSHandler(services.RSS, services.RSSFetcher),
@@ -46,12 +48,14 @@ func NewHandlers(services *service.Services, shutdownChan chan struct{}, memosBa
 		LLMProxy:      NewLLMProxyHandler(services.LLMProxy),
 		Classify:      NewClassifyHandler(services.Classify),
 		ActivityLog:   NewActivityLogHandler(services.ActivityLog),
+		LogCenter:     NewLogCenterHandler(services.LogCenter, apiKey),
 		FileIngestion: NewFileIngestionHandler(services.FileIngestion),
 		LogLevel:      NewLogLevelHandler(),
 		Config:        NewConfigHandler(services.LLMProxy),
 		TodoTxt:       NewTodoTxtHandler(memosBaseURL, memosAPIToken),
 		Search:        NewSearchHandler(services.Search),
 		Report:        NewReportHandler(services.Report),
+		Crawler:       NewCrawlerHandler(services.Crawler),
 	}
 
 	// Set optional handlers

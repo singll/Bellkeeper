@@ -10,11 +10,16 @@ import (
 )
 
 type ActivityLogService struct {
-	repo *repository.ActivityLogRepository
+	repo       *repository.ActivityLogRepository
+	logCenter  *LogCenterService
 }
 
 func NewActivityLogService(repo *repository.ActivityLogRepository) *ActivityLogService {
 	return &ActivityLogService{repo: repo}
+}
+
+func (s *ActivityLogService) SetLogCenter(lc *LogCenterService) {
+	s.logCenter = lc
 }
 
 type LogActivityParams struct {
@@ -28,6 +33,26 @@ type LogActivityParams struct {
 }
 
 func (s *ActivityLogService) LogActivity(p LogActivityParams) {
+	// Delegate to LogCenter if available
+	if s.logCenter != nil {
+		level := "info"
+		if p.Status == "failed" {
+			level = "error"
+		}
+		s.logCenter.LogActivity(LogEntryParams{
+			SourceID:   1, // bellkeeper-core
+			Module:     p.Module,
+			Action:     p.Action,
+			Level:      level,
+			Status:     p.Status,
+			Summary:    p.Summary,
+			Detail:     p.Detail,
+			RefID:      p.RefID,
+			DurationMs: p.DurationMs,
+		})
+		return
+	}
+
 	go func() {
 		detailStr := ""
 		if p.Detail != nil {
