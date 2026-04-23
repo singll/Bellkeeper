@@ -71,6 +71,15 @@ func (r *RSSRepository) UpdateTags(feed *model.RSSFeed, tags []model.Tag) error 
 
 func (r *RSSRepository) GetActive() ([]model.RSSFeed, error) {
 	var feeds []model.RSSFeed
+	if err := r.db.Where("is_active = ? AND is_paused = ?", true, false).Preload("Tags").Find(&feeds).Error; err != nil {
+		return nil, err
+	}
+	return feeds, nil
+}
+
+// GetActiveIncludingPaused returns all active feeds including paused ones (for health dashboards)
+func (r *RSSRepository) GetActiveIncludingPaused() ([]model.RSSFeed, error) {
+	var feeds []model.RSSFeed
 	if err := r.db.Where("is_active = ?", true).Preload("Tags").Find(&feeds).Error; err != nil {
 		return nil, err
 	}

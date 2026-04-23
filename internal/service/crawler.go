@@ -1,0 +1,177 @@
+package service
+
+import (
+	"context"
+	"fmt"
+	"time"
+
+	"github.com/singll/bellkeeper/internal/repository"
+)
+
+// CrawlService provides crawl management operations that wrap the enhanced RSSFetcherService.
+// It serves as the unified entry point for all crawl-related operations, both RSS and future
+// source types (URL seeds, API sources, etc.).
+type CrawlService struct {
+	rssFetcher *RSSFetcherService
+	rssRepo    *repository.RSSRepository
+	activity   *ActivityLogService
+}
+
+// NewCrawlService creates a new crawl service
+func NewCrawlService(
+	rssFetcher *RSSFetcherService,
+	rssRepo *repository.RSSRepository,
+	activity *ActivityLogService,
+) *CrawlService {
+	return &CrawlService{
+		rssFetcher: rssFetcher,
+		rssRepo:    rssRepo,
+		activity:   activity,
+	}
+}
+
+// FetchSource fetches a single RSS source with health tracking
+func (s *CrawlService) FetchSource(ctx context.Context, sourceID uint) (*FetchFeedResult, error) {
+	feed, err := s.rssRepo.GetByID(sourceID)
+	if err != nil {
+		return nil, fmt.Errorf("failed to get source: %w", err)
+	}
+
+	if feed.IsPaused {
+		return &FetchFeedResult{
+			FeedID:   feed.ID,
+			FeedName: feed.Name,
+			Error:    "source is paused — resume it first",
+		}, nil
+	}
+
+	internalResult := s.rssFetcher.FetchFeedInternal(ctx, sourceID)
+
+	// Re-read to get updated stats
+	feed, err = s.rssRepo.GetByID(sourceID)
+	if err != nil {
+		return &FetchFeedResult{
+			FeedID:   sourceID,
+			FeedName: "",
+		}, nil
+	}
+
+	result := &FetchFeedResult{
+		FeedID:     feed.ID,
+		FeedName:   feed.Name,
+		ItemsFound: internalResult.ItemsFound,
+		ItemsNew:   internalResult.ItemsNew,
+		ItemsDup:   internalResult.ItemsDup,
+	}
+	if internalResult.Error != nil {
+		result.Error = internalResult.Error.Error()
+	}
+
+	return result, nil
+}
+
+// FetchAllActiveSources batch fetches all active (non-paused) RSS sources
+func (s *CrawlService) FetchAllActiveSources(ctx context.Context) (*FetchAllResult, error) {
+	return s.rssFetcher.FetchAll(ctx)
+}
+
+// ProcessArticle processes a single RSS item: extract -> dedup -> classify -> ingest.
+// This is called internally by RSSFetcherService.fetchFeed, but can also be invoked
+// manually for ad-hoc article processing.
+func (s *CrawlService) ProcessArticle(ctx context.Context, sourceID uint, url, title string) (*IngestURLResponse, error) {
+	if s.rssFetcher.ingestion == nil {
+		return nil, fmt.Errorf("file ingestion service not available")
+	}
+
+	feed, err := s.rssRepo.GetByID(sourceID)
+	if err != nil {
+		return nil, fmt.Errorf("failed to get source: %w", err)
+	}
+
+	result, err := s.rssFetcher.ingestion.IngestURL(&IngestURLRequest{
+		URL:   url,
+		Title: title,
+	})
+	if err != nil {
+		s.logActivity("crawl", "process_article", "failure",
+			fmt.Sprintf("Article %s from source %s failed: %v", url, feed.Name, err),
+			sourceID, 0)
+		return nil, err
+	}
+
+	s.logActivity("crawl", "process_article", result.Status,
+		fmt.Sprintf("Article %s from source %s: %s", url, feed.Name, result.Status),
+		sourceID, 0)
+
+	return result, nil
+}
+
+// CheckSourceHealth evaluates source health status and returns details
+func (s *CrawlService) CheckSourceHealth(sourceID uint) (*SourceHealthStatus, error) {
+	feed, err := s.rssRepo.GetByID(sourceID)
+	if err != nil {
+		return nil, fmt.Errorf("failed to get source: %w", err)
+	}
+
+	return &SourceHealthStatus{
+		FeedID:              feed.ID,
+		FeedName:            feed.Name,
+		URL:                 feed.URL,
+		Category:            feed.Category,
+		IsActive:            feed.IsActive,
+		IsPaused:            feed.IsPaused,
+		HealthScore:         feed.HealthScore,
+		ConsecutiveFailures: feed.ConsecutiveFailures,
+		LastFailureReason:   feed.LastFailureReason,
+		TotalFetched:        feed.TotalFetched,
+		TotalFailed:         feed.TotalFailed,
+		LastFetchedAt:       feed.LastFetchedAt,
+		PausedAt:            feed.PausedAt,
+	}, nil
+}
+
+// ResumeSource manually resumes a paused source
+func (s *CrawlService) ResumeSource(sourceID uint) error {
+	return s.rssFetcher.ResumeSource(sourceID)
+}
+
+// PauseSource manually pauses an active source
+func (s *CrawlService) PauseSource(sourceID uint) error {
+	return s.rssFetcher.PauseSource(sourceID)
+}
+
+// GetSourceHealthStatus lists health scores for all sources
+func (s *CrawlService) GetSourceHealthStatus() ([]SourceHealthStatus, error) {
+	return s.rssFetcher.GetSourceHealthStatus()
+}
+
+// GetRecentCrawlJobs returns recent crawl job records from activity logs.
+// Since CrawlJob model is for future expansion, we currently derive this
+// from activity_logs with module="rss_fetcher" or "crawl".
+func (s *CrawlService) GetRecentCrawlJobs(page, limit int) (*ActivityLogsPage, error) {
+	if s.activity == nil {
+		return nil, fmt.Errorf("activity log service not available")
+	}
+
+	return s.activity.List(ListActivityLogsQuery{
+		Module: "rss_fetcher",
+		Page:   page,
+		Limit:  limit,
+		Since:  time.Now().Add(-24 * time.Hour),
+	})
+}
+
+// logActivity logs an activity event
+func (s *CrawlService) logActivity(module, action, status, summary string, sourceID uint, durationMs int) {
+	if s.activity == nil {
+		return
+	}
+	s.activity.LogActivity(LogActivityParams{
+		Module:     module,
+		Action:     action,
+		Status:     status,
+		Summary:    summary,
+		RefID:      fmt.Sprintf("source:%d", sourceID),
+		DurationMs: durationMs,
+	})
+}

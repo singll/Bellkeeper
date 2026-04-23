@@ -24,6 +24,7 @@ type RSSRequest struct {
 	Description          string `json:"description"`
 	IsActive             *bool  `json:"is_active"`
 	FetchIntervalMinutes int    `json:"fetch_interval_minutes"`
+	MaxConcurrency       int    `json:"max_concurrency"`
 	TagIDs               []uint `json:"tag_ids"`
 }
 
@@ -75,10 +76,14 @@ func (h *RSSHandler) Create(c *gin.Context) {
 		Description:          req.Description,
 		IsActive:             isActive,
 		FetchIntervalMinutes: req.FetchIntervalMinutes,
+		MaxConcurrency:       req.MaxConcurrency,
 	}
 
 	if feed.FetchIntervalMinutes == 0 {
 		feed.FetchIntervalMinutes = defaults.DefaultFetchInterval
+	}
+	if feed.MaxConcurrency == 0 {
+		feed.MaxConcurrency = 3
 	}
 
 	if err := h.svc.Create(feed, req.TagIDs); err != nil {
@@ -115,6 +120,7 @@ func (h *RSSHandler) Update(c *gin.Context) {
 		feed.IsActive = *req.IsActive
 	}
 	feed.FetchIntervalMinutes = req.FetchIntervalMinutes
+	feed.MaxConcurrency = req.MaxConcurrency
 
 	if err := h.svc.Update(feed, req.TagIDs); err != nil {
 		response.InternalError(c, err.Error())
