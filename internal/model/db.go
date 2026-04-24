@@ -69,6 +69,10 @@ func AutoMigrate(db *gorm.DB) error {
 		return err
 	}
 
+	if err := SeedUncategorizedTag(db); err != nil {
+		return err
+	}
+
 	if err := SeedDatasetMappings(db); err != nil {
 		return err
 	}
@@ -217,6 +221,24 @@ func SeedLogSources(db *gorm.DB) error {
 		}
 	}
 
+	return nil
+}
+
+// SeedUncategorizedTag ensures a tag with id=0 exists for uncategorized articles.
+// File ingestion creates ArticleTag records with TagID=0 by default.
+func SeedUncategorizedTag(db *gorm.DB) error {
+	var count int64
+	db.Table("tags").Where("id = 0").Count(&count)
+	if count == 0 {
+		now := time.Now()
+		if err := db.Exec(
+			"INSERT INTO tags (id, name, description, color, created_at, updated_at) VALUES (0, 'uncategorized', '默认未分类', '#909399', ?, ?)",
+			now, now,
+		).Error; err != nil {
+			return err
+		}
+		middleware.GetLogger().Info("seeded uncategorized tag (id=0)")
+	}
 	return nil
 }
 
