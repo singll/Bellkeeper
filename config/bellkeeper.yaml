@@ -224,6 +224,11 @@ meilisearch:
   api_key: ${MEILI_MASTER_KEY}
   index: knowledge_chunks
 
+# RSS 抓取器配置
+rss_fetcher:
+  enabled: true
+  rsshub_base_url: "http://sp-rsshub:1200"  # RSSHub 实例地址，以 / 开头的 feed URL 会拼接此地址
+
 # 知识库配置
 knowledge:
   enabled: true

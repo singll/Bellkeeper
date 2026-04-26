@@ -72,6 +72,7 @@ func NewServices(repos *repository.Repositories, cfg *config.Config, version str
 			CheckInterval: cfg.RSSFetcher.CheckInterval,
 			MaxPerBatch:   cfg.RSSFetcher.MaxPerBatch,
 			Timeout:       cfg.RSSFetcher.Timeout,
+			RSSHubBaseURL: cfg.RSSFetcher.RSSHubBaseURL,
 		},
 		repos.RSS,
 		fileIngestionSvc,

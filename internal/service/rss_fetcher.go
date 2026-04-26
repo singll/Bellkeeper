@@ -18,8 +18,8 @@ import (
 // Health tracking constants
 const (
 	HealthScoreMax          = 100
-	HealthScoreThreshold    = 20  // auto-pause when health_score drops below this (triggers after MaxRetryAttempts exhausted)
-	HealthScoreDecrement    = 20  // decrease per consecutive failure
+	HealthScoreThreshold    = 20  // auto-unpause when health_score recovers above this
+	HealthScoreDecrement    = 15  // 每次连续失败扣减（5次失败后 health=25，仍可恢复）
 	HealthScoreIncrement    = 10  // increase per successful fetch (capped at 100)
 	HealthScoreRecoveryStep = 5   // gradual recovery per successful fetch after failure
 
@@ -27,6 +27,9 @@ const (
 	RetryDelayMin    = 1 * time.Minute
 	RetryDelayMax    = 2 * time.Hour
 	MaxRetryAttempts = 4
+
+	// 连续失败暂停阈值：5次连续失败才自动暂停（独立于重试调度）
+	PauseThreshold = 5
 )
 
 // retryBackoff returns the delay for a given retry attempt using exponential backoff.
@@ -47,9 +50,10 @@ func retryBackoff(attempt int) time.Duration {
 // RSSFetcherConfig holds configuration for the RSS fetcher
 type RSSFetcherConfig struct {
 	Enabled       bool
-	CheckInterval int // seconds between feed checks
-	MaxPerBatch   int // max feeds to process per check
-	Timeout       int // seconds for each feed fetch
+	CheckInterval int    // seconds between feed checks
+	MaxPerBatch   int    // max feeds to process per check
+	Timeout       int    // seconds for each feed fetch
+	RSSHubBaseURL string // RSSHub 实例地址，用于拼接以 / 开头的相对路径
 }
 
 // retryItem represents a feed scheduled for retry
@@ -291,8 +295,15 @@ func (s *RSSFetcherService) fetchFeed(ctx context.Context, feed *model.RSSFeed) 
 
 	log.Printf("[RSSFetcher] fetching feed: %s (%s)", feed.Name, feed.URL)
 
+	// 拼接 RSSHub 相对路径：以 / 开头的 URL 视为 RSSHub 路径，需加上 base URL
+	feedURL := feed.URL
+	if strings.HasPrefix(feedURL, "/") && s.cfg.RSSHubBaseURL != "" {
+		feedURL = s.cfg.RSSHubBaseURL + feedURL
+		log.Printf("[RSSFetcher] resolved RSSHub URL: %s -> %s", feed.URL, feedURL)
+	}
+
 	// Parse RSS feed with improved error handling
-	rssFeed, err := s.parseFeedWithRetry(fetchCtx, feed.URL)
+	rssFeed, err := s.parseFeedWithRetry(fetchCtx, feedURL)
 	if err != nil {
 		// Record failure in health tracking
 		s.recordFailure(feed, err.Error())
@@ -304,7 +315,7 @@ func (s *RSSFetcherService) fetchFeed(ctx context.Context, feed *model.RSSFeed) 
 
 		// Log activity
 		durationMs := int(time.Since(startTime).Milliseconds())
-		s.logActivity("rss_fetcher", "fetch", "failure",
+		s.logActivity("rss_fetch", "fetch", "failure",
 			fmt.Sprintf("Feed %s fetch failed: %s", feed.Name, err.Error()),
 			feed.ID, durationMs)
 
@@ -324,7 +335,7 @@ func (s *RSSFetcherService) fetchFeed(ctx context.Context, feed *model.RSSFeed) 
 
 	if len(rssFeed.Items) == 0 {
 		log.Printf("[RSSFetcher] no items in feed %s", feed.Name)
-		s.logActivity("rss_fetcher", "fetch", "success",
+		s.logActivity("rss_fetch", "fetch", "success",
 			fmt.Sprintf("Feed %s fetched, 0 items found", feed.Name),
 			feed.ID, int(time.Since(startTime).Milliseconds()))
 		return result
@@ -349,7 +360,7 @@ func (s *RSSFetcherService) fetchFeed(ctx context.Context, feed *model.RSSFeed) 
 		})
 		if err != nil {
 			log.Printf("[RSSFetcher] failed to ingest %s: %v", item.Link, err)
-			s.logActivity("rss_fetcher", "ingest", "failure",
+			s.logActivity("rss_fetch", "ingest", "failure",
 				fmt.Sprintf("Ingest failed for %s: %v", item.Link, err),
 				feed.ID, 0)
 			continue
@@ -358,20 +369,20 @@ func (s *RSSFetcherService) fetchFeed(ctx context.Context, feed *model.RSSFeed) 
 		if ingestResult.Status == "duplicate" {
 			result.ItemsDup++
 			log.Printf("[RSSFetcher] skipped duplicate: %s", item.Link)
-			s.logActivity("rss_fetcher", "ingest", "duplicate",
+			s.logActivity("rss_fetch", "ingest", "duplicate",
 				fmt.Sprintf("Duplicate skipped: %s", item.Link),
 				feed.ID, 0)
 		} else if ingestResult.Status == "success" {
 			result.ItemsNew++
 			log.Printf("[RSSFetcher] ingested: %s -> %s", item.Link, ingestResult.FilePath)
-			s.logActivity("rss_fetcher", "ingest", "success",
+			s.logActivity("rss_fetch", "ingest", "success",
 				fmt.Sprintf("New article ingested: %s", item.Link),
 				feed.ID, 0)
 		}
 	}
 
 	durationMs := int(time.Since(startTime).Milliseconds())
-	s.logActivity("rss_fetcher", "fetch", "success",
+	s.logActivity("rss_fetch", "fetch", "success",
 		fmt.Sprintf("Feed %s fetched: %d items, %d new, %d dup", feed.Name, result.ItemsFound, result.ItemsNew, result.ItemsDup),
 		feed.ID, durationMs)
 
@@ -456,7 +467,7 @@ func (s *RSSFetcherService) recordSuccess(feed *model.RSSFeed) {
 		feed.IsPaused = false
 		feed.PausedAt = nil
 		log.Printf("[RSSFetcher] auto-unpaused feed %d (%s) — health_score recovered to %d", feed.ID, feed.Name, feed.HealthScore)
-		s.logActivity("rss_fetcher", "health", "auto_unpause",
+		s.logActivity("rss_fetch", "health", "auto_unpause",
 			fmt.Sprintf("Feed %s auto-unpaused, health_score=%d", feed.Name, feed.HealthScore),
 			feed.ID, 0)
 	}
@@ -477,14 +488,14 @@ func (s *RSSFetcherService) recordFailure(feed *model.RSSFeed, reason string) {
 	}
 	feed.TotalFailed++
 
-	// Auto-pause only when all retries are exhausted (ConsecutiveFailures > MaxRetryAttempts)
-	// This ensures retries at attempts 1-4 still work before auto-pause kicks in at failure 5+
-	if !feed.IsPaused && feed.ConsecutiveFailures > MaxRetryAttempts {
+	// Auto-pause when consecutive failures reach PauseThreshold (默认5次)
+	// 重试调度使用 MaxRetryAttempts，暂停阈值独立控制
+	if !feed.IsPaused && feed.ConsecutiveFailures >= PauseThreshold {
 		feed.IsPaused = true
 		now := time.Now()
 		feed.PausedAt = &now
 		log.Printf("[RSSFetcher] auto-paused feed %d (%s) — health_score=%d, consecutive_failures=%d", feed.ID, feed.Name, feed.HealthScore, feed.ConsecutiveFailures)
-		s.logActivity("rss_fetcher", "health", "auto_pause",
+		s.logActivity("rss_fetch", "health", "auto_pause",
 			fmt.Sprintf("Feed %s auto-paused, health_score=%d, failures=%d, reason=%s", feed.Name, feed.HealthScore, feed.ConsecutiveFailures, reason),
 			feed.ID, 0)
 	}
@@ -561,7 +572,7 @@ func (s *RSSFetcherService) ResumeSource(feedID uint) error {
 	}
 
 	log.Printf("[RSSFetcher] manually resumed feed %d (%s)", feedID, feed.Name)
-	s.logActivity("rss_fetcher", "health", "manual_resume",
+	s.logActivity("rss_fetch", "health", "manual_resume",
 		fmt.Sprintf("Feed %s manually resumed, health_score set to %d", feed.Name, feed.HealthScore),
 		feedID, 0)
 
@@ -588,7 +599,7 @@ func (s *RSSFetcherService) PauseSource(feedID uint) error {
 	}
 
 	log.Printf("[RSSFetcher] manually paused feed %d (%s)", feedID, feed.Name)
-	s.logActivity("rss_fetcher", "health", "manual_pause",
+	s.logActivity("rss_fetch", "health", "manual_pause",
 		fmt.Sprintf("Feed %s manually paused", feed.Name),
 		feedID, 0)
 
