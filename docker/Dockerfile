@@ -56,6 +56,9 @@ RUN apk add --no-cache ca-certificates tzdata wget python3 py3-pip && \
 COPY --from=backend-builder /app/bellkeeper .
 COPY --from=backend-builder /app/web/dist ./web/dist
 
+# Copy trafilatura wrapper script (trafilatura 2.0 removed __main__.py)
+COPY scripts/trafilatura_extract.py /app/scripts/trafilatura_extract.py
+
 # Copy default config
 COPY config/bellkeeper.yaml ./config/
 

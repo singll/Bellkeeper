@@ -115,8 +115,8 @@ func (s *ExtractorService) extractWithTrafilatura(req *ExtractionRequest) (*Extr
 	ctx, cancel := context.WithTimeout(context.Background(), time.Duration(timeout)*time.Second)
 	defer cancel()
 
-	// Run trafilatura command
-	cmd := exec.CommandContext(ctx, "python3", "-m", "trafilatura", "-u", req.URL, "--json")
+	// 使用 wrapper 脚本调用 trafilatura（trafilatura 2.0 移除了 __main__.py，不再支持 -m 调用）
+	cmd := exec.CommandContext(ctx, "python3", "/app/scripts/trafilatura_extract.py", req.URL, "--timeout", fmt.Sprintf("%d", timeout))
 	var stdout, stderr bytes.Buffer
 	cmd.Stdout = &stdout
 	cmd.Stderr = &stderr

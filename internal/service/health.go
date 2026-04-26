@@ -61,9 +61,9 @@ func (s *HealthService) Detailed() *DetailedHealth {
 	// Check RagFlow (requires API key auth)
 	services["ragflow"] = s.checkRagFlow()
 
-	// Check n8n (only if URL is configured)
-	if s.cfg.N8N.WebhookBaseURL != "" {
-		services["n8n"] = s.checkHTTPService(s.cfg.N8N.WebhookBaseURL + "/healthz")
+	// Check n8n (使用 API 端点 + API Key 认证，避免根路径 404 误判)
+	if s.cfg.N8N.APIBaseURL != "" && s.cfg.N8N.APIKey != "" {
+		services["n8n"] = s.checkN8N()
 	}
 
 	// Check Meilisearch (only if enabled in knowledge config)
@@ -113,6 +113,38 @@ func (s *HealthService) Detailed() *DetailedHealth {
 		Version:  s.version,
 		Services: services,
 		Metrics:  metrics,
+	}
+}
+
+// checkN8N checks n8n health via API endpoint with API key authentication.
+// n8n 根路径返回 404 会导致误判，改用 /api/v1/workflows?limit=1 携带 API Key 探测。
+func (s *HealthService) checkN8N() ServiceStatus {
+	url := s.cfg.N8N.APIBaseURL + "/api/v1/workflows?limit=1"
+	client := httpclient.HealthCheck(time.Duration(defaults.HealthCheckTimeout) * time.Second)
+
+	req, err := http.NewRequest("GET", url, nil)
+	if err != nil {
+		return ServiceStatus{Status: "down", Error: err.Error()}
+	}
+	req.Header.Set("X-N8N-API-KEY", s.cfg.N8N.APIKey)
+
+	start := time.Now()
+	resp, err := client.Do(req)
+	latency := time.Since(start).Milliseconds()
+
+	if err != nil {
+		return ServiceStatus{Status: "down", LatencyMs: latency, Error: err.Error()}
+	}
+	defer resp.Body.Close()
+
+	if resp.StatusCode >= 200 && resp.StatusCode < 400 {
+		return ServiceStatus{Status: "up", LatencyMs: latency}
+	}
+
+	return ServiceStatus{
+		Status:    "unhealthy",
+		LatencyMs: latency,
+		Error:     fmt.Sprintf("HTTP %d", resp.StatusCode),
 	}
 }
 
