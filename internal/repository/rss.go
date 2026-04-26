@@ -1,6 +1,8 @@
 package repository
 
 import (
+	"time"
+
 	"github.com/singll/bellkeeper/internal/model"
 	"gorm.io/gorm"
 )
@@ -84,6 +86,45 @@ func (r *RSSRepository) GetActiveIncludingPaused() ([]model.RSSFeed, error) {
 		return nil, err
 	}
 	return feeds, nil
+}
+
+// BatchUpdatePaused 批量更新源的暂停状态，返回受影响行数
+func (r *RSSRepository) BatchUpdatePaused(ids []uint, paused bool) (int64, error) {
+	if len(ids) == 0 {
+		return 0, nil
+	}
+	now := time.Now()
+	updates := map[string]interface{}{
+		"is_paused":            paused,
+		"consecutive_failures": 0,
+		"last_failure_reason":  "",
+	}
+	if paused {
+		updates["paused_at"] = now
+	} else {
+		updates["paused_at"] = nil
+		updates["health_score"] = 30
+	}
+	result := r.db.Model(&model.RSSFeed{}).Where("id IN ?", ids).Updates(updates)
+	return result.RowsAffected, result.Error
+}
+
+// UpdateAllPaused 更新所有活跃源的暂停状态，返回受影响行数
+func (r *RSSRepository) UpdateAllPaused(paused bool) (int64, error) {
+	now := time.Now()
+	updates := map[string]interface{}{
+		"is_paused":            paused,
+		"consecutive_failures": 0,
+		"last_failure_reason":  "",
+	}
+	if paused {
+		updates["paused_at"] = now
+	} else {
+		updates["paused_at"] = nil
+		updates["health_score"] = 30
+	}
+	result := r.db.Model(&model.RSSFeed{}).Where("is_active = ?", true).Updates(updates)
+	return result.RowsAffected, result.Error
 }
 
 // Search searches RSS feeds by name or URL

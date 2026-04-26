@@ -145,6 +145,50 @@ func (s *CrawlService) GetSourceHealthStatus() ([]SourceHealthStatus, error) {
 	return s.rssFetcher.GetSourceHealthStatus()
 }
 
+// BatchPauseSources 批量暂停源
+func (s *CrawlService) BatchPauseSources(ids []uint) (int64, error) {
+	affected, err := s.rssRepo.BatchUpdatePaused(ids, true)
+	if err != nil {
+		return 0, fmt.Errorf("batch pause failed: %w", err)
+	}
+	s.logActivity("rss_fetch", "batch", "pause",
+		fmt.Sprintf("Batch paused %d sources", affected), 0, 0)
+	return affected, nil
+}
+
+// BatchResumeSources 批量恢复源
+func (s *CrawlService) BatchResumeSources(ids []uint) (int64, error) {
+	affected, err := s.rssRepo.BatchUpdatePaused(ids, false)
+	if err != nil {
+		return 0, fmt.Errorf("batch resume failed: %w", err)
+	}
+	s.logActivity("rss_fetch", "batch", "resume",
+		fmt.Sprintf("Batch resumed %d sources", affected), 0, 0)
+	return affected, nil
+}
+
+// PauseAllSources 暂停所有活跃源
+func (s *CrawlService) PauseAllSources() (int64, error) {
+	affected, err := s.rssRepo.UpdateAllPaused(true)
+	if err != nil {
+		return 0, fmt.Errorf("pause all failed: %w", err)
+	}
+	s.logActivity("rss_fetch", "batch", "pause_all",
+		fmt.Sprintf("Paused all %d active sources", affected), 0, 0)
+	return affected, nil
+}
+
+// ResumeAllSources 恢复所有暂停源
+func (s *CrawlService) ResumeAllSources() (int64, error) {
+	affected, err := s.rssRepo.UpdateAllPaused(false)
+	if err != nil {
+		return 0, fmt.Errorf("resume all failed: %w", err)
+	}
+	s.logActivity("rss_fetch", "batch", "resume_all",
+		fmt.Sprintf("Resumed all %d paused sources", affected), 0, 0)
+	return affected, nil
+}
+
 // GetRecentCrawlJobs returns recent crawl job records from activity logs.
 // Since CrawlJob model is for future expansion, we currently derive this
 // from activity_logs with module="rss_fetcher" or "crawl".

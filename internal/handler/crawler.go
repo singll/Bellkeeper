@@ -6,6 +6,11 @@ import (
 	"github.com/singll/bellkeeper/internal/service"
 )
 
+// batchSourcesRequest 批量操作请求体
+type batchSourcesRequest struct {
+	IDs []uint `json:"ids" binding:"required"`
+}
+
 // CrawlerHandler handles crawl management API endpoints
 type CrawlerHandler struct {
 	svc *service.CrawlService
@@ -89,4 +94,64 @@ func (h *CrawlerHandler) FetchSource(c *gin.Context) {
 	}
 
 	response.Success(c, result)
+}
+
+// BatchPauseSources 批量暂停源
+// POST /api/crawl/sources/batch/pause
+func (h *CrawlerHandler) BatchPauseSources(c *gin.Context) {
+	var req batchSourcesRequest
+	if err := c.ShouldBindJSON(&req); err != nil {
+		response.BadRequest(c, "ids field is required")
+		return
+	}
+
+	affected, err := h.svc.BatchPauseSources(req.IDs)
+	if err != nil {
+		response.InternalError(c, err.Error())
+		return
+	}
+
+	response.Success(c, gin.H{"affected": affected})
+}
+
+// BatchResumeSources 批量恢复源
+// POST /api/crawl/sources/batch/resume
+func (h *CrawlerHandler) BatchResumeSources(c *gin.Context) {
+	var req batchSourcesRequest
+	if err := c.ShouldBindJSON(&req); err != nil {
+		response.BadRequest(c, "ids field is required")
+		return
+	}
+
+	affected, err := h.svc.BatchResumeSources(req.IDs)
+	if err != nil {
+		response.InternalError(c, err.Error())
+		return
+	}
+
+	response.Success(c, gin.H{"affected": affected})
+}
+
+// PauseAllSources 暂停所有活跃源
+// POST /api/crawl/sources/all/pause
+func (h *CrawlerHandler) PauseAllSources(c *gin.Context) {
+	affected, err := h.svc.PauseAllSources()
+	if err != nil {
+		response.InternalError(c, err.Error())
+		return
+	}
+
+	response.Success(c, gin.H{"affected": affected})
+}
+
+// ResumeAllSources 恢复所有暂停源
+// POST /api/crawl/sources/all/resume
+func (h *CrawlerHandler) ResumeAllSources(c *gin.Context) {
+	affected, err := h.svc.ResumeAllSources()
+	if err != nil {
+		response.InternalError(c, err.Error())
+		return
+	}
+
+	response.Success(c, gin.H{"affected": affected})
 }

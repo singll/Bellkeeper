@@ -278,6 +278,11 @@ func registerKnowledgeFilesRoutes(api *gin.RouterGroup, h *handler.KnowledgeFile
 func registerCrawlerRoutes(api *gin.RouterGroup, h *handler.CrawlerHandler) {
 	crawl := api.Group("/crawl")
 	crawl.GET("/sources/health", h.SourceHealth)
+	// 批量操作（固定路径必须在 :id 参数路由之前注册，避免路由冲突）
+	crawl.POST("/sources/batch/pause", h.BatchPauseSources)
+	crawl.POST("/sources/batch/resume", h.BatchResumeSources)
+	crawl.POST("/sources/all/pause", h.PauseAllSources)
+	crawl.POST("/sources/all/resume", h.ResumeAllSources)
 	crawl.POST("/sources/:id/resume", h.ResumeSource)
 	crawl.POST("/sources/:id/pause", h.PauseSource)
 	crawl.GET("/jobs", h.CrawlJobs)
