@@ -280,9 +280,9 @@ func (s *FileIngestionService) sanitizeTitle(title string) string {
 	// Trim hyphens from start and end
 	cleaned = strings.Trim(cleaned, "-")
 
-	// Limit length to 80 characters
-	if len(cleaned) > 80 {
-		cleaned = cleaned[:80]
+	// Limit length to 80 runes (not bytes, to avoid breaking UTF-8)
+	if runeLen := len([]rune(cleaned)); runeLen > 80 {
+		cleaned = string([]rune(cleaned)[:80])
 	}
 
 	return cleaned
