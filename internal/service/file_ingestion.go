@@ -33,7 +33,8 @@ type IngestURLRequest struct {
 	Title    string   `json:"title"`
 	Tags     []string `json:"tags"`
 	Category string   `json:"category"`
-	Layer    string   `json:"layer"` // "raw" or "working"
+	Layer    string   `json:"layer"`    // "raw" or "working"
+	Content  string   `json:"content"`  // 可选：传入已提取的内容，跳过 Extract 步骤
 }
 
 // IngestURLResponse represents the response from URL ingestion
@@ -87,19 +88,29 @@ func (s *FileIngestionService) IngestURL(req *IngestURLRequest) (*IngestURLRespo
 		}, nil
 	}
 
-	// 2. 提取正文
-	extraction, err := s.extractor.Extract(&ExtractionRequest{URL: req.URL})
-	if err != nil || !extraction.Success {
-		errMsg := "extraction failed"
-		if extraction != nil && extraction.Error != "" {
-			errMsg = extraction.Error
+	// 2. 提取正文（如果调用方已传入 Content，跳过 Extract）
+	var extraction *ExtractionResult
+	if req.Content != "" {
+		extraction = &ExtractionResult{
+			Content:   req.Content,
+			Title:     req.Title,
+			Extractor: "provided",
+			Success:   true,
 		}
-		s.logIngestion(req.URL, "extract_failed", errMsg)
-		return &IngestURLResponse{
-			Success:      false,
-			Status:       "extract_failed",
-			ErrorMessage: errMsg,
-		}, fmt.Errorf("extraction failed: %s", errMsg)
+	} else {
+		extraction, err = s.extractor.Extract(&ExtractionRequest{URL: req.URL})
+		if err != nil || !extraction.Success {
+			errMsg := "extraction failed"
+			if extraction != nil && extraction.Error != "" {
+				errMsg = extraction.Error
+			}
+			s.logIngestion(req.URL, "extract_failed", errMsg)
+			return &IngestURLResponse{
+				Success:      false,
+				Status:       "extract_failed",
+				ErrorMessage: errMsg,
+			}, fmt.Errorf("extraction failed: %s", errMsg)
+		}
 	}
 
 	// Use extracted title if not provided

@@ -33,7 +33,7 @@ type LogActivityParams struct {
 }
 
 func (s *ActivityLogService) LogActivity(p LogActivityParams) {
-	// Delegate to LogCenter if available
+	// 同时写入 LogCenter 和 activity_logs 表，保证 /api/logs 端点可查
 	if s.logCenter != nil {
 		level := "info"
 		if p.Status == "failed" {
@@ -50,9 +50,9 @@ func (s *ActivityLogService) LogActivity(p LogActivityParams) {
 			RefID:      p.RefID,
 			DurationMs: p.DurationMs,
 		})
-		return
 	}
 
+	// 始终写入 activity_logs 表（O02 日报等通过 /api/logs 查询此表）
 	go func() {
 		detailStr := ""
 		if p.Detail != nil {

@@ -198,7 +198,7 @@ func (s *CrawlService) GetRecentCrawlJobs(page, limit int) (*ActivityLogsPage, e
 	}
 
 	return s.activity.List(ListActivityLogsQuery{
-		Module: "rss_fetcher",
+		Module: "rss_fetch",
 		Page:   page,
 		Limit:  limit,
 		Since:  time.Now().Add(-24 * time.Hour),
