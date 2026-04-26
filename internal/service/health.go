@@ -119,7 +119,7 @@ func (s *HealthService) Detailed() *DetailedHealth {
 // checkN8N checks n8n health via API endpoint with API key authentication.
 // n8n 根路径返回 404 会导致误判，改用 /api/v1/workflows?limit=1 携带 API Key 探测。
 func (s *HealthService) checkN8N() ServiceStatus {
-	url := s.cfg.N8N.APIBaseURL + "/api/v1/workflows?limit=1"
+	url := s.cfg.N8N.APIBaseURL + "/workflows?limit=1"
 	client := httpclient.HealthCheck(time.Duration(defaults.HealthCheckTimeout) * time.Second)
 
 	req, err := http.NewRequest("GET", url, nil)
