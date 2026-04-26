@@ -3,6 +3,7 @@ package service
 import (
 	"crypto/sha256"
 	"encoding/hex"
+	"errors"
 	"fmt"
 	"net/url"
 	"os"
@@ -14,6 +15,8 @@ import (
 	"github.com/singll/bellkeeper/internal/config"
 	"github.com/singll/bellkeeper/internal/model"
 	"github.com/singll/bellkeeper/internal/repository"
+
+	"gorm.io/gorm"
 )
 
 // FileIngestionService handles file ingestion from URLs
@@ -130,7 +133,7 @@ func (s *FileIngestionService) IngestURL(req *IngestURLRequest) (*IngestURLRespo
 			ExistingTitle: existingArticle.ArticleTitle,
 			ExistingURL:   existingArticle.ArticleURL,
 		}, nil
-	} else if hashErr != nil {
+	} else if hashErr != nil && !errors.Is(hashErr, gorm.ErrRecordNotFound) {
 		// DB 查询失败，不阻止入库，仅记录日志后继续
 		s.logIngestion(req.URL, "hash_check_failed", fmt.Sprintf("Content hash DB check failed: %v", hashErr))
 	}
