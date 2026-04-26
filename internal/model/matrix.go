@@ -181,11 +181,23 @@ func SeedMatrixPlatform(db *gorm.DB) error {
 	}
 
 	for _, ch := range channels {
-		if err := db.Create(&ch).Error; err != nil {
-			log.Printf("warn: failed to seed Matrix channel %q: %v", ch.ChannelName, err)
-			continue
+		var existing MatrixChannel
+		if err := db.Where("channel_name = ?", ch.ChannelName).First(&existing).Error; err == nil {
+			// Channel exists â update RoomID if empty and env var is set
+			if existing.RoomID == "" && ch.RoomID != "" {
+				if err := db.Model(&existing).Update("room_id", ch.RoomID).Error; err != nil {
+					log.Printf("warn: failed to update RoomID for channel %q: %v", ch.ChannelName, err)
+				} else {
+					log.Printf("info: updated RoomID for channel %q from env var", ch.ChannelName)
+				}
+			}
+		} else {
+			if err := db.Create(&ch).Error; err != nil {
+				log.Printf("warn: failed to seed Matrix channel %q: %v", ch.ChannelName, err)
+				continue
+			}
+			log.Printf("info: seeded Matrix channel %q", ch.ChannelName)
 		}
-		log.Printf("info: seeded Matrix channel %q", ch.ChannelName)
 	}
 
 	// Seed default commands

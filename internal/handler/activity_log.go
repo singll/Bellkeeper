@@ -25,6 +25,10 @@ func (h *ActivityLogHandler) List(c *gin.Context) {
 	if s := c.Query("since"); s != "" {
 		if t, err := time.Parse(time.RFC3339, s); err == nil {
 			since = t
+		} else if t, err := time.ParseInLocation("2006-01-02T15:04:05", s, time.Local); err == nil {
+			since = t
+		} else if t, err := time.Parse("2006-01-02", s); err == nil {
+			since = t
 		}
 	}
 
@@ -56,6 +60,10 @@ func (h *ActivityLogHandler) Stats(c *gin.Context) {
 	var since time.Time
 	if s := c.Query("since"); s != "" {
 		if t, err := time.Parse(time.RFC3339, s); err == nil {
+			since = t
+		} else if t, err := time.ParseInLocation("2006-01-02T15:04:05", s, time.Local); err == nil {
+			since = t
+		} else if t, err := time.Parse("2006-01-02", s); err == nil {
 			since = t
 		}
 	}
