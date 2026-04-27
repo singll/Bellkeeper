@@ -35,6 +35,7 @@ config/*.local.yaml
 # Logs
 *.log
 logs/
+!web/src/pages/logs/
 
 # Test coverage
 coverage.out
