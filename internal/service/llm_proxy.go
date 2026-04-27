@@ -276,16 +276,22 @@ func dbChannelToConfig(ch model.LLMChannel) config.ChannelConfig {
 	if apiKey == "" {
 		apiKey = ch.APIKeyEnv
 	}
+	providerType := ch.ProviderType
+	if providerType == "" {
+		providerType = "openai"
+	}
+
 	return config.ChannelConfig{
-		Name:      ch.Name,
-		BaseURL:   ch.BaseURL,
-		APIKey:    apiKey,
-		RPM:       ch.RPM,
-		RPD:       ch.RPD,
-		Priority:  ch.Priority,
-		Models:    ch.GetModels(),
-		IsEnabled: ch.IsEnabled,
-		IsFree:    ch.IsFree,
+		Name:         ch.Name,
+		BaseURL:      ch.BaseURL,
+		APIKey:       apiKey,
+		ProviderType: providerType,
+		RPM:          ch.RPM,
+		RPD:          ch.RPD,
+		Priority:     ch.Priority,
+		Models:       ch.GetModels(),
+		IsEnabled:    ch.IsEnabled,
+		IsFree:       ch.IsFree,
 	}
 }
 
@@ -504,6 +510,8 @@ func (s *LLMProxyService) tryChannel(
 	var lastBody []byte
 	var lastHeaders http.Header
 
+	isAnthropic := ch.Config.ProviderType == "anthropic"
+
 	for attempt := 0; attempt <= maxRetries; attempt++ {
 		// Client-side rate limiting
 		allowed, waitTime := ch.Bucket.TryAcquire()
@@ -524,10 +532,24 @@ func (s *LLMProxyService) tryChannel(
 			return 429, []byte(`{"error":"rate limit: bucket exhausted after retries"}`), nil, nil
 		}
 
+		// Prepare request body and path for Anthropic conversion
+		forwardBody := body
+		forwardPath := path
+		if isAnthropic {
+			converted, err := ConvertOpenAIToAnthropic(body)
+			if err != nil {
+				return 400, []byte(`{"error":"anthropic request conversion failed"}`), nil, fmt.Errorf("anthropic conversion: %w", err)
+			}
+			forwardBody = converted
+			if path == "/v1/chat/completions" {
+				forwardPath = "/v1/messages"
+			}
+		}
+
 		// Forward request upstream
 		start := time.Now()
-		targetURL := strings.TrimRight(ch.Config.BaseURL, "/") + path
-		req, err := http.NewRequest(method, targetURL, bytes.NewReader(body))
+		targetURL := strings.TrimRight(ch.Config.BaseURL, "/") + forwardPath
+		req, err := http.NewRequest(method, targetURL, bytes.NewReader(forwardBody))
 		if err != nil {
 			return 0, nil, nil, fmt.Errorf("create request: %w", err)
 		}
@@ -538,7 +560,13 @@ func (s *LLMProxyService) tryChannel(
 				req.Header.Add(k, v)
 			}
 		}
-		req.Header.Set("Authorization", "Bearer "+ch.Config.APIKey)
+		if isAnthropic {
+			req.Header.Set("x-api-key", ch.Config.APIKey)
+			req.Header.Set("anthropic-version", anthropicVersion)
+			req.Header.Del("Authorization")
+		} else {
+			req.Header.Set("Authorization", "Bearer "+ch.Config.APIKey)
+		}
 		req.Header.Set("Content-Type", "application/json")
 
 		resp, err := ch.Client.Do(req)
@@ -552,6 +580,18 @@ func (s *LLMProxyService) tryChannel(
 
 		respBytes, _ := io.ReadAll(resp.Body)
 		resp.Body.Close()
+
+		// Convert Anthropic response back to OpenAI format
+		if isAnthropic && resp.StatusCode < 500 {
+			converted, err := ConvertAnthropicToOpenAI(respBytes)
+			if err != nil {
+				middleware.GetLogger().Warn("anthropic response conversion failed",
+					zap.String("channel", ch.Config.Name), zap.Error(err))
+			} else {
+				respBytes = converted
+			}
+		}
+
 		lastStatusCode = resp.StatusCode
 		lastBody = respBytes
 		lastHeaders = resp.Header
@@ -621,17 +661,29 @@ func extractModelFromBody(body []byte) string {
 }
 
 func extractTokenUsage(body []byte) (prompt, comp int) {
-	var resp struct {
+	// Try OpenAI format first
+	var openaiResp struct {
 		Usage struct {
 			PromptTokens     int `json:"prompt_tokens"`
 			CompletionTokens int `json:"completion_tokens"`
 		} `json:"usage"`
 	}
-	if err := json.Unmarshal(body, &resp); err != nil {
-		middleware.GetLogger().Warn("failed to extract token usage", zap.Error(err))
-		return 0, 0
+	if err := json.Unmarshal(body, &openaiResp); err == nil && openaiResp.Usage.PromptTokens > 0 {
+		return openaiResp.Usage.PromptTokens, openaiResp.Usage.CompletionTokens
 	}
-	return resp.Usage.PromptTokens, resp.Usage.CompletionTokens
+
+	// Try Anthropic format
+	var anthropicResp struct {
+		Usage struct {
+			InputTokens  int `json:"input_tokens"`
+			OutputTokens int `json:"output_tokens"`
+		} `json:"usage"`
+	}
+	if err := json.Unmarshal(body, &anthropicResp); err == nil && anthropicResp.Usage.InputTokens > 0 {
+		return anthropicResp.Usage.InputTokens, anthropicResp.Usage.OutputTokens
+	}
+
+	return 0, 0
 }
 
 func (s *LLMProxyService) logRequest(channelName, modelName, path string, statusCode int,
@@ -672,6 +724,194 @@ func (s *LLMProxyService) logGroupRequest(channelName, virtualModel, realModel, 
 	// Log with virtual model name so operators can trace group requests
 	s.logRequest(channelName, virtualModel+"→"+realModel, path, statusCode, isRateLimit,
 		0, 0, 0, 0, errMsg, callerID)
+}
+
+// --- Streaming Proxy ---
+
+// StreamResult holds the result of a streaming proxy request.
+type StreamResult struct {
+	StatusCode   int
+	RespHeaders  http.Header
+	BodyReader   io.ReadCloser
+	ProviderType string
+	ChannelName  string
+	ModelName    string
+}
+
+// IsStreamRequest checks if the request body has stream:true.
+func (s *LLMProxyService) IsStreamRequest(body []byte) bool {
+	var req struct {
+		Stream bool `json:"stream"`
+	}
+	if err := json.Unmarshal(body, &req); err != nil {
+		return false
+	}
+	return req.Stream
+}
+
+// ProxyStreamRequest forwards an OpenAI-compatible streaming request.
+// Returns a StreamResult with an open BodyReader that the caller must close.
+func (s *LLMProxyService) ProxyStreamRequest(
+	method, path string,
+	headers http.Header,
+	body []byte,
+	callerID string,
+) (*StreamResult, error) {
+	modelName := extractModelFromBody(body)
+
+	s.mu.RLock()
+	modelGroups := s.modelGroups
+	modelMap := s.modelMap
+	s.mu.RUnlock()
+
+	taskKey := headers.Get("X-Task-Key")
+	if taskKey == "" && callerID != "" && callerID != "unknown" {
+		taskKey = callerID + ":" + modelName
+	}
+
+	// Check virtual model group
+	if group, ok := modelGroups[modelName]; ok {
+		ch, realModel := group.SelectChannel(taskKey)
+		if ch == nil {
+			return nil, fmt.Errorf("no available channel in group %s", modelName)
+		}
+		rewrittenBody := rewriteModel(body, realModel)
+		result, err := s.tryChannelStream(ch, method, path, headers, rewrittenBody, callerID)
+		if err == nil {
+			result.ModelName = modelName + "→" + realModel
+			// Log stream start
+			s.logRequest(ch.Config.Name, modelName+"→"+realModel, path, result.StatusCode, false,
+				0, 0, 0, 0, "", callerID)
+		}
+		return result, err
+	}
+
+	// Direct channel matching
+	channels := findChannelsInMap(modelMap, modelName)
+	if len(channels) == 0 {
+		return nil, fmt.Errorf("no channel available for model: %s", modelName)
+	}
+
+	healthy := s.filterHealthy(channels)
+	if len(healthy) == 0 {
+		return nil, fmt.Errorf("all channels circuit-broken for model: %s", modelName)
+	}
+
+	// Try first healthy channel (no retry for streaming)
+	ch := healthy[0]
+	result, err := s.tryChannelStream(ch, method, path, headers, body, callerID)
+	if err == nil {
+		result.ModelName = modelName
+		s.logRequest(ch.Config.Name, modelName, path, result.StatusCode, false,
+			0, 0, 0, 0, "", callerID)
+	}
+	return result, err
+}
+
+// tryChannelStream sends a streaming request to a single channel.
+// No retries — once a stream starts, you can't retry.
+func (s *LLMProxyService) tryChannelStream(
+	ch *Channel,
+	method, path string,
+	headers http.Header,
+	body []byte,
+	callerID string,
+) (*StreamResult, error) {
+	// Single rate limit check (no retry loop)
+	allowed, waitTime := ch.Bucket.TryAcquire()
+	if !allowed {
+		maxWait := time.Duration(s.cfg.MaxWaitSeconds) * time.Second
+		if waitTime > maxWait {
+			waitTime = maxWait
+		}
+		// For streaming, we can wait once but not retry
+		if waitTime <= maxWait {
+			middleware.GetLogger().Warn("stream bucket throttle, waiting once",
+				zap.String("channel", ch.Config.Name), zap.Duration("wait", waitTime))
+			time.Sleep(waitTime)
+		}
+	}
+
+	isAnthropic := ch.Config.ProviderType == "anthropic"
+
+	forwardBody := body
+	forwardPath := path
+	if isAnthropic {
+		converted, err := ConvertOpenAIToAnthropic(body)
+		if err != nil {
+			return nil, fmt.Errorf("anthropic stream conversion: %w", err)
+		}
+		forwardBody = converted
+		if path == "/v1/chat/completions" {
+			forwardPath = "/v1/messages"
+		}
+	}
+
+	targetURL := strings.TrimRight(ch.Config.BaseURL, "/") + forwardPath
+	req, err := http.NewRequest(method, targetURL, bytes.NewReader(forwardBody))
+	if err != nil {
+		return nil, fmt.Errorf("create stream request: %w", err)
+	}
+
+	for k, vv := range headers {
+		for _, v := range vv {
+			req.Header.Add(k, v)
+		}
+	}
+	if isAnthropic {
+		req.Header.Set("x-api-key", ch.Config.APIKey)
+		req.Header.Set("anthropic-version", anthropicVersion)
+		req.Header.Del("Authorization")
+	} else {
+		req.Header.Set("Authorization", "Bearer "+ch.Config.APIKey)
+	}
+	req.Header.Set("Content-Type", "application/json")
+
+	// Use the underlying http.Client without timeout for streaming
+	// (the httpclient.Client has an overall Timeout which kills long streams)
+	streamClient := ch.Client.UnderlyingClient()
+	// Temporarily remove timeout by creating a request-specific context
+	// Actually, the underlying client.Timeout is the issue — we need a client without it
+	noTimeoutClient := &http.Client{
+		Transport: streamClient.Transport,
+		Timeout:   0,
+	}
+
+	resp, err := noTimeoutClient.Do(req)
+	if err != nil {
+		return nil, fmt.Errorf("upstream stream request: %w", err)
+	}
+
+	if resp.StatusCode >= 400 {
+		respBytes, _ := io.ReadAll(resp.Body)
+		resp.Body.Close()
+
+		// Convert Anthropic error response
+		if isAnthropic {
+			converted, convErr := ConvertAnthropicErrorToOpenAI(respBytes)
+			if convErr == nil {
+				respBytes = converted
+			}
+		}
+
+		return &StreamResult{
+			StatusCode:   resp.StatusCode,
+			BodyReader:   io.NopCloser(bytes.NewReader(respBytes)),
+			RespHeaders:  resp.Header,
+			ProviderType: ch.Config.ProviderType,
+			ChannelName:  ch.Config.Name,
+		}, nil
+	}
+
+	ch.Health.RecordSuccess()
+
+	return &StreamResult{
+		StatusCode:   resp.StatusCode,
+		BodyReader:   resp.Body,
+		RespHeaders:  resp.Header,
+		ProviderType: ch.Config.ProviderType,
+		ChannelName:  ch.Config.Name,
+	}, nil
 }
 
 // --- Management APIs ---

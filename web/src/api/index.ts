@@ -11,6 +11,7 @@ import type {
   LLMGroupStatus,
   LLMChannelConfig,
   LLMModelGroupConfig,
+  LLMProxyLog,
   ActivityLogsPage,
   ModuleStat,
   ParseTask,
@@ -236,6 +237,13 @@ export const llmProxyApi = {
 
   reload: () =>
     request<{ message: string }>('/llm/reload', { method: 'POST' }),
+
+  logs: (channel?: string, limit?: number) => {
+    const p = new URLSearchParams()
+    if (channel) p.set('channel', channel)
+    if (limit) p.set('limit', String(limit))
+    return request<{ data: LLMProxyLog[] }>(`/llm/logs?${p}`)
+  },
 }
 
 // RagFlow API

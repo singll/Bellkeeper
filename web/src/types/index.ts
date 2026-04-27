@@ -143,6 +143,7 @@ export interface LLMChannelConfig {
   name: string
   base_url: string
   api_key_env: string
+  provider_type: string  // "openai" | "anthropic"
   rpm: number
   rpd: number
   priority: number
@@ -364,6 +365,24 @@ export interface KnowledgeSearchResult {
   files: KnowledgeSearchHit[]
   total: number
   query_ms: number
+}
+
+// LLM Proxy Log Types
+
+export interface LLMProxyLog {
+  id: number
+  channel_name: string
+  model: string
+  request_path: string
+  status_code: number
+  is_rate_limit: boolean
+  retry_count: number
+  duration_ms: number
+  prompt_tokens: number
+  comp_tokens: number
+  error_message: string
+  caller_id: string
+  created_at: string
 }
 
 // LLM Proxy Fetch Response Types (for raw fetch in LLMProxy.tsx)

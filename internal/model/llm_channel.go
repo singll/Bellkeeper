@@ -15,8 +15,9 @@ type LLMChannel struct {
 	ID        uint           `gorm:"primaryKey" json:"id"`
 	Name      string         `gorm:"size:100;uniqueIndex;not null" json:"name"`
 	BaseURL   string         `gorm:"size:500;not null" json:"base_url"`
-	APIKeyEnv string         `gorm:"size:200" json:"api_key_env"`
-	RPM       int            `gorm:"default:500" json:"rpm"`
+	APIKeyEnv    string         `gorm:"size:200" json:"api_key_env"`
+	ProviderType string         `gorm:"size:50;default:'openai'" json:"provider_type"`
+	RPM          int            `gorm:"default:500" json:"rpm"`
 	RPD       int            `gorm:"default:50000" json:"rpd"`
 	Priority  int            `gorm:"default:1" json:"priority"`
 	IsFree    bool           `gorm:"default:false" json:"is_free"`

@@ -6,8 +6,9 @@ import LLMProxyOverview from './llm-proxy/LLMProxyOverview'
 import LLMProxyChannels from './llm-proxy/LLMProxyChannels'
 import LLMProxyGroups from './llm-proxy/LLMProxyGroups'
 import LLMProxyConfig from './llm-proxy/LLMProxyConfig'
+import LLMProxyLogs from './llm-proxy/LLMProxyLogs'
 
-type TabKey = 'overview' | 'channels' | 'groups' | 'config'
+type TabKey = 'overview' | 'channels' | 'groups' | 'config' | 'logs'
 
 const LLMProxy: Component = () => {
   const [activeTab, setActiveTab] = createSignal<TabKey>('overview')
@@ -140,6 +141,7 @@ const LLMProxy: Component = () => {
               <li>本页展示 LLM 渠道运行状态和模型组路由信息。</li>
               <li>在「配置」标签页中可添加/编辑/删除渠道和模型组，保存后自动生效。</li>
               <li>渠道 API Key 通过环境变量名引用（如 LLM_SILICONFLOW_API_KEY），需先在 .env 中配置。</li>
+              <li>支持 OpenAI 兼容和 Anthropic (Claude) 两种协议，Anthropic 渠道会自动转换请求/响应格式。</li>
             </ul>
           </div>
         </div>
@@ -158,6 +160,9 @@ const LLMProxy: Component = () => {
         </button>
         <button class={`tab ${activeTab() === 'config' ? 'tab-active' : ''}`} onClick={() => setActiveTab('config')}>
           配置
+        </button>
+        <button class={`tab ${activeTab() === 'logs' ? 'tab-active' : ''}`} onClick={() => setActiveTab('logs')}>
+          调用日志
         </button>
       </div>
 
@@ -207,6 +212,9 @@ const LLMProxy: Component = () => {
                 onRefreshConfigs={handleRefreshConfigs}
                 onRefreshAll={handleRefreshAll}
               />
+            </Match>
+            <Match when={activeTab() === 'logs'}>
+              <LLMProxyLogs channelConfigs={channelConfigs()} />
             </Match>
           </Switch>
         </Show>

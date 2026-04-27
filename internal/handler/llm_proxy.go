@@ -1,8 +1,11 @@
 package handler
 
 import (
+	"bufio"
 	"io"
+	"net/http"
 	"strconv"
+	"strings"
 
 	"github.com/gin-gonic/gin"
 	"github.com/singll/bellkeeper/internal/model"
@@ -33,6 +36,15 @@ func (h *LLMProxyHandler) Proxy(c *gin.Context) {
 		callerID = "unknown"
 	}
 
+	if h.svc.IsStreamRequest(body) {
+		h.proxyStream(c, path, body, callerID)
+	} else {
+		h.proxyBuffered(c, path, body, callerID)
+	}
+}
+
+// proxyBuffered handles non-streaming proxy requests (original behavior).
+func (h *LLMProxyHandler) proxyBuffered(c *gin.Context, path string, body []byte, callerID string) {
 	statusCode, respBody, respHeaders, err := h.svc.ProxyRequest(
 		c.Request.Method, path, c.Request.Header, body, callerID,
 	)
@@ -48,6 +60,95 @@ func (h *LLMProxyHandler) Proxy(c *gin.Context) {
 	}
 
 	c.Data(statusCode, "application/json", respBody)
+}
+
+// proxyStream handles streaming proxy requests.
+func (h *LLMProxyHandler) proxyStream(c *gin.Context, path string, body []byte, callerID string) {
+	result, err := h.svc.ProxyStreamRequest(
+		c.Request.Method, path, c.Request.Header, body, callerID,
+	)
+	if err != nil {
+		response.InternalError(c, err.Error())
+		return
+	}
+	defer result.BodyReader.Close()
+
+	// Non-200 responses: read body fully and return as JSON error
+	if result.StatusCode != 200 {
+		errBody, _ := io.ReadAll(result.BodyReader)
+		if ct := result.RespHeaders.Get("Content-Type"); ct != "" {
+			c.Header("Content-Type", ct)
+		}
+		c.Data(result.StatusCode, "application/json", errBody)
+		return
+	}
+
+	// Set SSE headers
+	c.Header("Content-Type", "text/event-stream")
+	c.Header("Cache-Control", "no-cache")
+	c.Header("Connection", "keep-alive")
+	c.Header("X-Accel-Buffering", "no")
+
+	if result.ProviderType == "anthropic" {
+		h.streamAnthropicToOpenAI(c, result.BodyReader)
+	} else {
+		h.streamPassthrough(c, result.BodyReader)
+	}
+}
+
+// streamPassthrough transparently forwards SSE data from an OpenAI-compatible upstream.
+func (h *LLMProxyHandler) streamPassthrough(c *gin.Context, bodyReader io.ReadCloser) {
+	flusher, ok := c.Writer.(http.Flusher)
+	if !ok {
+		response.InternalError(c, "streaming not supported")
+		return
+	}
+
+	buf := make([]byte, 4096)
+	for {
+		n, err := bodyReader.Read(buf)
+		if n > 0 {
+			c.Writer.Write(buf[:n])
+			flusher.Flush()
+		}
+		if err != nil {
+			break
+		}
+	}
+}
+
+// streamAnthropicToOpenAI converts Anthropic SSE events to OpenAI SSE format on the fly.
+func (h *LLMProxyHandler) streamAnthropicToOpenAI(c *gin.Context, bodyReader io.ReadCloser) {
+	flusher, ok := c.Writer.(http.Flusher)
+	if !ok {
+		response.InternalError(c, "streaming not supported")
+		return
+	}
+
+	converter := service.NewAnthropicSSEConverter()
+	scanner := bufio.NewScanner(bodyReader)
+	scanner.Buffer(make([]byte, 0, 64*1024), 1024*1024)
+
+	var eventType string
+	for scanner.Scan() {
+		line := scanner.Text()
+
+		if strings.HasPrefix(line, "event: ") {
+			eventType = strings.TrimPrefix(line, "event: ")
+			continue
+		}
+
+		if strings.HasPrefix(line, "data: ") {
+			data := strings.TrimPrefix(line, "data: ")
+			output := converter.ConvertEvent(eventType, data)
+			if output != "" {
+				c.Writer.Write([]byte(output))
+				flusher.Flush()
+			}
+			eventType = ""
+			continue
+		}
+	}
 }
 
 // ChannelsStatus returns current status of all channels.

@@ -64,8 +64,9 @@ type ModelGroupMember struct {
 type ChannelConfig struct {
 	Name      string   `mapstructure:"name"`
 	BaseURL   string   `mapstructure:"base_url"`
-	APIKey    string   `mapstructure:"api_key"`
-	RawAPIKey string   `mapstructure:"-"` // Pre-expansion value, set by Load()
+	APIKey       string   `mapstructure:"api_key"`
+	ProviderType string   `mapstructure:"provider_type"`
+	RawAPIKey    string   `mapstructure:"-"` // Pre-expansion value, set by Load()
 	RPM       int      `mapstructure:"rpm"`
 	RPD       int      `mapstructure:"rpd"`
 	Priority  int      `mapstructure:"priority"`

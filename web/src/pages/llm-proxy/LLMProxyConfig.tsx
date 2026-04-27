@@ -26,6 +26,7 @@ const LLMProxyConfig: Component<LLMProxyConfigProps> = (props) => {
     name: '',
     base_url: '',
     api_key_env: '',
+    provider_type: 'openai' as string,
     rpm: 500,
     rpd: 50000,
     priority: 1,
@@ -51,6 +52,7 @@ const LLMProxyConfig: Component<LLMProxyConfigProps> = (props) => {
         name: ch.name,
         base_url: ch.base_url,
         api_key_env: ch.api_key_env,
+        provider_type: ch.provider_type || 'openai',
         rpm: ch.rpm,
         rpd: ch.rpd,
         priority: ch.priority,
@@ -64,6 +66,7 @@ const LLMProxyConfig: Component<LLMProxyConfigProps> = (props) => {
         name: '',
         base_url: '',
         api_key_env: '',
+        provider_type: 'openai',
         rpm: 500,
         rpd: 50000,
         priority: 1,
@@ -186,6 +189,12 @@ const LLMProxyConfig: Component<LLMProxyConfigProps> = (props) => {
     }))
   }
 
+  const baseUrlPlaceholder = () => {
+    const pt = chForm().provider_type
+    if (pt === 'anthropic') return '如 https://api.anthropic.com (不含 /v1)'
+    return '如 https://api.siliconflow.cn (不含 /v1)'
+  }
+
   return (
     <div class="space-y-6">
       {/* Channel Config */}
@@ -214,6 +223,7 @@ const LLMProxyConfig: Component<LLMProxyConfigProps> = (props) => {
                 <tr>
                   <th>名称</th>
                   <th>Base URL</th>
+                  <th>协议</th>
                   <th>API Key 变量</th>
                   <th>RPM / RPD</th>
                   <th>优先级</th>
@@ -228,6 +238,11 @@ const LLMProxyConfig: Component<LLMProxyConfigProps> = (props) => {
                     <tr>
                       <td class="font-medium text-white">{ch.name}</td>
                       <td class="text-xs text-dark-300 max-w-[200px] truncate">{ch.base_url}</td>
+                      <td>
+                        <span class={`badge ${ch.provider_type === 'anthropic' ? 'badge-warning' : 'badge-gray'}`}>
+                          {ch.provider_type === 'anthropic' ? 'Anthropic' : 'OpenAI'}
+                        </span>
+                      </td>
                       <td class="font-mono text-xs text-dark-300">{ch.api_key_env || '--'}</td>
                       <td>{ch.rpm} / {ch.rpd}</td>
                       <td>{ch.priority}</td>
@@ -321,13 +336,22 @@ const LLMProxyConfig: Component<LLMProxyConfigProps> = (props) => {
               <input class="input" value={chForm().name} onInput={(e) => setChForm((p) => ({ ...p, name: e.currentTarget.value }))} placeholder="如 siliconflow" />
             </div>
             <div>
-              <label class="label">API Key 环境变量</label>
-              <input class="input" value={chForm().api_key_env} onInput={(e) => setChForm((p) => ({ ...p, api_key_env: e.currentTarget.value }))} placeholder="如 LLM_SILICONFLOW_API_KEY" />
+              <label class="label">供应商类型</label>
+              <select class="input" value={chForm().provider_type} onChange={(e) => setChForm((p) => ({ ...p, provider_type: e.currentTarget.value }))}>
+                <option value="openai">OpenAI 兼容</option>
+                <option value="anthropic">Anthropic (Claude)</option>
+              </select>
             </div>
           </div>
-          <div>
-            <label class="label">Base URL</label>
-            <input class="input" value={chForm().base_url} onInput={(e) => setChForm((p) => ({ ...p, base_url: e.currentTarget.value }))} placeholder="如 https://api.siliconflow.cn (不含 /v1)" />
+          <div class="grid grid-cols-1 sm:grid-cols-2 gap-4">
+            <div>
+              <label class="label">Base URL</label>
+              <input class="input" value={chForm().base_url} onInput={(e) => setChForm((p) => ({ ...p, base_url: e.currentTarget.value }))} placeholder={baseUrlPlaceholder()} />
+            </div>
+            <div>
+              <label class="label">API Key 环境变量</label>
+              <input class="input" value={chForm().api_key_env} onInput={(e) => setChForm((p) => ({ ...p, api_key_env: e.currentTarget.value }))} placeholder={chForm().provider_type === 'anthropic' ? '如 LLM_ANTHROPIC_API_KEY' : '如 LLM_SILICONFLOW_API_KEY'} />
+            </div>
           </div>
           <div class="grid grid-cols-2 sm:grid-cols-4 gap-4">
             <div>
