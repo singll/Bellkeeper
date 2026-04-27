@@ -314,6 +314,27 @@
   .code {
     @apply px-1.5 py-0.5 bg-dark-700 rounded text-sm font-mono text-primary-300;
   }
+
+  /* Hero Cards */
+  .hero-card {
+    @apply card card-hover relative overflow-hidden border-l-4;
+  }
+
+  .hero-card-knowledge {
+    @apply border-l-blue-500 bg-gradient-to-br from-blue-500/10 to-blue-500/5;
+  }
+
+  .hero-card-llm {
+    @apply border-l-amber-500 bg-gradient-to-br from-amber-500/10 to-amber-500/5;
+  }
+
+  .hero-card-logs {
+    @apply border-l-emerald-500 bg-gradient-to-br from-emerald-500/10 to-emerald-500/5;
+  }
+
+  .hero-card-matrix {
+    @apply border-l-violet-500 bg-gradient-to-br from-violet-500/10 to-violet-500/5;
+  }
 }
 
 /* Utilities */

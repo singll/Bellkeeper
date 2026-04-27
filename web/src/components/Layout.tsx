@@ -15,6 +15,8 @@ interface NavGroup {
   icon: JSX.Element
   items: NavItem[]
   defaultExpanded?: boolean
+  accentColor?: string
+  isMoreSection?: boolean
 }
 
 // Icon components
@@ -133,17 +135,89 @@ const FolderIcon = () => (
   </svg>
 )
 
-const ArchiveIcon = () => (
-  <svg class="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-    <path stroke-linecap="round" stroke-linejoin="round" stroke-width="1.5" d="M5 8h14M5 8a2 2 0 110-4h14a2 2 0 110 4M5 8v10a2 2 0 002 2h10a2 2 0 002-2V8m-9 4h4" />
-  </svg>
-)
-
 const BookIcon = () => (
   <svg class="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
     <path stroke-linecap="round" stroke-linejoin="round" stroke-width="1.5" d="M12 6.253v13m0-13C10.832 5.477 9.246 5 7.5 5S4.168 5.477 3 6.253v13C4.168 18.477 5.754 18 7.5 18s3.332.477 4.5 1.253m0-13C13.168 5.477 14.754 5 16.5 5c1.747 0 3.332.477 4.5 1.253v13C19.832 18.477 18.247 18 16.5 18c-1.746 0-3.332.477-4.5 1.253" />
   </svg>
 )
+
+const ChannelIcon = () => (
+  <svg class="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+    <path stroke-linecap="round" stroke-linejoin="round" stroke-width="1.5" d="M8.111 16.404a5.5 5.5 0 017.778 0M12 20h.01m-7.08-7.071c3.904-3.905 10.236-3.905 14.141 0M1.394 9.393c5.857-5.857 15.355-5.857 21.213 0" />
+  </svg>
+)
+
+const GroupIcon = () => (
+  <svg class="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+    <path stroke-linecap="round" stroke-linejoin="round" stroke-width="1.5" d="M17 20h5v-2a3 3 0 00-5.356-1.857M17 20H7m10 0v-2c0-.656-.126-1.283-.356-1.857M7 20H2v-2a3 3 0 015.356-1.857M7 20v-2c0-.656.126-1.283.356-1.857m0 0a5.002 5.002 0 019.288 0M15 7a3 3 0 11-6 0 3 3 0 016 0zm6 3a2 2 0 11-4 0 2 2 0 014 0zM7 10a2 2 0 11-4 0 2 2 0 014 0z" />
+  </svg>
+)
+
+const ConfigIcon = () => (
+  <svg class="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+    <path stroke-linecap="round" stroke-linejoin="round" stroke-width="1.5" d="M10.325 4.317c.426-1.756 2.924-1.756 3.35 0a1.724 1.724 0 002.573 1.066c1.543-.94 3.31.826 2.37 2.37a1.724 1.724 0 001.065 2.572c1.756.426 1.756 2.924 0 3.35a1.724 1.724 0 00-1.066 2.573c.94 1.543-.826 3.31-2.37 2.37a1.724 1.724 0 00-2.572 1.065c-.426 1.756-2.924 1.756-3.35 0a1.724 1.724 0 00-2.573-1.066c-1.543.94-3.31-.826-2.37-2.37a1.724 1.724 0 00-1.065-2.572c-1.756-.426-1.756-2.924 0-3.35a1.724 1.724 0 001.066-2.573c-.94-1.543.826-3.31 2.37-2.37.996.608 2.296.07 2.572-1.065z" />
+    <path stroke-linecap="round" stroke-linejoin="round" stroke-width="1.5" d="M15 12a3 3 0 11-6 0 3 3 0 016 0z" />
+  </svg>
+)
+
+const LogListIcon = () => (
+  <svg class="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+    <path stroke-linecap="round" stroke-linejoin="round" stroke-width="1.5" d="M4 6h16M4 10h16M4 14h16M4 18h16" />
+  </svg>
+)
+
+const DashboardTabIcon = () => (
+  <svg class="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+    <path stroke-linecap="round" stroke-linejoin="round" stroke-width="1.5" d="M9 19v-6a2 2 0 00-2-2H5a2 2 0 00-2 2v6a2 2 0 002 2h2a2 2 0 002-2zm0 0V9a2 2 0 012-2h2a2 2 0 012 2v10m-6 0a2 2 0 002 2h2a2 2 0 002-2m0 0V5a2 2 0 012-2h2a2 2 0 012 2v14a2 2 0 01-2 2h-2a2 2 0 01-2-2z" />
+  </svg>
+)
+
+const AlertIcon = () => (
+  <svg class="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+    <path stroke-linecap="round" stroke-linejoin="round" stroke-width="1.5" d="M15 17h5l-1.405-1.405A2.032 2.032 0 0118 14.158V11a6.002 6.002 0 00-4-5.659V5a2 2 0 10-4 0v.341C7.67 6.165 6 8.388 6 11v3.159c0 .538-.214 1.055-.595 1.436L4 17h5m6 0v1a3 3 0 11-6 0v-1m6 0H9" />
+  </svg>
+)
+
+const SourceIcon = () => (
+  <svg class="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+    <path stroke-linecap="round" stroke-linejoin="round" stroke-width="1.5" d="M5 12h14M5 12a2 2 0 01-2-2V6a2 2 0 012-2h14a2 2 0 012 2v4a2 2 0 01-2 2M5 12a2 2 0 00-2 2v4a2 2 0 002 2h14a2 2 0 002-2v-4a2 2 0 00-2-2m-2-4h.01M17 16h.01" />
+  </svg>
+)
+
+const ParseTaskIcon = () => (
+  <svg class="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+    <path stroke-linecap="round" stroke-linejoin="round" stroke-width="1.5" d="M4 4v5h.582m15.356 2A8.001 8.001 0 004.582 9m0 0H9m11 11v-5h-.581m0 0a8.003 8.003 0 01-15.357-2m15.357 2H15" />
+  </svg>
+)
+
+// Accent color class maps
+const accentTextClass: Record<string, string> = {
+  blue: 'text-blue-400',
+  amber: 'text-amber-400',
+  emerald: 'text-emerald-400',
+  violet: 'text-violet-400',
+}
+
+const accentBgLight: Record<string, string> = {
+  blue: 'bg-blue-500/10',
+  amber: 'bg-amber-500/10',
+  emerald: 'bg-emerald-500/10',
+  violet: 'bg-violet-500/10',
+}
+
+const accentBgActive: Record<string, string> = {
+  blue: 'bg-blue-500/20',
+  amber: 'bg-amber-500/20',
+  emerald: 'bg-emerald-500/20',
+  violet: 'bg-violet-500/20',
+}
+
+const accentBorderLeft: Record<string, string> = {
+  blue: 'border-l-2 border-l-blue-500/50',
+  amber: 'border-l-2 border-l-amber-500/50',
+  emerald: 'border-l-2 border-l-emerald-500/50',
+  violet: 'border-l-2 border-l-violet-500/50',
+}
 
 // Navigation groups
 const navGroups: NavGroup[] = [
@@ -153,11 +227,7 @@ const navGroups: NavGroup[] = [
     icon: <DashboardIcon />,
     defaultExpanded: true,
     items: [
-      {
-        path: '/',
-        label: '仪表盘',
-        icon: <DashboardIcon />,
-      },
+      { path: '/', label: '仪表盘', icon: <DashboardIcon /> },
     ],
   },
   {
@@ -165,22 +235,42 @@ const navGroups: NavGroup[] = [
     label: '知识库',
     icon: <BookIcon />,
     defaultExpanded: true,
+    accentColor: 'blue',
     items: [
       { path: '/knowledge/files', label: '文件管理', icon: <FolderIcon /> },
       { path: '/knowledge/search', label: '知识搜索', icon: <SearchIcon /> },
       { path: '/knowledge/ask', label: '知识问答', icon: <LLMProxyIcon /> },
       { path: '/rss', label: '订阅源', icon: <RSSIcon /> },
       { path: '/tags', label: '标签', icon: <TagIcon /> },
+      { path: '/datasets', label: '数据集', icon: <DatasetIcon /> },
     ],
   },
   {
-    id: 'ai',
-    label: 'AI 服务',
+    id: 'llm',
+    label: 'LLM',
     icon: <LLMProxyIcon />,
     defaultExpanded: true,
+    accentColor: 'amber',
     items: [
-      { path: '/llm-proxy', label: 'LLM Proxy', icon: <LLMProxyIcon /> },
-      { path: '/workflows', label: 'Workflows', icon: <WorkflowIcon /> },
+      { path: '/llm', label: '总览', icon: <DashboardIcon /> },
+      { path: '/llm/channels', label: '渠道', icon: <ChannelIcon /> },
+      { path: '/llm/groups', label: '模型组', icon: <GroupIcon /> },
+      { path: '/llm/config', label: '配置', icon: <ConfigIcon /> },
+      { path: '/llm/logs', label: '调用日志', icon: <LogListIcon /> },
+    ],
+  },
+  {
+    id: 'logs',
+    label: '日志',
+    icon: <LogsIcon />,
+    defaultExpanded: true,
+    accentColor: 'emerald',
+    items: [
+      { path: '/logs', label: '日志浏览器', icon: <LogListIcon /> },
+      { path: '/logs/dashboard', label: '仪表盘', icon: <DashboardTabIcon /> },
+      { path: '/logs/sources', label: '日志源', icon: <SourceIcon /> },
+      { path: '/logs/alerts', label: '告警规则', icon: <AlertIcon /> },
+      { path: '/logs/parse-tasks', label: '解析任务', icon: <ParseTaskIcon /> },
     ],
   },
   {
@@ -188,6 +278,7 @@ const navGroups: NavGroup[] = [
     label: 'Matrix',
     icon: <MatrixIcon />,
     defaultExpanded: true,
+    accentColor: 'violet',
     items: [
       { path: '/matrix', label: '总览', icon: <MatrixIcon /> },
       { path: '/matrix/rooms', label: '房间管理', icon: <MatrixRoomIcon /> },
@@ -199,22 +290,15 @@ const navGroups: NavGroup[] = [
     ],
   },
   {
-    id: 'archive',
-    label: '归档',
-    icon: <ArchiveIcon />,
-    defaultExpanded: true,
-    items: [
-      { path: '/documents', label: '文档库', icon: <DocumentIcon /> },
-    ],
-  },
-  {
-    id: 'system',
-    label: '系统',
+    id: 'more',
+    label: '更多',
     icon: <SettingsIcon />,
-    defaultExpanded: true,
+    defaultExpanded: false,
+    isMoreSection: true,
     items: [
-      { path: '/logs', label: '日志中心', icon: <LogsIcon /> },
-      { path: '/settings', label: '设置', icon: <SettingsIcon /> },
+      { path: '/workflows', label: '工作流', icon: <WorkflowIcon /> },
+      { path: '/documents', label: '文档库', icon: <DocumentIcon /> },
+      { path: '/settings', label: '系统设置', icon: <SettingsIcon /> },
     ],
   },
 ]
@@ -236,7 +320,6 @@ const Layout: Component<RouteSectionProps> = (props) => {
       if (saved) {
         setExpandedGroups(JSON.parse(saved))
       } else {
-        // Initialize with defaults
         const defaults: Record<string, boolean> = {}
         navGroups.forEach(g => { defaults[g.id] = g.defaultExpanded ?? true })
         setExpandedGroups(defaults)
@@ -357,55 +440,66 @@ const Layout: Component<RouteSectionProps> = (props) => {
         <nav class="flex-1 px-3 py-4 space-y-1 overflow-y-auto scrollbar-hide">
           <Show when={!sidebarCollapsed()} fallback={<CollapsedNav />}>
             <For each={navGroups}>
-              {(group) => (
-                <div class="mb-2">
-                  {/* Group header */}
-                  <button
-                    class={`w-full flex items-center justify-between px-3 py-2 rounded-lg transition-colors
-                            ${hasActiveItem(group.items)
-                              ? 'bg-primary-500/10 text-primary-300'
-                              : 'text-dark-400 hover:bg-dark-700/50 hover:text-dark-200'
-                            }`}
-                    onClick={() => toggleGroup(group.id)}
-                  >
-                    <div class="flex items-center gap-2">
-                      <span class={hasActiveItem(group.items) ? 'text-primary-400' : ''}>
-                        {group.icon}
-                      </span>
-                      <span class="text-sm font-medium">{group.label}</span>
-                    </div>
-                    <span
-                      class={`transition-transform ${expandedGroups()[group.id] ? 'rotate-90' : ''}`}
-                    >
-                      <ChevronIcon />
-                    </span>
-                  </button>
+              {(group) => {
+                const accent = group.accentColor
+                const isMore = group.isMoreSection
 
-                  {/* Group items */}
-                  <Show when={expandedGroups()[group.id]}>
-                    <div class="mt-1 ml-2 pl-2 border-l border-dark-600/30 space-y-0.5">
-                      <For each={group.items}>
-                        {(item) => (
-                          <A
-                            href={item.path}
-                            class={`flex items-center gap-3 px-3 py-2 rounded-lg transition-all duration-200
-                                    ${isActive(item.path)
-                                      ? 'bg-primary-500/20 text-primary-300 shadow-sm'
-                                      : 'text-dark-400 hover:bg-dark-700/50 hover:text-dark-200'
-                                    }`}
-                            onClick={() => setMobileMenuOpen(false)}
-                          >
-                            <span class={`flex-shrink-0 ${isActive(item.path) ? 'text-primary-400' : ''}`}>
-                              {item.icon}
-                            </span>
-                            <span class="text-sm font-medium">{item.label}</span>
-                          </A>
-                        )}
-                      </For>
-                    </div>
-                  </Show>
-                </div>
-              )}
+                return (
+                  <div class="mb-2">
+                    {/* More section separator */}
+                    <Show when={isMore}>
+                      <div class="border-t border-dark-600/30 my-3" />
+                    </Show>
+
+                    {/* Group header */}
+                    <button
+                      class={`w-full flex items-center justify-between px-3 py-2 rounded-lg transition-colors
+                              ${hasActiveItem(group.items)
+                                ? `${accent ? accentBgLight[accent] : 'bg-primary-500/10'} ${accent ? accentTextClass[accent] : 'text-primary-300'}`
+                                : isMore ? 'text-dark-500 hover:bg-dark-700/30 hover:text-dark-400' : 'text-dark-400 hover:bg-dark-700/50 hover:text-dark-200'
+                              }
+                              ${isMore ? 'text-xs uppercase tracking-wider font-medium' : ''}`}
+                      onClick={() => toggleGroup(group.id)}
+                    >
+                      <div class="flex items-center gap-2">
+                        <span class={hasActiveItem(group.items) && accent ? accentTextClass[accent] : ''}>
+                          {group.icon}
+                        </span>
+                        <span class={isMore ? 'text-xs' : 'text-sm font-medium'}>{group.label}</span>
+                      </div>
+                      <span
+                        class={`transition-transform ${expandedGroups()[group.id] ? 'rotate-90' : ''}`}
+                      >
+                        <ChevronIcon />
+                      </span>
+                    </button>
+
+                    {/* Group items */}
+                    <Show when={expandedGroups()[group.id]}>
+                      <div class={`mt-1 ml-2 space-y-0.5 ${accent ? accentBorderLeft[accent] : 'border-l border-dark-600/30'} pl-2`}>
+                        <For each={group.items}>
+                          {(item) => (
+                            <A
+                              href={item.path}
+                              class={`flex items-center gap-3 px-3 py-2 rounded-lg transition-all duration-200
+                                      ${isActive(item.path)
+                                        ? `${accent ? accentBgActive[accent] : 'bg-primary-500/20'} ${accent ? accentTextClass[accent] : 'text-primary-300'} shadow-sm`
+                                        : isMore ? 'text-dark-500 hover:text-dark-300 hover:bg-dark-700/30' : 'text-dark-400 hover:bg-dark-700/50 hover:text-dark-200'
+                                      }`}
+                              onClick={() => setMobileMenuOpen(false)}
+                            >
+                              <span class={`flex-shrink-0 ${isActive(item.path) && accent ? accentTextClass[accent] : ''}`}>
+                                {item.icon}
+                              </span>
+                              <span class={`font-medium ${isMore ? 'text-xs' : 'text-sm'}`}>{item.label}</span>
+                            </A>
+                          )}
+                        </For>
+                      </div>
+                    </Show>
+                  </div>
+                )
+              }}
             </For>
           </Show>
         </nav>
@@ -456,21 +550,24 @@ const CollapsedNav: Component = () => {
   return (
     <div class="space-y-1">
       <For each={navGroups}>
-        {(group) => (
-          <A
-            href={group.items[0].path}
-            class={`flex justify-center p-3 rounded-xl transition-all
-                    ${isActive(group.items[0].path)
-                      ? 'bg-primary-500/20 text-primary-300'
-                      : 'text-dark-400 hover:bg-dark-700/50 hover:text-dark-200'
-                    }`}
-            title={group.label}
-          >
-            <span class={isActive(group.items[0].path) ? 'text-primary-400' : ''}>
-              {group.icon}
-            </span>
-          </A>
-        )}
+        {(group) => {
+          const accent = group.accentColor
+          return (
+            <A
+              href={group.items[0].path}
+              class={`flex justify-center p-3 rounded-xl transition-all
+                      ${isActive(group.items[0].path)
+                        ? `${accent ? accentBgActive[accent] : 'bg-primary-500/20'} ${accent ? accentTextClass[accent] : 'text-primary-300'}`
+                        : group.isMoreSection ? 'text-dark-600 hover:text-dark-400' : 'text-dark-400 hover:bg-dark-700/50 hover:text-dark-200'
+                      }`}
+              title={group.label}
+            >
+              <span class={isActive(group.items[0].path) && accent ? accentTextClass[accent] : ''}>
+                {group.icon}
+              </span>
+            </A>
+          )
+        }}
       </For>
     </div>
   )
