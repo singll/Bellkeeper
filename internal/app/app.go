@@ -191,6 +191,11 @@ func (a *App) setupMatrixInfra() error {
 	a.services.SetNotificationService(notifySvc)
 	a.handlers.MatrixNotify = handler.NewMatrixNotifyHandler(notifySvc)
 
+	// Wire notification into crawl queue
+	if a.services.CrawlQueue != nil {
+		a.services.CrawlQueue.SetNotificationService(notifySvc)
+	}
+
 	// Notification worker
 	notifySender := service.NewNotificationSender(nil, a.repos)
 	a.notifyWorker = worker.NewNotificationWorker(a.cfg.NATS, a.natsClient, notifySender, a.cfg.Matrix.MaxRetry)
@@ -278,6 +283,12 @@ func (a *App) startBackgroundTasks() {
 	} else {
 		a.logger.Info("[RSSFetcher] RSS fetcher disabled")
 	}
+
+	// Crawl queue
+	if a.services.CrawlQueue != nil {
+		a.services.CrawlQueue.Start(context.Background())
+		a.logger.Info("[CrawlQueue] crawl queue started")
+	}
 }
 
 // SetupHTTP configures the Gin router and HTTP server.
@@ -357,6 +368,9 @@ func (a *App) Shutdown() error {
 	}
 
 	// Core services
+	if a.services.CrawlQueue != nil {
+		a.services.CrawlQueue.Stop()
+	}
 	if a.services.LLMProxy != nil {
 		a.services.LLMProxy.Stop()
 	}

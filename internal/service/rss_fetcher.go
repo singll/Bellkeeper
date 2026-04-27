@@ -76,6 +76,9 @@ type RSSFetcherService struct {
 	running    bool
 	mu         sync.RWMutex
 
+	// Crawl queue (optional, set via SetCrawlQueueService)
+	crawlQueue *CrawlQueueService
+
 	// Retry queue
 	retryQueue []retryItem
 	retryMu    sync.Mutex
@@ -130,6 +133,11 @@ func NewRSSFetcherService(
 // SetActivityLogService sets the activity log service for observability
 func (s *RSSFetcherService) SetActivityLogService(activity *ActivityLogService) {
 	s.activity = activity
+}
+
+// SetCrawlQueueService sets the crawl queue service for async processing
+func (s *RSSFetcherService) SetCrawlQueueService(cq *CrawlQueueService) {
+	s.crawlQueue = cq
 }
 
 // Start starts the RSS fetcher background loop
@@ -350,6 +358,25 @@ func (s *RSSFetcherService) fetchFeed(ctx context.Context, feed *model.RSSFeed) 
 			continue
 		}
 
+		// Use crawl queue if available (async, fast enqueue)
+		if s.crawlQueue != nil {
+			_, err := s.crawlQueue.Enqueue(feed.ID, item.Link, item.Title, "auto", nil)
+			if err != nil {
+				log.Printf("[RSSFetcher] failed to enqueue %s: %v", item.Link, err)
+				s.logActivity("rss_fetch", "enqueue", "failure",
+					fmt.Sprintf("Enqueue failed for %s: %v", item.Link, err),
+					feed.ID, 0)
+			} else {
+				result.ItemsNew++
+				log.Printf("[RSSFetcher] enqueued: %s", item.Link)
+				s.logActivity("rss_fetch", "enqueue", "success",
+					fmt.Sprintf("Enqueued: %s", item.Link),
+					feed.ID, 0)
+			}
+			continue
+		}
+
+		// Fallback: direct ingestion (backward compatible)
 		if s.ingestion == nil {
 			continue
 		}

@@ -27,6 +27,7 @@ type Repositories struct {
 	MatrixCommandLog   *MatrixCommandLogRepository
 	MatrixSyncState    *MatrixSyncStateRepository
 	MatrixUserRole     *MatrixUserRoleRepository
+	CrawlJob           *CrawlJobRepository
 }
 
 // NewRepositories creates all repository instances
@@ -53,5 +54,6 @@ func NewRepositories(db *gorm.DB) *Repositories {
 		MatrixCommandLog:   NewMatrixCommandLogRepository(db),
 		MatrixSyncState:    NewMatrixSyncStateRepository(db),
 		MatrixUserRole:     NewMatrixUserRoleRepository(db),
+		CrawlJob:           NewCrawlJobRepository(db),
 	}
 }

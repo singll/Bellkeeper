@@ -39,6 +39,11 @@ func Setup(r *gin.Engine, handlers *handler.Handlers, mode string, apiKey string
 	registerSearchRoutes(api, handlers.Search)
 	registerCrawlerRoutes(api, handlers.Crawler)
 
+	// Crawl queue routes
+	if handlers.CrawlQueue != nil {
+		registerCrawlQueueRoutes(api, handlers.CrawlQueue)
+	}
+
 	// Matrix notification routes
 	if handlers.MatrixNotify != nil {
 		registerMatrixNotifyRoutes(api, handlers.MatrixNotify)
@@ -287,6 +292,17 @@ func registerCrawlerRoutes(api *gin.RouterGroup, h *handler.CrawlerHandler) {
 	crawl.POST("/sources/:id/pause", h.PauseSource)
 	crawl.GET("/jobs", h.CrawlJobs)
 	crawl.POST("/fetch/:sourceId", h.FetchSource)
+}
+
+func registerCrawlQueueRoutes(api *gin.RouterGroup, h *handler.CrawlQueueHandler) {
+	queue := api.Group("/crawl/queue")
+	queue.GET("/stats", h.Stats)
+	queue.GET("/jobs", h.ListJobs)
+	queue.POST("/jobs/:id/retry", h.RetryJob)
+	queue.GET("/workers", h.Workers)
+	queue.GET("/blocked", h.Blocked)
+	queue.POST("/blocked/:id/unblock", h.Unblock)
+	queue.POST("/enqueue", h.Enqueue)
 }
 
 func registerLogCenterRoutes(api *gin.RouterGroup, h *handler.LogCenterHandler) {

@@ -23,6 +23,7 @@ type Services struct {
 	FileIngestion *FileIngestionService
 	Search        *SearchService
 	Report        *ReportService
+	CrawlQueue    *CrawlQueueService
 	// Optional services (initialized in main.go with infra dependencies)
 	Notification *NotificationService
 	MatrixAdmin  *AdminService
@@ -84,6 +85,13 @@ func NewServices(repos *repository.Repositories, cfg *config.Config, version str
 	// Create crawl service (wraps RSS fetcher with management operations)
 	crawlSvc := NewCrawlService(rssFetcherSvc, repos.RSS, activityLogSvc)
 
+	// Create crawl queue service (if enabled)
+	var crawlQueueSvc *CrawlQueueService
+	if cfg.CrawlQueue.Enabled {
+		crawlQueueSvc = NewCrawlQueueService(cfg.CrawlQueue, repos.CrawlJob, extractorSvc, fileIngestionSvc, activityLogSvc)
+		rssFetcherSvc.SetCrawlQueueService(crawlQueueSvc)
+	}
+
 	return &Services{
 		Tag:            NewTagService(repos.Tag),
 		RSS:            NewRSSService(repos.RSS, repos.Tag),
@@ -101,6 +109,7 @@ func NewServices(repos *repository.Repositories, cfg *config.Config, version str
 		FileIngestion:  fileIngestionSvc,
 		Search:          NewSearchService(repos.Tag, repos.ArticleTag, repos.RSS),
 		Report:          NewReportService(cfg.FileIngestion.BasePath),
+		CrawlQueue:     crawlQueueSvc,
 	}
 }
 

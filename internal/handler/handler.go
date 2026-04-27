@@ -26,6 +26,7 @@ type Handlers struct {
 	Search        *SearchHandler
 	Report        *ReportHandler
 	Crawler       *CrawlerHandler
+	CrawlQueue    *CrawlQueueHandler
 	// Optional handlers
 	MatrixNotify *MatrixNotifyHandler
 	MatrixAdmin  *MatrixAdminHandler
@@ -56,6 +57,11 @@ func NewHandlers(services *service.Services, shutdownChan chan struct{}, apiKey,
 		Search:        NewSearchHandler(services.Search),
 		Report:        NewReportHandler(services.Report),
 		Crawler:       NewCrawlerHandler(services.Crawler),
+	}
+
+	// Set crawl queue handler (if available)
+	if services.CrawlQueue != nil {
+		h.CrawlQueue = NewCrawlQueueHandler(services.CrawlQueue)
 	}
 
 	// Set optional handlers

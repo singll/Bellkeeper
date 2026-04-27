@@ -25,6 +25,7 @@ type Config struct {
 	Memos         MemosConfig         `mapstructure:"memos"`
 	Meilisearch   MeilisearchConfig   `mapstructure:"meilisearch"`
 	Knowledge     KnowledgeConfig     `mapstructure:"knowledge"`
+	CrawlQueue    CrawlQueueConfig    `mapstructure:"crawl_queue"`
 }
 
 type LLMProxyConfig struct {
@@ -218,6 +219,21 @@ type RSSFetcherConfig struct {
 	RSSHubBaseURL string `mapstructure:"rsshub_base_url"` // RSSHub 实例地址，用于拼接以 / 开头的相对路径
 }
 
+// CrawlQueueConfig 爬取队列配置
+type CrawlQueueConfig struct {
+	Enabled             bool     `mapstructure:"enabled"`
+	FirecrawlWorkers    int      `mapstructure:"firecrawl_workers"`
+	TrafilaturaWorkers  int      `mapstructure:"trafilatura_workers"`
+	AutoWorkers         int      `mapstructure:"auto_workers"`
+	PollInterval        int      `mapstructure:"poll_interval"`        // 秒
+	MaxRetries          int      `mapstructure:"max_retries"`
+	RetryBackoffBase    int      `mapstructure:"retry_backoff_base"`   // 秒
+	RetryBackoffMax     int      `mapstructure:"retry_backoff_max"`    // 秒
+	DeadLetterThreshold int      `mapstructure:"dead_letter_threshold"`
+	PaywallThreshold    int      `mapstructure:"paywall_threshold"`    // 连续空内容次数
+	BlockedDomains      []string `mapstructure:"blocked_domains"`      // 预设付费墙域名
+}
+
 // ScanDirConfig 扫描目录配置
 type ScanDirConfig struct {
 	Path  string `mapstructure:"path"`
@@ -407,4 +423,21 @@ func setDefaults(v *viper.Viper) {
 	v.SetDefault("rss_fetcher.max_per_batch", 5)
 	v.SetDefault("rss_fetcher.timeout", 30)
 	v.SetDefault("rss_fetcher.rsshub_base_url", "")
+
+	// Crawl Queue
+	v.SetDefault("crawl_queue.enabled", true)
+	v.SetDefault("crawl_queue.firecrawl_workers", 3)
+	v.SetDefault("crawl_queue.trafilatura_workers", 2)
+	v.SetDefault("crawl_queue.auto_workers", 2)
+	v.SetDefault("crawl_queue.poll_interval", 5)
+	v.SetDefault("crawl_queue.max_retries", 4)
+	v.SetDefault("crawl_queue.retry_backoff_base", 60)
+	v.SetDefault("crawl_queue.retry_backoff_max", 7200)
+	v.SetDefault("crawl_queue.dead_letter_threshold", 6)
+	v.SetDefault("crawl_queue.paywall_threshold", 2)
+	v.SetDefault("crawl_queue.blocked_domains", []string{
+		"wsj.com", "nytimes.com", "reuters.com", "bloomberg.com",
+		"medium.com", "ft.com", "economist.com", "wired.com",
+		"technologyreview.com", "scientificamerican.com",
+	})
 }
