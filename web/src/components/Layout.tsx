@@ -347,8 +347,7 @@ const Layout: Component<RouteSectionProps> = (props) => {
   }
 
   const isActive = (path: string) => {
-    if (path === '/') return location.pathname === '/'
-    return location.pathname.startsWith(path)
+    return location.pathname === path
   }
 
   const hasActiveItem = (items: NavItem[]) => {
@@ -543,8 +542,7 @@ const CollapsedNav: Component = () => {
   const location = useLocation()
 
   const isActive = (path: string) => {
-    if (path === '/') return location.pathname === '/'
-    return location.pathname.startsWith(path)
+    return location.pathname === path
   }
 
   return (
