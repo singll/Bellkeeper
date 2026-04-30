@@ -152,6 +152,7 @@ type ListCrawlJobOpts struct {
 	Status      model.CrawlJobStatus
 	Domain      string
 	ChannelType string
+	Since       time.Time // only return jobs updated after this time
 	Page        int
 	Limit       int
 }
@@ -170,6 +171,9 @@ func (r *CrawlJobRepository) List(opts ListCrawlJobOpts) ([]model.CrawlJob, int6
 	}
 	if opts.ChannelType != "" {
 		tx = tx.Where("channel_type = ?", opts.ChannelType)
+	}
+	if !opts.Since.IsZero() {
+		tx = tx.Where("updated_at >= ?", opts.Since)
 	}
 
 	if err := tx.Count(&total).Error; err != nil {
@@ -237,6 +241,17 @@ func (r *CrawlJobRepository) GetBlockedSince(since time.Time) ([]model.CrawlJob,
 	return jobs, err
 }
 
+// GetDeadSince returns dead jobs updated after a given time.
+// Uses updated_at (not created_at) because dead is a terminal state —
+// updated_at reflects when the job transitioned to dead.
+func (r *CrawlJobRepository) GetDeadSince(since time.Time) ([]model.CrawlJob, error) {
+	var jobs []model.CrawlJob
+	err := r.db.Where("status = ? AND updated_at >= ?", model.CrawlJobDead, since).
+		Order("updated_at DESC").
+		Find(&jobs).Error
+	return jobs, err
+}
+
 // CountByDomainAndStatus counts jobs for a domain with a given status since a time.
 func (r *CrawlJobRepository) CountByDomainAndStatus(domain string, status model.CrawlJobStatus, since time.Time) (int64, error) {
 	var count int64
@@ -254,6 +269,20 @@ func (r *CrawlJobRepository) RecoverOrphanedJobs() error {
 			"status":     string(model.CrawlJobPending),
 			"started_at": nil,
 		}).Error
+}
+
+// RecoverStaleRunningJobs resets jobs that have been in "running" status
+// longer than staleTimeout. Unlike RecoverOrphanedJobs (which resets all
+// running jobs for crash recovery), this targets jobs stuck due to goroutine leaks.
+func (r *CrawlJobRepository) RecoverStaleRunningJobs(staleTimeout time.Duration) (int64, error) {
+	cutoff := time.Now().Add(-staleTimeout)
+	result := r.db.Model(&model.CrawlJob{}).
+		Where("status = ? AND started_at < ?", string(model.CrawlJobRunning), cutoff).
+		Updates(map[string]interface{}{
+			"status":     string(model.CrawlJobPending),
+			"started_at": nil,
+		})
+	return result.RowsAffected, result.Error
 }
 
 // GetRecentlyBlockedDomains returns domains that have been blocked recently.

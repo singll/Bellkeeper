@@ -217,6 +217,10 @@ func (s *CrawlQueueService) Start(ctx context.Context) {
 	// Rebuild blocked domain list from DB
 	s.rebuildBlockedDomains()
 
+	// Launch periodic stale job recovery
+	s.wg.Add(1)
+	go s.staleJobRecoveryLoop(ctx)
+
 	// Launch workers
 	s.startWorkers(ctx, "firecrawl", s.cfg.FirecrawlWorkers)
 	s.startWorkers(ctx, "trafilatura", s.cfg.TrafilaturaWorkers)
@@ -233,6 +237,32 @@ func (s *CrawlQueueService) Stop() {
 	}
 	s.wg.Wait()
 	log.Printf("[CrawlQueue] all workers stopped")
+}
+
+// staleJobRecoveryLoop periodically recovers jobs stuck in "running" state.
+func (s *CrawlQueueService) staleJobRecoveryLoop(ctx context.Context) {
+	defer s.wg.Done()
+
+	interval := time.Duration(s.cfg.RecoveryIntervalMinutes) * time.Minute
+	staleTimeout := time.Duration(s.cfg.StaleTimeoutMinutes) * time.Minute
+	ticker := time.NewTicker(interval)
+	defer ticker.Stop()
+
+	for {
+		select {
+		case <-ctx.Done():
+			return
+		case <-ticker.C:
+			recovered, err := s.repo.RecoverStaleRunningJobs(staleTimeout)
+			if err != nil {
+				log.Printf("[CrawlQueue] stale job recovery error: %v", err)
+				continue
+			}
+			if recovered > 0 {
+				log.Printf("[CrawlQueue] recovered %d stale running jobs (stale>%s)", recovered, staleTimeout)
+			}
+		}
+	}
 }
 
 // startWorkers launches n workers for a given channel type.

@@ -2,6 +2,7 @@ package handler
 
 import (
 	"strconv"
+	"time"
 
 	"github.com/singll/bellkeeper/internal/model"
 	"github.com/singll/bellkeeper/internal/pkg/response"
@@ -38,6 +39,7 @@ func (h *CrawlQueueHandler) ListJobs(c *gin.Context) {
 	status := c.DefaultQuery("status", "")
 	domain := c.DefaultQuery("domain", "")
 	channelType := c.DefaultQuery("channel_type", "")
+	sinceStr := c.DefaultQuery("since", "")
 
 	page, _ := strconv.Atoi(pageStr)
 	limit, _ := strconv.Atoi(limitStr)
@@ -48,10 +50,20 @@ func (h *CrawlQueueHandler) ListJobs(c *gin.Context) {
 		limit = 50
 	}
 
+	var sinceTime time.Time
+	if sinceStr != "" {
+		if t, err := time.Parse(time.RFC3339, sinceStr); err == nil {
+			sinceTime = t
+		} else if t, err := time.Parse("2006-01-02", sinceStr); err == nil {
+			sinceTime = t
+		}
+	}
+
 	opts := repository.ListCrawlJobOpts{
 		Status:      model.CrawlJobStatus(status),
 		Domain:      domain,
 		ChannelType: channelType,
+		Since:       sinceTime,
 		Page:        page,
 		Limit:       limit,
 	}
