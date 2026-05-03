@@ -2,6 +2,7 @@ package service
 
 import (
 	"log"
+	"os"
 
 	"github.com/singll/bellkeeper/internal/model"
 	"github.com/singll/bellkeeper/internal/pkg/urlutil"
@@ -159,10 +160,22 @@ type URLCheckResult struct {
 	MatchType  string `json:"match_type,omitempty"` // "exact", "normalized", "fuzzy"
 }
 
-// verifyAndClean checks if the document still exists in RAGFlow via the verifier.
-// If the document is gone, it cleans up stale article_tags and returns false.
-// If no verifier is set, returns true (assume exists).
+// verifyAndClean checks if the article still exists (local file + RAGFlow document).
+// If the article is gone (file deleted or RAGFlow document removed), it cleans up
+// stale article_tags and returns false, allowing re-crawl.
 func (s *DatasetService) verifyAndClean(at *model.ArticleTag) bool {
+	// 1. Check local file existence — if .md was removed, treat as stale
+	if at.FilePath != "" {
+		if _, err := os.Stat(at.FilePath); os.IsNotExist(err) {
+			log.Printf("info: article file %s no longer exists, cleaning up stale article_tags for document %s", at.FilePath, at.DocumentID)
+			if delErr := s.repo.DeleteArticleTagsByDocumentIDs([]string{at.DocumentID}); delErr != nil {
+				log.Printf("warn: failed to clean up stale article_tags for document %s: %v", at.DocumentID, delErr)
+			}
+			return false
+		}
+	}
+
+	// 2. Check RAGFlow document existence via the verifier
 	if s.verifier == nil {
 		return true
 	}
