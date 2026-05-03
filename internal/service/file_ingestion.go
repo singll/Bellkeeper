@@ -125,32 +125,14 @@ func (s *FileIngestionService) IngestURL(req *IngestURLRequest) (*IngestURLRespo
 	contentHash := s.calculateHash(extraction.Content)
 	existingArticle, hashErr := s.articleRepo.GetByContentHash(contentHash)
 	if hashErr == nil && existingArticle != nil {
-		// 哈希匹配，但需要验证关联文件是否仍然存在
-		if existingArticle.FilePath != "" {
-			if _, statErr := os.Stat(existingArticle.FilePath); os.IsNotExist(statErr) {
-				// 文件已删除，清理旧记录，允许重新入库
-				s.logIngestion(req.URL, "stale_hash_cleanup", fmt.Sprintf("Content hash matches but file deleted: %s, cleaning up stale record for %s", existingArticle.FilePath, existingArticle.ArticleURL))
-				s.articleRepo.Delete(existingArticle.ID)
-			} else {
-				// 文件仍存在，确实是重复内容
-				s.logIngestion(req.URL, "duplicate_content", fmt.Sprintf("Content hash matches existing article: %s (%s)", existingArticle.ArticleTitle, existingArticle.ArticleURL))
-				return &IngestURLResponse{
-					Success:       false,
-					Status:        "duplicate_content",
-					ExistingTitle: existingArticle.ArticleTitle,
-					ExistingURL:   existingArticle.ArticleURL,
-				}, nil
-			}
-		} else {
-			// 无 FilePath 记录（可能是旧数据），保守处理视为重复
-			s.logIngestion(req.URL, "duplicate_content", fmt.Sprintf("Content hash matches existing article (no file_path): %s (%s)", existingArticle.ArticleTitle, existingArticle.ArticleURL))
-			return &IngestURLResponse{
-				Success:       false,
-				Status:        "duplicate_content",
-				ExistingTitle: existingArticle.ArticleTitle,
-				ExistingURL:   existingArticle.ArticleURL,
-			}, nil
-		}
+		// 哈希匹配：内容已存在，跳过写入
+		s.logIngestion(req.URL, "duplicate_content", fmt.Sprintf("Content hash matches existing article: %s (%s)", existingArticle.ArticleTitle, existingArticle.ArticleURL))
+		return &IngestURLResponse{
+			Success:       false,
+			Status:        "duplicate_content",
+			ExistingTitle: existingArticle.ArticleTitle,
+			ExistingURL:   existingArticle.ArticleURL,
+		}, nil
 	} else if hashErr != nil && !errors.Is(hashErr, gorm.ErrRecordNotFound) {
 		// DB 查询失败，不阻止入库，仅记录日志后继续
 		s.logIngestion(req.URL, "hash_check_failed", fmt.Sprintf("Content hash DB check failed: %v", hashErr))
