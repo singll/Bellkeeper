@@ -110,7 +110,6 @@ func registerRagFlowRoutes(api *gin.RouterGroup, h *handler.RagFlowHandler) {
 	api.POST("/ragflow/ingest/obsidian", h.IngestObsidianNote)
 	api.POST("/ragflow/upload", h.Upload)
 	api.POST("/ragflow/upload/with-routing", h.UploadWithRouting)
-	api.GET("/ragflow/check-url", h.CheckURL)
 	api.GET("/ragflow/documents", h.ListDocuments)
 	api.DELETE("/ragflow/documents/:id", h.DeleteDocument)
 	// 高级操作

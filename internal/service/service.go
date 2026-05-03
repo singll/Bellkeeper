@@ -46,8 +46,8 @@ func NewServices(repos *repository.Repositories, cfg *config.Config, version str
 	// Create ragflow service with activity log
 	ragFlowSvc := NewRagFlowService(cfg.RagFlow, repos.DatasetMapping, repos.Tag, activityLogSvc)
 
-	// Create dataset service with document verifier
-	datasetSvc := NewDatasetService(repos.DatasetMapping, repos.Tag, ragFlowSvc.DocumentExistsInRagFlow)
+	// Create dataset service
+	datasetSvc := NewDatasetService(repos.DatasetMapping, repos.Tag)
 
 	// Create classify service with activity log
 	classifySvc := NewClassifyService(cfg.Classify, cfg.Server.APIKey, activityLogSvc)

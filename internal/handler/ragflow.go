@@ -69,24 +69,6 @@ func (h *RagFlowHandler) IngestObsidianNote(c *gin.Context) {
 	response.Success(c, result)
 }
 
-func (h *RagFlowHandler) CheckURL(c *gin.Context) {
-	url := c.Query("url")
-	if url == "" {
-		response.BadRequest(c, "url parameter required")
-		return
-	}
-
-	normalize := c.DefaultQuery("normalize", "true") == "true"
-
-	result, err := h.svc.CheckURLEnhanced(url, normalize)
-	if err != nil {
-		response.InternalError(c, err.Error())
-		return
-	}
-
-	response.Success(c, result)
-}
-
 func (h *RagFlowHandler) ListDocuments(c *gin.Context) {
 	datasetID := c.Query("dataset_id")
 	if datasetID == "" {
