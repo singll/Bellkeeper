@@ -1,6 +1,7 @@
 package service
 
 import (
+	"bufio"
 	"fmt"
 	"os"
 	"path/filepath"
@@ -33,14 +34,17 @@ type WriteRequest struct {
 
 // WriteResult is the result of a write operation.
 type WriteResult struct {
-	FilePath   string `json:"file_path"`
-	Channel    string `json:"channel"`
-	Appended   bool   `json:"appended"`
+	FilePath  string `json:"file_path"`
+	Channel   string `json:"channel"`
+	Merged    bool   `json:"merged"`
+	NewSections int  `json:"new_sections"`
+	NewLines  int    `json:"new_lines"`
 }
 
 // WriteMessage writes a markdown message to the knowledge base.
 // Path: {basePath}/working/messages/{channel}/{date}.md
-// If the file already exists today, appends with a separator and increments suffix.
+// If the file already exists, performs incremental merge: only adds new content,
+// never deletes or overwrites existing sections.
 func (s *ReportService) WriteMessage(req *WriteRequest) (*WriteResult, error) {
 	if req.Channel == "" || req.Content == "" {
 		return nil, fmt.Errorf("channel and content are required")
@@ -59,10 +63,50 @@ func (s *ReportService) WriteMessage(req *WriteRequest) (*WriteResult, error) {
 		return nil, fmt.Errorf("create directory: %w", err)
 	}
 
-	// Determine file path (handle same-day multiple messages)
-	filePath, appended := s.resolveFilePath(dir, dateStr)
+	filePath := filepath.Join(dir, dateStr+".md")
 
-	// Build content with frontmatter
+	// Build frontmatter for this entry
+	frontmatter := s.buildFrontmatter(req, timestamp)
+
+	// Strip frontmatter from existing content for merge comparison
+	newContent := req.Content
+
+	// Check if file already exists
+	existingBytes, err := os.ReadFile(filePath)
+	if err == nil && len(existingBytes) > 0 {
+		// File exists — do incremental merge
+		existingContent := stripFrontmatter(string(existingBytes))
+		merged, newSections, newLines := mergeMarkdown(existingContent, newContent)
+		finalContent := frontmatter + "\n\n" + merged + "\n"
+		if err := os.WriteFile(filePath, []byte(finalContent), 0644); err != nil {
+			return nil, fmt.Errorf("write merged file: %w", err)
+		}
+		return &WriteResult{
+			FilePath:    filePath,
+			Channel:     req.Channel,
+			Merged:      true,
+			NewSections: newSections,
+			NewLines:    newLines,
+		}, nil
+	}
+
+	// File does not exist — create new
+	finalContent := frontmatter + "\n\n" + newContent + "\n"
+	if err := os.WriteFile(filePath, []byte(finalContent), 0644); err != nil {
+		return nil, fmt.Errorf("write file: %w", err)
+	}
+
+	return &WriteResult{
+		FilePath:    filePath,
+		Channel:     req.Channel,
+		Merged:      false,
+		NewSections: 0,
+		NewLines:    0,
+	}, nil
+}
+
+// buildFrontmatter generates YAML frontmatter for a report entry.
+func (s *ReportService) buildFrontmatter(req *WriteRequest, timestamp string) string {
 	var sb strings.Builder
 	sb.WriteString("---\n")
 	sb.WriteString(fmt.Sprintf("created: %s\n", timestamp))
@@ -81,65 +125,153 @@ func (s *ReportService) WriteMessage(req *WriteRequest) (*WriteResult, error) {
 	sb.WriteString("tags: [bot-message, ")
 	sb.WriteString(req.Channel)
 	sb.WriteString("]\n")
-	sb.WriteString("---\n\n")
-
-	if appended {
-		sb.WriteString("---\n\n") // separator between entries
-	}
-	sb.WriteString(req.Content)
-	sb.WriteString("\n")
-
-	// Write: append or create
-	var err error
-	if appended {
-		f, openErr := os.OpenFile(filePath, os.O_APPEND|os.O_WRONLY, 0644)
-		if openErr != nil {
-			return nil, fmt.Errorf("open file: %w", openErr)
-		}
-		_, err = f.WriteString(sb.String())
-		f.Close()
-	} else {
-		err = os.WriteFile(filePath, []byte(sb.String()), 0644)
-	}
-	if err != nil {
-		return nil, fmt.Errorf("write file: %w", err)
-	}
-
-	return &WriteResult{
-		FilePath: filePath,
-		Channel:  req.Channel,
-		Appended: appended,
-	}, nil
+	sb.WriteString("---")
+	return sb.String()
 }
 
-// resolveFilePath finds the correct file path for today's date, handling multiple messages per day.
-func (s *ReportService) resolveFilePath(dir, dateStr string) (string, bool) {
-	// Try base file first
-	base := filepath.Join(dir, dateStr+".md")
-	if _, err := os.Stat(base); os.IsNotExist(err) {
-		return base, false
+// stripFrontmatter removes YAML frontmatter (--- ... ---) from markdown content.
+func stripFrontmatter(content string) string {
+	if !strings.HasPrefix(content, "---") {
+		return content
 	}
+	end := strings.Index(content[3:], "---")
+	if end < 0 {
+		return content
+	}
+	// Skip past the closing ---
+	rest := content[3+end+3:]
+	rest = strings.TrimLeft(rest, "\n\r")
+	return rest
+}
 
-	// File exists, find next available suffix
-	for i := 1; i < 100; i++ {
-		path := filepath.Join(dir, fmt.Sprintf("%s_%d.md", dateStr, i))
-		if _, err := os.Stat(path); os.IsNotExist(err) {
-			return path, false
+// markdownSection represents a section of markdown delimited by #### headings.
+type markdownSection struct {
+	heading string // e.g. "#### 服务状态"
+	body    string // content after the heading until next #### or EOF
+}
+
+// parseSections splits markdown into the title line (### heading) and #### sections.
+func parseSections(content string) (string, []markdownSection) {
+	var title string
+	var sections []markdownSection
+
+	scanner := bufio.NewScanner(strings.NewReader(content))
+	var current *markdownSection
+	var bodyLines []string
+
+	flush := func() {
+		if current != nil {
+			current.body = strings.TrimRight(strings.Join(bodyLines, "\n"), "\n\r")
+			sections = append(sections, *current)
 		}
 	}
 
-	// Fallback: append to the last file
-	for i := 99; i >= 0; i-- {
-		var path string
-		if i == 0 {
-			path = filepath.Join(dir, dateStr+".md")
+	for scanner.Scan() {
+		line := scanner.Text()
+		if strings.HasPrefix(line, "#### ") {
+			flush()
+			current = &markdownSection{heading: line}
+			bodyLines = nil
+		} else if strings.HasPrefix(line, "### ") && title == "" {
+			title = line
+		} else if current != nil {
+			bodyLines = append(bodyLines, line)
 		} else {
-			path = filepath.Join(dir, fmt.Sprintf("%s_%d.md", dateStr, i))
+			// Content before first #### (after title) — ignore for section merge
 		}
-		if _, err := os.Stat(path); err == nil {
-			return path, true
+	}
+	flush()
+	return title, sections
+}
+
+// mergeMarkdown merges newContent into existingContent with incremental-only logic.
+// - Existing sections are preserved as-is
+// - New sections (#### headings not in existing) are appended
+// - For sections present in both: existing body is kept, new lines from the new body are appended
+// - Lines already in existing (exact match after trim) are not duplicated
+func mergeMarkdown(existingContent, newContent string) (string, int, int) {
+	_, existingSections := parseSections(existingContent)
+	_, newSections := parseSections(newContent)
+
+	// Index existing sections by heading
+	existingMap := make(map[string]*markdownSection)
+	for i := range existingSections {
+		existingMap[existingSections[i].heading] = &existingSections[i]
+	}
+
+	totalNewSections := 0
+	totalNewLines := 0
+
+	// Track which new sections were matched
+	matchedNewSections := make(map[int]bool)
+
+	for ni, ns := range newSections {
+		es, found := existingMap[ns.heading]
+		if !found {
+			// New section doesn't exist — will be appended
+			totalNewSections++
+			continue
+		}
+		matchedNewSections[ni] = true
+
+		// Section exists in both — merge body incrementally
+		existingLines := strings.Split(es.body, "\n")
+		existingSet := make(map[string]bool)
+		for _, l := range existingLines {
+			trimmed := strings.TrimSpace(l)
+			if trimmed != "" {
+				existingSet[trimmed] = true
+			}
+		}
+
+		newLines := strings.Split(ns.body, "\n")
+		var appended []string
+		for _, l := range newLines {
+			trimmed := strings.TrimSpace(l)
+			if trimmed != "" && !existingSet[trimmed] {
+				appended = append(appended, l)
+				existingSet[trimmed] = true
+			}
+		}
+
+		if len(appended) > 0 {
+			// Append new lines to existing section body
+			if es.body != "" && !strings.HasSuffix(es.body, "\n") {
+				es.body += "\n"
+			}
+			es.body += strings.Join(appended, "\n")
+			totalNewLines += len(appended)
 		}
 	}
 
-	return base, false
+	// Build result: existing sections (with merged content) in original order,
+	// then new sections appended at the end.
+	var sb strings.Builder
+
+	// Write existing sections (preserving order)
+	for i, s := range existingSections {
+		if i > 0 {
+			sb.WriteString("\n\n")
+		}
+		sb.WriteString(s.heading)
+		sb.WriteString("\n")
+		if s.body != "" {
+			sb.WriteString(s.body)
+		}
+	}
+
+	// Append new sections
+	for ni, ns := range newSections {
+		if matchedNewSections[ni] {
+			continue
+		}
+		sb.WriteString("\n\n")
+		sb.WriteString(ns.heading)
+		sb.WriteString("\n")
+		if ns.body != "" {
+			sb.WriteString(ns.body)
+		}
+	}
+
+	return sb.String(), totalNewSections, totalNewLines
 }

@@ -328,7 +328,7 @@ func (s *CrawlQueueService) processJob(ctx context.Context, job *model.CrawlJob,
 	}
 
 	if !result.Success {
-		s.handleExtractionFailure(job, fmt.Errorf(result.Error), result.Extractor, cb, durationMs)
+		s.handleExtractionFailure(job, fmt.Errorf("%s", result.Error), result.Extractor, cb, durationMs)
 		return
 	}
 
