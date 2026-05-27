@@ -17,11 +17,6 @@ database:
   # max_open_conns: 100     # 连接池最大打开连接
   # conn_max_lifetime: 60   # 连接最大生命周期（分钟）
 
-ragflow:
-  base_url: ${BELLKEEPER_RAGFLOW_BASE_URL}
-  api_key: ${BELLKEEPER_RAGFLOW_API_KEY}
-  timeout: 30
-
 n8n:
   webhook_base_url: ${BELLKEEPER_N8N_WEBHOOK_BASE_URL}
   api_base_url: ${BELLKEEPER_N8N_API_BASE_URL}

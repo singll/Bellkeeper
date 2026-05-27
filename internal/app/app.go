@@ -265,17 +265,6 @@ func (a *App) startBackgroundTasks() {
 		a.knowledgeIndexSvc.StartIncrementalScan(context.Background())
 	}
 
-	// Dataset sync
-	go func() {
-		if result, err := a.services.RagFlow.SyncDatasetMappings(); err != nil {
-			a.logger.Warn("dataset sync failed (will retry on next restart)", zap.Error(err))
-		} else {
-			a.logger.Info("dataset sync completed",
-				zap.Int("matched", result.Matched), zap.Int("created", result.Created),
-				zap.Int("skipped", result.Skipped), zap.Int("failed", result.Failed))
-		}
-	}()
-
 	// RSS fetcher
 	if a.cfg.RSSFetcher.Enabled {
 		a.services.RSSFetcher.Start(context.Background())

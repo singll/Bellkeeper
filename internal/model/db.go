@@ -172,8 +172,6 @@ func SeedLLMProxyConfig(db *gorm.DB, cfg config.LLMProxyConfig) error {
 func SeedSettings(db *gorm.DB) error {
 	defaults := []Setting{
 		// API 配置
-		{Key: "ragflow_base_url", Value: "", ValueType: "string", Category: "api", Description: "RagFlow API base URL"},
-		{Key: "ragflow_api_key", Value: "", ValueType: "string", Category: "api", Description: "RagFlow API key", IsSecret: true},
 		{Key: "n8n_webhook_base_url", Value: "", ValueType: "string", Category: "api", Description: "n8n Webhook base URL"},
 		{Key: "n8n_api_base_url", Value: "", ValueType: "string", Category: "api", Description: "n8n API base URL"},
 		{Key: "n8n_api_key", Value: "", ValueType: "string", Category: "api", Description: "n8n API key", IsSecret: true},
@@ -243,8 +241,8 @@ func SeedUncategorizedTag(db *gorm.DB) error {
 }
 
 // SeedDatasetMappings creates default dataset mappings and tag associations if they don't exist.
-// DatasetID is left empty as a placeholder — must be filled with real RAGFlow dataset UUIDs
-// via the Web UI or API after deployment.
+// DatasetID is left empty as a placeholder — it will be auto-filled (e.g. UUID or slug) by
+// the dataset service once a real index partition is bound via the Web UI or API.
 func SeedDatasetMappings(db *gorm.DB) error {
 	type mappingSeed struct {
 		Name        string

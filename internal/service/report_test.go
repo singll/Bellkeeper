@@ -45,7 +45,7 @@ func TestParseSections(t *testing.T) {
 
 | 服务 | 状态 |
 |------|------|
-| RagFlow | ✅ |
+| Bellkeeper | ✅ |
 
 #### 今日内容采集
 
@@ -65,7 +65,7 @@ func TestParseSections(t *testing.T) {
 	if sections[0].heading != "#### 服务状态" {
 		t.Errorf("section[0].heading = %q", sections[0].heading)
 	}
-	if !strings.Contains(sections[0].body, "| RagFlow | ✅ |") {
+	if !strings.Contains(sections[0].body, "| Bellkeeper | ✅ |") {
 		t.Errorf("section[0].body missing expected content: %q", sections[0].body)
 	}
 	if sections[1].heading != "#### 今日内容采集" {
@@ -78,13 +78,13 @@ func TestMergeMarkdown_NewSection(t *testing.T) {
 
 | 服务 | 状态 |
 |------|------|
-| RagFlow | ✅ |`
+| Bellkeeper | ✅ |`
 
 	new := `#### 服务状态
 
 | 服务 | 状态 |
 |------|------|
-| RagFlow | ✅ |
+| Bellkeeper | ✅ |
 
 #### 今日内容采集
 
@@ -100,10 +100,10 @@ func TestMergeMarkdown_NewSection(t *testing.T) {
 	if !strings.Contains(merged, "#### 服务状态") {
 		t.Error("merged should still contain existing section")
 	}
-	// Should not duplicate the RagFlow row
-	count := strings.Count(merged, "| RagFlow | ✅ |")
+	// Should not duplicate the Bellkeeper row
+	count := strings.Count(merged, "| Bellkeeper | ✅ |")
 	if count != 1 {
-		t.Errorf("RagFlow row appears %d times, want 1", count)
+		t.Errorf("Bellkeeper row appears %d times, want 1", count)
 	}
 	_ = newLines
 }
@@ -183,7 +183,7 @@ func TestMergeMarkdown_PreservesExistingSections(t *testing.T) {
 
 | 服务 | 状态 |
 |------|------|
-| RagFlow | ✅ |
+| Bellkeeper | ✅ |
 
 #### 今日内容采集
 
@@ -194,7 +194,7 @@ func TestMergeMarkdown_PreservesExistingSections(t *testing.T) {
 
 | 服务 | 状态 |
 |------|------|
-| RagFlow | ✅ |
+| Bellkeeper | ✅ |
 | n8n | ✅ |`
 
 	merged, _, _ := mergeMarkdown(existing, new)

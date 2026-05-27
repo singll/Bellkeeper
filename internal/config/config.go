@@ -11,7 +11,6 @@ import (
 type Config struct {
 	Server        ServerConfig        `mapstructure:"server"`
 	Database      DatabaseConfig      `mapstructure:"database"`
-	RagFlow       RagFlowConfig       `mapstructure:"ragflow"`
 	N8N           N8NConfig           `mapstructure:"n8n"`
 	Logging       LoggingConfig       `mapstructure:"logging"`
 	Features      FeatureConfig       `mapstructure:"features"`
@@ -100,12 +99,6 @@ type DatabaseConfig struct {
 func (d DatabaseConfig) DSN() string {
 	return fmt.Sprintf("host=%s port=%d user=%s password=%s dbname=%s sslmode=%s",
 		d.Host, d.Port, d.User, d.Password, d.Name, d.SSLMode)
-}
-
-type RagFlowConfig struct {
-	BaseURL string `mapstructure:"base_url"`
-	APIKey  string `mapstructure:"api_key"`
-	Timeout int    `mapstructure:"timeout"`
 }
 
 type N8NConfig struct {
@@ -320,10 +313,6 @@ func setDefaults(v *viper.Viper) {
 	v.SetDefault("database.max_idle_conns", 10)
 	v.SetDefault("database.max_open_conns", 100)
 	v.SetDefault("database.conn_max_lifetime", 60)
-
-	// RagFlow
-	v.SetDefault("ragflow.base_url", "http://ragflow:9380")
-	v.SetDefault("ragflow.timeout", 30)
 
 	// N8N — URL defaults left empty so workflow.go can fall back to DB settings
 	v.SetDefault("n8n.webhook_base_url", "")

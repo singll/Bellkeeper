@@ -11,7 +11,6 @@ type Handlers struct {
 	RSS           *RSSHandler
 	Dataset       *DatasetHandler
 	Setting       *SettingHandler
-	RagFlow       *RagFlowHandler
 	Health        *HealthHandler
 	Workflow      *WorkflowHandler
 	System        *SystemHandler
@@ -42,7 +41,6 @@ func NewHandlers(services *service.Services, shutdownChan chan struct{}, apiKey,
 		RSS:           NewRSSHandler(services.RSS, services.RSSFetcher),
 		Dataset:       NewDatasetHandler(services.Dataset),
 		Setting:       NewSettingHandler(services.Setting),
-		RagFlow:       NewRagFlowHandler(services.RagFlow),
 		Health:        NewHealthHandler(services.Health),
 		Workflow:      NewWorkflowHandler(services.Workflow),
 		System:        NewSystemHandler(shutdownChan),

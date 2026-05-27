@@ -84,22 +84,4 @@ var (
 		},
 		[]string{"command", "status"},
 	)
-
-	// RAGFlow metrics
-	RAGFlowDocumentsTotal = promauto.NewCounterVec(
-		prometheus.CounterOpts{
-			Name: "bellkeeper_ragflow_documents_total",
-			Help: "Total number of RAGFlow documents",
-		},
-		[]string{"operation", "status"},
-	)
-
-	RAGFlowParsingDuration = promauto.NewHistogramVec(
-		prometheus.HistogramOpts{
-			Name:    "bellkeeper_ragflow_parsing_duration_seconds",
-			Help:    "RAGFlow document parsing duration in seconds",
-			Buckets: prometheus.DefBuckets,
-		},
-		[]string{"dataset_id"},
-	)
 )

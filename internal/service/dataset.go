@@ -153,7 +153,7 @@ type URLCheckResult struct {
 }
 
 // CheckURL checks if a URL exists in the article_tags table with optional normalization and fuzzy matching.
-// Deduplication is purely based on database records — file existence and RAGFlow are not checked.
+// Deduplication is purely based on database records — file existence is not checked.
 func (s *DatasetService) CheckURL(rawURL string, normalize bool, fuzzy bool) (*URLCheckResult, error) {
 	// 1. Exact match
 	ats, err := s.repo.FindArticleTagsByURL(rawURL)
@@ -216,7 +216,7 @@ func (s *DatasetService) CheckURL(rawURL string, normalize bool, fuzzy bool) (*U
 }
 
 // BatchCheckURLs checks multiple URLs at once.
-// Deduplication is purely based on database records — file existence and RAGFlow are not checked.
+// Deduplication is purely based on database records — file existence is not checked.
 func (s *DatasetService) BatchCheckURLs(urls []string, normalize bool, fuzzy bool) (map[string]*URLCheckResult, error) {
 	results := make(map[string]*URLCheckResult)
 

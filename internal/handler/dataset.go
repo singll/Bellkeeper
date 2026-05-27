@@ -3,7 +3,6 @@ package handler
 import (
 	"github.com/gin-gonic/gin"
 	"github.com/singll/bellkeeper/internal/model"
-	"github.com/singll/bellkeeper/internal/pkg/defaults"
 	"github.com/singll/bellkeeper/internal/pkg/response"
 	"github.com/singll/bellkeeper/internal/service"
 )
@@ -78,10 +77,6 @@ func (h *DatasetHandler) Create(c *gin.Context) {
 		IsDefault:   isDefault,
 		IsActive:    isActive,
 		ParserID:    req.ParserID,
-	}
-
-	if mapping.ParserID == "" {
-		mapping.ParserID = defaults.DefaultParserID
 	}
 
 	if err := h.svc.Create(mapping, req.TagIDs); err != nil {

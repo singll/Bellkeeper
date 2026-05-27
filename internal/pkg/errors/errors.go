@@ -29,7 +29,7 @@ var (
 
 // ServiceError wraps an error with operation context and HTTP status code mapping.
 type ServiceError struct {
-	Op      string // Operation name, e.g. "ragflow.upload"
+	Op      string // Operation name, e.g. "crawler.fetch"
 	Code    int    // HTTP status code mapping
 	Err     error  // Original error
 	Message string // User-facing message

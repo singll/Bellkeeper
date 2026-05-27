@@ -58,9 +58,6 @@ func (s *HealthService) Check() map[string]string {
 func (s *HealthService) Detailed() *DetailedHealth {
 	services := make(map[string]ServiceStatus)
 
-	// Check RagFlow (requires API key auth)
-	services["ragflow"] = s.checkRagFlow()
-
 	// Check n8n (使用 API 端点 + API Key 认证，避免根路径 404 误判)
 	if s.cfg.N8N.APIBaseURL != "" && s.cfg.N8N.APIKey != "" {
 		services["n8n"] = s.checkN8N()
@@ -148,37 +145,7 @@ func (s *HealthService) checkN8N() ServiceStatus {
 	}
 }
 
-// checkRagFlow checks RagFlow health with API key authentication.
-func (s *HealthService) checkRagFlow() ServiceStatus {
-	url := s.cfg.RagFlow.BaseURL + "/api/v1/datasets?page=1&limit=1"
-	client := httpclient.HealthCheck(time.Duration(defaults.HealthCheckTimeout) * time.Second)
-
-	req, err := http.NewRequest("GET", url, nil)
-	if err != nil {
-		return ServiceStatus{Status: "down", Error: err.Error()}
-	}
-	req.Header.Set("Authorization", "Bearer "+s.cfg.RagFlow.APIKey)
-
-	start := time.Now()
-	resp, err := client.Do(req)
-	latency := time.Since(start).Milliseconds()
-
-	if err != nil {
-		return ServiceStatus{Status: "down", LatencyMs: latency, Error: err.Error()}
-	}
-	defer resp.Body.Close()
-
-	if resp.StatusCode >= 200 && resp.StatusCode < 400 {
-		return ServiceStatus{Status: "up", LatencyMs: latency}
-	}
-
-	return ServiceStatus{
-		Status:    "unhealthy",
-		LatencyMs: latency,
-		Error:     fmt.Sprintf("HTTP %d", resp.StatusCode),
-	}
-}
-
+// checkHTTPService is a generic HTTP-based health check used by the detailed endpoint.
 func (s *HealthService) checkHTTPService(url string) ServiceStatus {
 	client := httpclient.HealthCheck(time.Duration(defaults.HealthCheckTimeout) * time.Second)
 

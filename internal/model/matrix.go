@@ -44,7 +44,7 @@ func (MatrixChannel) TableName() string {
 type MatrixCommand struct {
 	ID              uint      `gorm:"primaryKey" json:"id"`
 	CommandName     string    `gorm:"size:100;uniqueIndex;notNull" json:"command_name"` // 列表, list, 新增, etc.
-	HandlerType     string    `gorm:"size:100;notNull;index" json:"handler_type"` // memos_todo, ragflow_qa, n8n_workflow
+	HandlerType     string    `gorm:"size:100;notNull;index" json:"handler_type"` // memos_todo, knowledge_qa, n8n_workflow
 	HandlerConfig   string    `gorm:"type:jsonb" json:"handler_config,omitempty"`
 	PermissionLevel string    `gorm:"size:50;default:user" json:"permission_level"` // admin, user, guest
 	RoomScope       string    `gorm:"size:50;default:any" json:"room_scope"` // any, specific, admin_only
@@ -245,22 +245,22 @@ func SeedMatrixPlatform(db *gorm.DB) error {
 		},
 		{
 			CommandName:     "问",
-			HandlerType:     "ragflow_qa",
+			HandlerType:     "knowledge_qa",
 			PermissionLevel: "user",
 			RoomScope:       "any",
 			IsActive:        true,
 			HandlerConfig:   "{}",
-			Description:     "向 RAGFlow 提问",
+			Description:     "向知识库提问",
 			UsageExample:    "!问 什么是 GORM？",
 		},
 		{
 			CommandName:     "搜",
-			HandlerType:     "ragflow_search",
+			HandlerType:     "knowledge_search",
 			PermissionLevel: "user",
 			RoomScope:       "any",
 			IsActive:        true,
 			HandlerConfig:   "{}",
-			Description:     "在 RAGFlow 中搜索",
+			Description:     "在知识库中搜索",
 			UsageExample:    "!搜 Docker 部署",
 		},
 		{
@@ -285,12 +285,12 @@ func SeedMatrixPlatform(db *gorm.DB) error {
 		},
 		{
 			CommandName:     "search",
-			HandlerType:     "ragflow_search",
+			HandlerType:     "knowledge_search",
 			PermissionLevel: "user",
 			RoomScope:       "any",
 			IsActive:        true,
 			HandlerConfig:   "{}",
-			Description:     "Search in RAGFlow",
+			Description:     "Search the knowledge base",
 			UsageExample:    "!search Docker",
 		},
 		{

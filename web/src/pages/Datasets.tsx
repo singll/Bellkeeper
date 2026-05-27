@@ -105,7 +105,7 @@ const Datasets: Component = () => {
       <div class="flex flex-col sm:flex-row sm:items-center justify-between gap-4 mb-6">
         <div>
           <h1 class="text-2xl font-bold text-white">知识库映射</h1>
-          <p class="text-sm text-dark-400 mt-1">管理 RagFlow 知识库与标签的映射关系</p>
+          <p class="text-sm text-dark-400 mt-1">管理知识库分区与标签的路由规则</p>
         </div>
         <button class="btn btn-primary" onClick={openCreateModal}>
           <svg class="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
@@ -123,7 +123,7 @@ const Datasets: Component = () => {
           </svg>
           <div class="text-sm">
             <p class="text-primary-300 font-medium">知识库路由说明</p>
-            <p class="text-dark-400 mt-1">文档上传时，系统会根据标签自动路由到对应的 RagFlow 知识库。默认知识库用于未匹配任何标签的文档。</p>
+            <p class="text-dark-400 mt-1">文档入库时，系统会根据标签自动路由到对应的知识库分区。默认分区用于未匹配任何标签的文档。</p>
           </div>
         </div>
       </div>
@@ -326,7 +326,7 @@ const Datasets: Component = () => {
             </div>
           </div>
           <div>
-            <label class="label">RagFlow Dataset ID *</label>
+            <label class="label">Dataset ID *</label>
             <input
               type="text"
               class="input font-mono"
@@ -335,7 +335,7 @@ const Datasets: Component = () => {
               value={form().dataset_id}
               onInput={(e) => setForm({ ...form(), dataset_id: e.currentTarget.value })}
             />
-            <p class="text-xs text-dark-500 mt-1">从 RagFlow 控制台复制知识库 ID</p>
+            <p class="text-xs text-dark-500 mt-1">用于知识库分区与索引路由的唯一标识</p>
           </div>
           <div>
             <label class="label">解析器</label>

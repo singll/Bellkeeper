@@ -1,4 +1,4 @@
-import type { LogEntry, LogSource, LogAlertRule, ParseTask } from '@/types'
+import type { LogEntry, LogSource, LogAlertRule } from '@/types'
 
 export const formatDateTime = (value?: string) => {
   if (!value) return '--'
@@ -51,8 +51,6 @@ export const statusLabel = (status: string) => {
 
 export const moduleLabel = (module: string) => {
   const map: Record<string, string> = {
-    ragflow_upload: '文件上传',
-    ragflow_parse: '智能解析',
     classify: '文章分类',
     llm_proxy: 'LLM Proxy',
     rss_fetch: 'RSS采集',
@@ -69,22 +67,4 @@ export const sourceTypeLabel = (t: string) => {
   return map[t] || t
 }
 
-export const parseTaskStatusBadge = (status: string) => {
-  switch (status) {
-    case 'running': return 'badge-primary'
-    case 'recovering': return 'badge-warning'
-    case 'completed': return 'badge-success'
-    default: return 'badge-gray'
-  }
-}
-
-export const parseResultBadge = (result?: string) => {
-  switch (result) {
-    case 'success': return 'badge-success'
-    case 'partial_failed': return 'badge-warning'
-    case 'failed': return 'badge-danger'
-    default: return 'badge-gray'
-  }
-}
-
-export type { LogEntry, LogSource, LogAlertRule, ParseTask }
+export type { LogEntry, LogSource, LogAlertRule }

@@ -81,8 +81,6 @@ const LogBrowser: Component = () => {
             onChange={(e) => { setModuleFilter(e.currentTarget.value); applyFilter() }}
           >
             <option value="">全部模块</option>
-            <option value="ragflow_upload">文件上传</option>
-            <option value="ragflow_parse">智能解析</option>
             <option value="classify">文章分类</option>
             <option value="llm_proxy">LLM Proxy</option>
             <option value="rss_fetch">RSS采集</option>

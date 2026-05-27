@@ -257,10 +257,9 @@ func (r *Router) createHandlerFromDB(cmd *model.MatrixCommand) Handler {
 		}
 		return nil
 
-	case "ragflow_qa", "ragflow_search":
-		// QA handler via n8n - deprecated, use SetKnowledgeHandlers instead
-		// Skip registration here, the new knowledge handlers are registered via SetKnowledgeHandlers
-		middleware.GetLogger().Warn("skip command: use SetKnowledgeHandlers for knowledge-based QA", zap.String("command", cmd.CommandName))
+	case "knowledge_qa", "knowledge_search":
+		// QA / search handlers are registered at runtime via SetKnowledgeHandlers
+		// (CommandService wires AskServiceAdapter + SearchServiceAdapter directly to the router)
 		return nil
 
 	case "builtin_ping":

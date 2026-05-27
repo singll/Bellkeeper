@@ -213,31 +213,6 @@ export interface ParseDocState {
   last_error?: string
 }
 
-export interface ParseTask {
-  id: string
-  status: string
-  total: number
-  completed: number
-  failed: number
-  pending: number
-  batch_size: number
-  running_count: number
-  recovering_count: number
-  succeeded_count: number
-  final_failed_count: number
-  current_dataset_id?: string
-  current_batch_index?: number
-  current_stage?: string
-  result_status?: string
-  failed_docs?: { dataset_id: string; document_id: string; error: string; retries: number }[]
-  suspected_stuck_docs?: string[]
-  doc_states?: ParseDocState[]
-  started_at: string
-  last_progress_at?: string
-  completed_at?: string
-  log?: string[]
-}
-
 // Matrix Platform Types
 
 export interface MatrixRoom {

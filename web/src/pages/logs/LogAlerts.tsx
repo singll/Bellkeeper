@@ -68,7 +68,6 @@ const LogAlerts: Component = () => {
               <select class="input" value={form().module}
                 onChange={(e) => setForm({ ...form(), module: e.currentTarget.value })}>
                 <option value="rss_fetch">RSS采集</option>
-                <option value="ragflow_parse">智能解析</option>
                 <option value="classify">文章分类</option>
                 <option value="llm_proxy">LLM Proxy</option>
                 <option value="file_ingest">文件入库</option>

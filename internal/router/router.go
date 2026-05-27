@@ -24,7 +24,6 @@ func Setup(r *gin.Engine, handlers *handler.Handlers, mode string, apiKey string
 	registerTagRoutes(api, handlers.Tag)
 	registerRSSRoutes(api, handlers.RSS)
 	registerDatasetRoutes(api, handlers.Dataset)
-	registerRagFlowRoutes(api, handlers.RagFlow)
 	registerSettingRoutes(api, handlers.Setting)
 	registerWorkflowRoutes(api, handlers.Workflow)
 	registerSystemRoutes(api, handlers.System)
@@ -104,36 +103,6 @@ func registerDatasetRoutes(api *gin.RouterGroup, h *handler.DatasetHandler) {
 	api.GET("/datasets/article-tags/:document_id", h.GetArticleTags)
 	api.GET("/datasets/articles-by-tag/:tag_id", h.GetArticlesByTag)
 	api.POST("/datasets/check-url", h.CheckURL)
-}
-
-func registerRagFlowRoutes(api *gin.RouterGroup, h *handler.RagFlowHandler) {
-	api.POST("/ragflow/ingest/obsidian", h.IngestObsidianNote)
-	api.POST("/ragflow/upload", h.Upload)
-	api.POST("/ragflow/upload/with-routing", h.UploadWithRouting)
-	api.GET("/ragflow/documents", h.ListDocuments)
-	api.DELETE("/ragflow/documents/:id", h.DeleteDocument)
-	// 高级操作
-	api.GET("/ragflow/datasets", h.ListDatasets)
-	api.GET("/ragflow/datasets/:dataset_id", h.GetDataset)
-	api.POST("/ragflow/datasets", h.CreateDataset)
-	api.PUT("/ragflow/datasets/:dataset_id", h.UpdateDataset)
-	api.DELETE("/ragflow/datasets/:dataset_id", h.DeleteDataset)
-	api.POST("/ragflow/documents/parse", h.RunParsing)
-	api.POST("/ragflow/documents/parse/throttled", h.RunParsingThrottled)
-	api.POST("/ragflow/documents/parse/smart", h.RunParsingSmart)
-	api.GET("/ragflow/documents/parse/smart/:task_id", h.GetParseTaskStatus)
-	api.GET("/ragflow/documents/parse/tasks", h.ListParseTasks)
-	api.POST("/ragflow/documents/parse/stop", h.StopParsing)
-	api.GET("/ragflow/documents/parse/status", h.GetParsingStatus)
-	api.POST("/ragflow/upload/batch", h.BatchUpload)
-	api.POST("/ragflow/documents/batch-delete", h.BatchDeleteDocuments)
-	api.POST("/ragflow/documents/transfer", h.TransferDocument)
-	api.PUT("/ragflow/documents/metadata", h.UpdateDocumentMetadata)
-	api.PUT("/ragflow/documents/parser-config", h.UpdateDocumentParserConfig)
-	api.GET("/ragflow/chunks", h.ListChunks)
-	api.DELETE("/ragflow/chunks", h.DeleteChunks)
-	api.POST("/ragflow/documents/batch-transfer", h.BatchTransferDocuments)
-	api.POST("/ragflow/datasets/sync", h.SyncDatasets)
 }
 
 func registerSettingRoutes(api *gin.RouterGroup, h *handler.SettingHandler) {

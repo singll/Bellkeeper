@@ -7,8 +7,8 @@ import (
 	"gorm.io/gorm"
 )
 
-// DatasetMapping represents a mapping between tags and RagFlow datasets
-// and can also act as a routing rule for file-first document ingestion.
+// DatasetMapping is a routing-rule record used by file-first document ingestion:
+// it groups tags into a logical "dataset" (Meilisearch partition / storage hint).
 type DatasetMapping struct {
 	ID          uint           `gorm:"primaryKey" json:"id"`
 	Name        string         `gorm:"size:100;uniqueIndex;not null" json:"name"`

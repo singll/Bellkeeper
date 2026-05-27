@@ -8,7 +8,6 @@ import Dashboard from './pages/Dashboard'
 import Tags from './pages/Tags'
 import RSSFeeds from './pages/RSSFeeds'
 import Datasets from './pages/Datasets'
-import Documents from './pages/Documents'
 import Workflows from './pages/Workflows'
 import Settings from './pages/Settings'
 import MatrixDashboard from './pages/MatrixDashboard'
@@ -23,7 +22,7 @@ import { KnowledgeFiles, KnowledgeSearch, KnowledgeAsk } from './pages/knowledge
 // LLM pages (split from old LLMProxy)
 import { LLMOverview, LLMChannels, LLMGroups, LLMConfig, LLMLogs } from './pages/llm'
 // Log pages (split from old LogCenter)
-import { LogBrowser, LogDashboard, LogSources, LogAlerts, LogParseTasks } from './pages/logs'
+import { LogBrowser, LogDashboard, LogSources, LogAlerts } from './pages/logs'
 import ErrorFallback from './components/ErrorFallback'
 import './index.css'
 
@@ -57,7 +56,6 @@ render(() => (
         <Route path="/logs/dashboard" component={LogDashboard} />
         <Route path="/logs/sources" component={LogSources} />
         <Route path="/logs/alerts" component={LogAlerts} />
-        <Route path="/logs/parse-tasks" component={LogParseTasks} />
         {/* Matrix (core system) */}
         <Route path="/matrix" component={MatrixDashboard} />
         <Route path="/matrix/rooms" component={MatrixRooms} />
@@ -68,7 +66,6 @@ render(() => (
         <Route path="/matrix/command-logs" component={MatrixCommandLogs} />
         {/* More */}
         <Route path="/workflows" component={Workflows} />
-        <Route path="/documents" component={Documents} />
         <Route path="/settings" component={Settings} />
       </Router>
     </ToastProvider>

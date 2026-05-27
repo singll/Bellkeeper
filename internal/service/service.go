@@ -13,7 +13,6 @@ type Services struct {
 	Crawler       *CrawlService
 	Dataset       *DatasetService
 	Setting       *SettingService
-	RagFlow       *RagFlowService
 	Health        *HealthService
 	Workflow      *WorkflowService
 	LLMProxy      *LLMProxyService
@@ -42,9 +41,6 @@ func NewServices(repos *repository.Repositories, cfg *config.Config, version str
 
 	// Wire LogCenter into ActivityLog for delegation
 	activityLogSvc.SetLogCenter(logCenterSvc)
-
-	// Create ragflow service with activity log
-	ragFlowSvc := NewRagFlowService(cfg.RagFlow, repos.DatasetMapping, repos.Tag, activityLogSvc)
 
 	// Create dataset service
 	datasetSvc := NewDatasetService(repos.DatasetMapping, repos.Tag)
@@ -99,7 +95,6 @@ func NewServices(repos *repository.Repositories, cfg *config.Config, version str
 		Crawler:        crawlSvc,
 		Dataset:        datasetSvc,
 		Setting:        NewSettingService(repos.Setting),
-		RagFlow:        ragFlowSvc,
 		Health:         NewHealthService(cfg, version, repos.Tag, repos.RSS, repos.DatasetMapping),
 		Workflow:       NewWorkflowService(cfg.N8N, repos.Setting),
 		LLMProxy:       NewLLMProxyService(cfg.LLMProxy, repos.LLMProxy, repos.LLMChannel, repos.LLMModelGroup),
