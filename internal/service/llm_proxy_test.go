@@ -3,6 +3,7 @@ package service
 import (
 	"testing"
 
+	"github.com/singll/bellkeeper/internal/config"
 	"github.com/singll/bellkeeper/internal/model"
 	"github.com/stretchr/testify/assert"
 )
@@ -117,4 +118,56 @@ func TestImplicitConversationID(t *testing.T) {
 	id2 := m.ImplicitConversationID(nil, turn2)
 	assert.NotEmpty(t, id1)
 	assert.Equal(t, id1, id2, "multi-turn requests sharing a prefix must hash to the same conversation id")
+}
+
+func newTestChannel(name, tier string, free bool, taskTypes []string) *Channel {
+	return &Channel{
+		Config: config.ChannelConfig{Name: name, Tier: tier, IsFree: free, TaskTypes: taskTypes},
+		Bucket: NewTokenBucket(100, 0, 60),
+		Health: NewChannelHealth(config.CircuitBreakerConfig{FailureThreshold: 5, CooldownSeconds: 30}),
+	}
+}
+
+func newTestGroup(members ...*ModelGroupMemberRuntime) *ModelGroup {
+	return &ModelGroup{
+		Config:  config.ModelGroupConfig{Strategy: "priority-health"},
+		Members: members,
+	}
+}
+
+func member(ch *Channel, model string) *ModelGroupMemberRuntime {
+	return &ModelGroupMemberRuntime{Config: config.ModelGroupMember{Channel: ch.Config.Name, Model: model, Weight: 1}, Channel: ch}
+}
+
+func TestSelectChannel_CodingTierOrdering(t *testing.T) {
+	freeCh := newTestChannel("free", "free", true, nil)
+	kimiCh := newTestChannel("kimi", "standard", false, []string{"coding"}) // coding-only
+	paidCh := newTestChannel("paid", "premium", false, nil)
+	g := newTestGroup(member(paidCh, "paid-m"), member(kimiCh, "kimi-m"), member(freeCh, "free-m"))
+
+	// free_first → free tier wins for coding
+	ch, _ := g.SelectChannel("", TaskCoding, "free_first", nil, nil)
+	assert.Equal(t, "free", ch.Config.Name)
+
+	// quality_first → standard (Kimi/sunk-cost) tier first
+	ch, _ = g.SelectChannel("", TaskCoding, "quality_first", nil, nil)
+	assert.Equal(t, "kimi", ch.Config.Name)
+
+	// complex → standard first
+	ch, _ = g.SelectChannel("", TaskCoding, "complex", nil, nil)
+	assert.Equal(t, "kimi", ch.Config.Name)
+
+	// Excluding the free tier (already tried) advances to standard under free_first.
+	ch, _ = g.SelectChannel("", TaskCoding, "free_first", nil, map[string]bool{"free": true})
+	assert.Equal(t, "kimi", ch.Config.Name)
+}
+
+func TestSelectChannel_TaskEligibility(t *testing.T) {
+	freeCh := newTestChannel("free", "free", true, nil)               // general-purpose
+	kimiCh := newTestChannel("kimi", "standard", false, []string{"coding"}) // coding-only
+	g := newTestGroup(member(kimiCh, "kimi-m"), member(freeCh, "free-m"))
+
+	// A classify task must NOT route to the coding-only kimi channel.
+	ch, _ := g.SelectChannel("", TaskClassify, "", nil, nil)
+	assert.Equal(t, "free", ch.Config.Name, "classify must skip coding-only members")
 }

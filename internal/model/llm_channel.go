@@ -27,6 +27,9 @@ type LLMChannel struct {
 	BalanceProviderType string `gorm:"size:50" json:"balance_provider_type"` // e.g. "deepseek", "moonshot", "newapi", "aliyun"
 	BalanceConfigJSON   string `gorm:"type:text" json:"balance_config_json"`   // provider-specific extra config
 	ModelRPMOverrides   string `gorm:"type:text" json:"model_rpm_overrides"`   // JSON: {"model": rpm}
+	// Task-aware tiered routing (§2.6.5)
+	TaskTypes string `gorm:"type:text" json:"task_types"` // JSON array, empty = eligible for all task types
+	Tier      string `gorm:"size:20" json:"tier"`         // free | standard | premium; empty = derived from is_free
 	CreatedAt time.Time      `json:"created_at"`
 	UpdatedAt time.Time      `json:"updated_at"`
 	DeletedAt gorm.DeletedAt `gorm:"index" json:"-"`
@@ -60,4 +63,26 @@ func (c *LLMChannel) SetModels(models []string) {
 		return
 	}
 	c.Models = string(data)
+}
+
+// GetTaskTypes parses the JSON task_types string. Empty = eligible for all tasks.
+func (c *LLMChannel) GetTaskTypes() []string {
+	var t []string
+	if c.TaskTypes == "" {
+		return t
+	}
+	if err := json.Unmarshal([]byte(c.TaskTypes), &t); err != nil {
+		return []string{}
+	}
+	return t
+}
+
+// SetTaskTypes serializes a slice of task types into JSON.
+func (c *LLMChannel) SetTaskTypes(types []string) {
+	data, err := json.Marshal(types)
+	if err != nil {
+		c.TaskTypes = "[]"
+		return
+	}
+	c.TaskTypes = string(data)
 }

@@ -477,6 +477,8 @@ func dbChannelToConfig(ch model.LLMChannel) config.ChannelConfig {
 		BalanceProviderType: ch.BalanceProviderType,
 		BalanceConfigJSON:   ch.BalanceConfigJSON,
 		ModelRPMOverrides:   ch.ModelRPMOverrides,
+		TaskTypes:           ch.GetTaskTypes(),
+		Tier:                ch.Tier,
 	}
 }
 
@@ -610,10 +612,9 @@ func (s *LLMProxyService) ProxyRequest(
 		taskKey = callerID + ":" + modelName
 	}
 
-	// --- Task type detection (for logging and future task-aware routing) ---
+	// --- Task type detection (drives task-aware tiered routing in proxyViaGroup) ---
 	headerMap := headerToMap(headers)
 	taskType := s.taskRouter.DetectTaskType(headerMap, modelName, body, 0)
-	_ = taskType // currently logged; task-aware tiered routing uses model-group configuration
 
 	// --- Conversation binding (sticky session) ---
 	convID := s.convMgr.ImplicitConversationID(headerMap, body)
@@ -643,7 +644,7 @@ func (s *LLMProxyService) ProxyRequest(
 
 	// Check if model matches a virtual model group
 	if group, ok := modelGroups[modelName]; ok {
-		statusCode, respBody, respHeaders, err = s.proxyViaGroup(group, taskKey, method, path, headers, body, callerID, tokenID)
+		statusCode, respBody, respHeaders, err = s.proxyViaGroup(group, taskKey, method, path, headers, body, callerID, tokenID, taskType)
 		if err == nil && statusCode < 500 && statusCode != 429 {
 			// Record conversation binding on success
 			if convID != "" {
@@ -697,6 +698,39 @@ func (s *LLMProxyService) ProxyRequest(
 	return statusCode, respBody, respHeaders, lastErr
 }
 
+// codingPref resolves the coding routing preference for tier ordering. For the
+// complexity_aware strategy it derives simple/medium/complex from the prompt;
+// otherwise it returns the configured free_first / quality_first directly.
+func (s *LLMProxyService) codingPref(body []byte) string {
+	if s.taskRouter == nil {
+		return "complexity_aware"
+	}
+	strategy := s.taskRouter.GetCodingStrategy()
+	if strategy == "complexity_aware" {
+		return string(s.taskRouter.DetectComplexity(body, 0))
+	}
+	return strategy
+}
+
+// balanceSnapshot returns a channel→remaining-USD map from the balance manager,
+// used by the balance_aware routing strategy. Channels with fetch errors are omitted.
+func (s *LLMProxyService) balanceSnapshot() map[string]float64 {
+	if s.balanceMgr == nil {
+		return nil
+	}
+	all := s.balanceMgr.GetAll()
+	if len(all) == 0 {
+		return nil
+	}
+	m := make(map[string]float64, len(all))
+	for name, info := range all {
+		if info != nil && info.Error == "" {
+			m[name] = info.Balance
+		}
+	}
+	return m
+}
+
 // proxyViaGroup routes a request through a virtual model group with sticky binding.
 func (s *LLMProxyService) proxyViaGroup(
 	group *ModelGroup,
@@ -705,22 +739,23 @@ func (s *LLMProxyService) proxyViaGroup(
 	body []byte,
 	callerID string,
 	tokenID uint,
+	taskType TaskType,
 ) (int, []byte, http.Header, error) {
 	modelName := extractModelFromBody(body) // original virtual model name for logging
 	maxAttempts := len(group.Members)
 	tried := map[string]bool{}
 
+	// Resolve coding sub-strategy + balance snapshot once (task-aware tiered routing).
+	codingPref := ""
+	if taskType == TaskCoding {
+		codingPref = s.codingPref(body)
+	}
+	balances := s.balanceSnapshot()
+
 	for attempt := 0; attempt < maxAttempts; attempt++ {
-		ch, realModel := group.SelectChannel(taskKey)
+		ch, realModel := group.SelectChannel(taskKey, taskType, codingPref, balances, tried)
 		if ch == nil {
 			break
-		}
-		if tried[ch.Config.Name] {
-			// Already tried this channel, clear its sticky binding to try another
-			if taskKey != "" && group.Sticky != nil {
-				group.Sticky.Remove(taskKey)
-			}
-			continue
 		}
 		tried[ch.Config.Name] = true
 
@@ -1159,6 +1194,7 @@ func (s *LLMProxyService) ProxyStreamRequest(
 
 	// --- Conversation binding (sticky session) ---
 	headerMap := headerToMap(headers)
+	taskType := s.taskRouter.DetectTaskType(headerMap, modelName, body, 0)
 	convID := s.convMgr.ImplicitConversationID(headerMap, body)
 	allowSwitch := headers.Get("X-Allow-Channel-Switch") == "true"
 
@@ -1187,7 +1223,11 @@ func (s *LLMProxyService) ProxyStreamRequest(
 
 	// Check virtual model group
 	if group, ok := modelGroups[modelName]; ok {
-		ch, realModel := group.SelectChannel(taskKey)
+		codingPref := ""
+		if taskType == TaskCoding {
+			codingPref = s.codingPref(body)
+		}
+		ch, realModel := group.SelectChannel(taskKey, taskType, codingPref, s.balanceSnapshot(), nil)
 		if ch == nil {
 			return nil, fmt.Errorf("no available channel in group %s", modelName)
 		}

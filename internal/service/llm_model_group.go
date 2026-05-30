@@ -210,39 +210,36 @@ func NewModelGroup(cfg config.ModelGroupConfig, channels map[string]*Channel) (*
 	return g, nil
 }
 
-// SelectChannel picks a channel for the given task key, respecting sticky bindings
-// and health state.
-func (g *ModelGroup) SelectChannel(taskKey string) (*Channel, string) {
-	// 1. Check sticky binding
+// SelectChannel picks a channel for the given task key, respecting sticky bindings,
+// health, task-type eligibility, and (for coding) tier ordering. `exclude` holds
+// channel names already tried this request so retries advance deterministically.
+// `balances` (channel→remaining USD) feeds the balance_aware strategy.
+func (g *ModelGroup) SelectChannel(taskKey string, taskType TaskType, codingPref string, balances map[string]float64, exclude map[string]bool) (*Channel, string) {
+	// 1. Check sticky binding (skip if excluded/unhealthy)
 	if taskKey != "" && g.Sticky != nil {
 		if binding := g.Sticky.Get(taskKey); binding != nil {
-			if binding.Channel.Health.IsAvailable() {
+			if !exclude[binding.Channel.Config.Name] && binding.Channel.Health.IsAvailable() {
 				return binding.Channel, binding.Model
 			}
-			// Bound channel is unhealthy, clear binding and re-select
+			// Bound channel is unhealthy or already tried — clear binding and re-select
 			g.Sticky.Remove(taskKey)
 		}
 	}
 
-	// 2. Filter available members
-	available := g.filterAvailable()
-	if len(available) == 0 {
+	// 2. Filter to available, not-excluded, task-eligible members
+	candidates := g.eligibleMembers(taskType, exclude)
+	if len(candidates) == 0 {
 		return nil, ""
 	}
 
-	// 3. Select by strategy
+	// 3. Select. Coding tasks honor tier ordering (free/standard/premium) per the
+	//    configured sub-strategy; other tasks use the group's base strategy.
 	var selected *ModelGroupMemberRuntime
-	switch g.Config.Strategy {
-	case "round-robin":
-		selected = weightedSelect(available)
-	case "least_latency":
-		selected = leastLatencySelect(available)
-	case "balance_aware":
-		selected = balanceAwareSelect(available)
-	default: // "priority-health"
-		selected = priorityHealthSelect(available)
+	if taskType == TaskCoding {
+		selected = g.selectCodingTiered(candidates, codingPref, balances)
+	} else {
+		selected = g.selectByStrategy(candidates, balances)
 	}
-
 	if selected == nil {
 		return nil, ""
 	}
@@ -255,6 +252,98 @@ func (g *ModelGroup) SelectChannel(taskKey string) (*Channel, string) {
 	return selected.Channel, selected.Config.Model
 }
 
+// eligibleMembers returns available, non-excluded members, then applies task-type
+// eligibility: a member whose non-empty TaskTypes excludes taskType is dropped
+// (so e.g. classify/summary never route to a coding-only channel like kimi-code).
+// Falls back to the unfiltered available set if tagging would empty it.
+func (g *ModelGroup) eligibleMembers(taskType TaskType, exclude map[string]bool) []*ModelGroupMemberRuntime {
+	var available []*ModelGroupMemberRuntime
+	for _, m := range g.Members {
+		if exclude[m.Channel.Config.Name] {
+			continue
+		}
+		if m.Channel.Health.IsAvailable() {
+			available = append(available, m)
+		}
+	}
+	var eligible []*ModelGroupMemberRuntime
+	for _, m := range available {
+		tt := m.Channel.Config.TaskTypes
+		if len(tt) == 0 || containsString(tt, string(taskType)) {
+			eligible = append(eligible, m)
+		}
+	}
+	if len(eligible) == 0 {
+		return available // never fail a request purely on task tagging
+	}
+	return eligible
+}
+
+// selectByStrategy applies the group's base load-balancing strategy.
+func (g *ModelGroup) selectByStrategy(candidates []*ModelGroupMemberRuntime, balances map[string]float64) *ModelGroupMemberRuntime {
+	switch g.Config.Strategy {
+	case "round-robin":
+		return weightedSelect(candidates)
+	case "least_latency":
+		return leastLatencySelect(candidates)
+	case "balance_aware":
+		return balanceAwareSelect(candidates, balances)
+	default: // "priority-health"
+		return priorityHealthSelect(candidates)
+	}
+}
+
+// selectCodingTiered partitions candidates by tier and picks within the first
+// non-empty tier in the order dictated by the coding sub-strategy. Within a tier
+// the group's base strategy breaks ties.
+func (g *ModelGroup) selectCodingTiered(candidates []*ModelGroupMemberRuntime, codingPref string, balances map[string]float64) *ModelGroupMemberRuntime {
+	byTier := map[string][]*ModelGroupMemberRuntime{}
+	for _, m := range candidates {
+		t := memberTier(m)
+		byTier[t] = append(byTier[t], m)
+	}
+	for _, tier := range codingTierOrder(codingPref) {
+		if members := byTier[tier]; len(members) > 0 {
+			return g.selectByStrategy(members, balances)
+		}
+	}
+	// Candidates only in non-standard tiers — fall back to the whole set.
+	return g.selectByStrategy(candidates, balances)
+}
+
+// memberTier resolves a member's tier, defaulting from IsFree when unset.
+func memberTier(m *ModelGroupMemberRuntime) string {
+	if t := m.Channel.Config.Tier; t != "" {
+		return t
+	}
+	if m.Channel.Config.IsFree {
+		return "free"
+	}
+	return "standard"
+}
+
+// codingTierOrder maps a coding preference to a tier visit order. free/standard/
+// premium ≈ 免费 / Kimi-Code-sunk-cost / 付费. (ROADMAP §2.6.5)
+func codingTierOrder(pref string) []string {
+	switch pref {
+	case "quality_first", "complex":
+		// Kimi Code (sunk cost) → paid → free fallback
+		return []string{"standard", "premium", "free"}
+	default: // free_first, simple, medium
+		return []string{"free", "standard", "premium"}
+	}
+}
+
+// containsString reports whether s is in arr.
+func containsString(arr []string, s string) bool {
+	for _, v := range arr {
+		if v == s {
+			return true
+		}
+	}
+	return false
+}
+
 // GetStickyBinding returns the current sticky binding for a task key without modifying it.
 func (g *ModelGroup) GetStickyBinding(taskKey string) (*Channel, string) {
 	if taskKey == "" || g.Sticky == nil {
@@ -264,18 +353,6 @@ func (g *ModelGroup) GetStickyBinding(taskKey string) (*Channel, string) {
 		return binding.Channel, binding.Model
 	}
 	return nil, ""
-}
-
-// filterAvailable returns members whose channels are not circuit-broken
-// and have tokens remaining.
-func (g *ModelGroup) filterAvailable() []*ModelGroupMemberRuntime {
-	var available []*ModelGroupMemberRuntime
-	for _, m := range g.Members {
-		if m.Channel.Health.IsAvailable() {
-			available = append(available, m)
-		}
-	}
-	return available
 }
 
 // priorityHealthSelect sorts candidates by priority (asc), health score (desc),
@@ -364,24 +441,45 @@ func leastLatencySelect(candidates []*ModelGroupMemberRuntime) *ModelGroupMember
 	return best
 }
 
-// balanceAwareSelect prefers members with positive balance, then falls back to least_latency.
-func balanceAwareSelect(candidates []*ModelGroupMemberRuntime) *ModelGroupMemberRuntime {
+// balanceAwareSelect scores members by score = latency_ewma × (1 + error_rate) /
+// max(remaining_usd, 1) — lower is better — using the live balance snapshot. When
+// no balance is known for any candidate (provider unsupported / stale), it degrades
+// to priority-health rather than guessing. (§2.3.5 / §2.6.3)
+func balanceAwareSelect(candidates []*ModelGroupMemberRuntime, balances map[string]float64) *ModelGroupMemberRuntime {
 	if len(candidates) == 0 {
 		return nil
 	}
-	// Filter members with known positive balance (if balance info is available)
-	var positive []*ModelGroupMemberRuntime
+	hasBalance := false
 	for _, m := range candidates {
-		// Balance awareness is applied at channel level via balance.Manager
-		// For now, we use a heuristic: free channels are deprioritized if paid channels have balance
-		if !m.Channel.Config.IsFree {
-			positive = append(positive, m)
+		if _, ok := balances[m.Channel.Config.Name]; ok {
+			hasBalance = true
+			break
 		}
 	}
-	if len(positive) > 0 {
-		return leastLatencySelect(positive)
+	if !hasBalance {
+		return priorityHealthSelect(candidates)
 	}
-	return leastLatencySelect(candidates)
+	best := candidates[0]
+	bestScore := balanceScore(best, balances)
+	for _, m := range candidates[1:] {
+		if s := balanceScore(m, balances); s < bestScore {
+			best = m
+			bestScore = s
+		}
+	}
+	return best
+}
+
+func balanceScore(m *ModelGroupMemberRuntime, balances map[string]float64) float64 {
+	latency := m.Channel.EWMALatency()
+	if latency <= 0 {
+		latency = 1 // no latency samples yet — neutral weight
+	}
+	remaining := balances[m.Channel.Config.Name]
+	if remaining < 1 {
+		remaining = 1 // floor so near-zero balances don't divide by ~0
+	}
+	return latency * (1 + m.ErrorRate()) / remaining
 }
 
 // Status returns a snapshot of the model group state for management APIs.
