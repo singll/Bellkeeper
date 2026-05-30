@@ -23,6 +23,10 @@ type LLMChannel struct {
 	IsFree    bool           `gorm:"default:false" json:"is_free"`
 	IsEnabled bool           `gorm:"default:true" json:"is_enabled"`
 	Models    string         `gorm:"type:text" json:"models"` // JSON array string
+	// Balance monitoring
+	BalanceProviderType string `gorm:"size:50" json:"balance_provider_type"` // e.g. "deepseek", "moonshot", "newapi", "aliyun"
+	BalanceConfigJSON   string `gorm:"type:text" json:"balance_config_json"`   // provider-specific extra config
+	ModelRPMOverrides   string `gorm:"type:text" json:"model_rpm_overrides"`   // JSON: {"model": rpm}
 	CreatedAt time.Time      `json:"created_at"`
 	UpdatedAt time.Time      `json:"updated_at"`
 	DeletedAt gorm.DeletedAt `gorm:"index" json:"-"`

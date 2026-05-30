@@ -38,6 +38,18 @@ type LLMProxyConfig struct {
 	CircuitBreaker    CircuitBreakerConfig `mapstructure:"circuit_breaker"`
 	ModelGroups       []ModelGroupConfig   `mapstructure:"model_groups"`
 	Channels          []ChannelConfig      `mapstructure:"channels"`
+	// Balance monitoring
+	BalanceSyncInterval int `mapstructure:"balance_sync_interval"` // seconds, 0 = disabled
+	LogRetentionDays    int `mapstructure:"log_retention_days"`    // 0 = default 30
+	// Coding routing strategy
+	CodingRoutingStrategy string          `mapstructure:"coding_routing_strategy"` // free_first | quality_first | complexity_aware
+	Complexity            ComplexityConfig `mapstructure:"complexity"`
+}
+
+type ComplexityConfig struct {
+	SimpleThresholdTokens int      `mapstructure:"simple_threshold_tokens"`
+	ComplexThresholdTokens int     `mapstructure:"complex_threshold_tokens"`
+	ComplexKeywords        []string `mapstructure:"complex_keywords"`
 }
 
 type CircuitBreakerConfig struct {
@@ -68,6 +80,9 @@ type ChannelConfig struct {
 	ProviderType string   `mapstructure:"provider_type"`
 	RawAPIKey    string   `mapstructure:"-"` // Pre-expansion value, set by Load()
 	RPM       int      `mapstructure:"rpm"`
+	BalanceProviderType string `mapstructure:"balance_provider_type"`
+	BalanceConfigJSON   string `mapstructure:"balance_config_json"`
+	ModelRPMOverrides   string `mapstructure:"model_rpm_overrides"`
 	RPD       int      `mapstructure:"rpd"`
 	Priority  int      `mapstructure:"priority"`
 	Models    []string `mapstructure:"models"`

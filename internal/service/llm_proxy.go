@@ -10,11 +10,14 @@ import (
 	"net/http"
 	"os"
 	"sort"
+	"strconv"
 	"strings"
 	"sync"
 	"time"
 
 	"github.com/singll/bellkeeper/internal/config"
+	"github.com/singll/bellkeeper/internal/llm/balance"
+	"github.com/singll/bellkeeper/internal/llm/converter"
 	"github.com/singll/bellkeeper/internal/middleware"
 	"github.com/singll/bellkeeper/internal/model"
 	"github.com/singll/bellkeeper/internal/pkg/httpclient"
@@ -146,6 +149,7 @@ type LLMProxyService struct {
 	groupRepo      *repository.LLMModelGroupRepository
 	pricer         *Pricer
 	tokenUsageRepo *repository.LLMTokenUsageRepository
+	balanceMgr     *balance.Manager
 	stopChans      []chan struct{}           // cleanup goroutine stop channels
 }
 
@@ -166,7 +170,67 @@ func NewLLMProxyService(cfg config.LLMProxyConfig, repo *repository.LLMProxyRepo
 		middleware.GetLogger().Error("failed to load llm-proxy config from DB", zap.Error(err))
 	}
 
+	// Initialize balance manager
+	if cfg.BalanceSyncInterval > 0 {
+		svc.balanceMgr = balance.NewManager(time.Duration(cfg.BalanceSyncInterval) * time.Second)
+		svc.registerBalanceProviders()
+		svc.balanceMgr.Start()
+	}
+
 	return svc
+}
+
+func (s *LLMProxyService) registerBalanceProviders() {
+	if s.balanceMgr == nil {
+		return
+	}
+	for name, ch := range s.channels {
+		if ch.Config.BalanceProviderType == "" {
+			continue
+		}
+		apiKey := ch.Config.APIKey
+		if apiKey == "" {
+			continue
+		}
+		if err := s.balanceMgr.Register(name, ch.Config.BalanceProviderType, ch.Config.BaseURL, apiKey, ch.Config.BalanceConfigJSON); err != nil {
+			middleware.GetLogger().Warn("failed to register balance provider",
+				zap.String("channel", name), zap.Error(err))
+		}
+	}
+}
+
+// GetChannelBalance returns the last fetched balance for a channel.
+func (s *LLMProxyService) GetChannelBalance(channelName string) *balance.Info {
+	if s.balanceMgr == nil {
+		return nil
+	}
+	return s.balanceMgr.Get(channelName)
+}
+
+// GetAllBalances returns all channel balances.
+func (s *LLMProxyService) GetAllBalances() map[string]*balance.Info {
+	if s.balanceMgr == nil {
+		return nil
+	}
+	return s.balanceMgr.GetAll()
+}
+
+// RefreshBalances triggers an immediate balance refresh.
+func (s *LLMProxyService) RefreshBalances() {
+	if s.balanceMgr == nil {
+		return
+	}
+	s.balanceMgr.RefreshAll()
+}
+
+// Stop halts background services (balance manager, etc.).
+func (s *LLMProxyService) Stop() {
+	for _, stop := range s.stopChans {
+		close(stop)
+	}
+	if s.balanceMgr != nil {
+		s.balanceMgr.Stop()
+	}
 }
 
 // loadFromDB loads channel and model group configuration from the database.
@@ -286,16 +350,19 @@ func dbChannelToConfig(ch model.LLMChannel) config.ChannelConfig {
 	}
 
 	return config.ChannelConfig{
-		Name:         ch.Name,
-		BaseURL:      ch.BaseURL,
-		APIKey:       apiKey,
-		ProviderType: providerType,
-		RPM:          ch.RPM,
-		RPD:          ch.RPD,
-		Priority:     ch.Priority,
-		Models:       ch.GetModels(),
-		IsEnabled:    ch.IsEnabled,
-		IsFree:       ch.IsFree,
+		Name:                ch.Name,
+		BaseURL:             ch.BaseURL,
+		APIKey:              apiKey,
+		ProviderType:        providerType,
+		RPM:                 ch.RPM,
+		RPD:                 ch.RPD,
+		Priority:            ch.Priority,
+		Models:              ch.GetModels(),
+		IsEnabled:           ch.IsEnabled,
+		IsFree:              ch.IsFree,
+		BalanceProviderType: ch.BalanceProviderType,
+		BalanceConfigJSON:   ch.BalanceConfigJSON,
+		ModelRPMOverrides:   ch.ModelRPMOverrides,
 	}
 }
 
@@ -536,9 +603,12 @@ func (s *LLMProxyService) tryChannel(
 			return 429, []byte(`{"error":"rate limit: bucket exhausted after retries"}`), nil, nil
 		}
 
-		// Prepare request body and path for Anthropic conversion
+		// Prepare request body and path for provider-specific conversion
 		forwardBody := body
 		forwardPath := path
+		isGemini := ch.Config.ProviderType == "gemini"
+		realModel := modelName
+
 		if isAnthropic {
 			converted, err := ConvertOpenAIToAnthropic(body)
 			if err != nil {
@@ -548,6 +618,23 @@ func (s *LLMProxyService) tryChannel(
 			if path == "/v1/chat/completions" {
 				forwardPath = "/v1/messages"
 			}
+		} else if isGemini {
+			// Parse and strip suffixes, rewrite model
+			parsedBody, parsedModel := s.parseModelSuffixes(body)
+			realModel = parsedModel
+			converted, err := geminiOpenAIToGemini(parsedBody)
+			if err != nil {
+				return 400, []byte(`{"error":"gemini request conversion failed"}`), nil, fmt.Errorf("gemini conversion: %w", err)
+			}
+			forwardBody = converted
+			if path == "/v1/chat/completions" {
+				forwardPath = "/v1beta/models/" + realModel + ":generateContent"
+			}
+		} else {
+			// Strip suffixes for non-gemini providers too (reasoning effort, thinking)
+			parsedBody, parsedModel := s.parseModelSuffixes(body)
+			realModel = parsedModel
+			forwardBody = parsedBody
 		}
 
 		// Forward request upstream
@@ -568,16 +655,19 @@ func (s *LLMProxyService) tryChannel(
 			req.Header.Set("x-api-key", ch.Config.APIKey)
 			req.Header.Set("anthropic-version", anthropicVersion)
 			req.Header.Del("Authorization")
+		} else if isGemini {
+			req.Header.Set("Authorization", "Bearer "+ch.Config.APIKey)
+			req.Header.Set("Content-Type", "application/json")
 		} else {
 			req.Header.Set("Authorization", "Bearer "+ch.Config.APIKey)
+			req.Header.Set("Content-Type", "application/json")
 		}
-		req.Header.Set("Content-Type", "application/json")
 
 		resp, err := ch.Client.Do(req)
 		durationMs := int(time.Since(start).Milliseconds())
 
 		if err != nil {
-			s.logRequest(ch.Config.Name, modelName, path, 0, false, attempt, durationMs, 0, 0, 0,
+			s.logRequest(ch.Config.Name, realModel, path, 0, false, attempt, durationMs, 0, 0, 0,
 				err.Error(), callerID)
 			return 0, nil, nil, fmt.Errorf("upstream request: %w", err)
 		}
@@ -585,11 +675,19 @@ func (s *LLMProxyService) tryChannel(
 		respBytes, _ := io.ReadAll(resp.Body)
 		resp.Body.Close()
 
-		// Convert Anthropic response back to OpenAI format
+		// Convert provider response back to OpenAI format
 		if isAnthropic && resp.StatusCode < 500 {
 			converted, err := ConvertAnthropicToOpenAI(respBytes)
 			if err != nil {
 				middleware.GetLogger().Warn("anthropic response conversion failed",
+					zap.String("channel", ch.Config.Name), zap.Error(err))
+			} else {
+				respBytes = converted
+			}
+		} else if isGemini && resp.StatusCode < 500 {
+			converted, err := geminiGeminiToOpenAI(respBytes, modelName)
+			if err != nil {
+				middleware.GetLogger().Warn("gemini response conversion failed",
 					zap.String("channel", ch.Config.Name), zap.Error(err))
 			} else {
 				respBytes = converted
@@ -1060,10 +1158,77 @@ func (s *LLMProxyService) GetRateLimitEvents(hours int, channelName string) ([]m
 	return s.repo.GetRateLimitEvents(since, channelName)
 }
 
-// Stop gracefully shuts down all background goroutines (model group cleanup).
-func (s *LLMProxyService) Stop() {
-	for _, stop := range s.stopChans {
-		close(stop)
+// parseModelSuffixes handles reasoning effort (-high/-medium/-low) and thinking mode (-thinking-N) suffixes.
+// Returns modified request body and the real model name to send upstream.
+func (s *LLMProxyService) parseModelSuffixes(body []byte) ([]byte, string) {
+	var req struct {
+		Model string `json:"model"`
 	}
-	s.stopChans = nil
+	if err := json.Unmarshal(body, &req); err != nil {
+		return body, ""
+	}
+	originalModel := req.Model
+	realModel := originalModel
+
+	// Reasoning effort suffixes: o4-mini-high → o4-mini + reasoning.effort=high
+	if strings.HasSuffix(originalModel, "-high") {
+		realModel = strings.TrimSuffix(originalModel, "-high")
+		body = injectField(body, "reasoning", map[string]string{"effort": "high"})
+	} else if strings.HasSuffix(originalModel, "-medium") {
+		realModel = strings.TrimSuffix(originalModel, "-medium")
+		body = injectField(body, "reasoning", map[string]string{"effort": "medium"})
+	} else if strings.HasSuffix(originalModel, "-low") {
+		realModel = strings.TrimSuffix(originalModel, "-low")
+		body = injectField(body, "reasoning", map[string]string{"effort": "low"})
+	}
+
+	// Thinking mode suffix: claude-sonnet-thinking-2048 → thinking.budget_tokens=2048
+	if idx := strings.LastIndex(realModel, "-thinking-"); idx > 0 {
+		budgetStr := realModel[idx+len("-thinking-"):]
+		if budget, err := strconv.Atoi(budgetStr); err == nil {
+			realModel = realModel[:idx]
+			body = injectField(body, "thinking", map[string]int{"budget_tokens": budget})
+		}
+	}
+
+	// Replace model name in body
+	if realModel != originalModel {
+		body = replaceModelInBody(body, realModel)
+	}
+	return body, realModel
+}
+
+func injectField(body []byte, key string, value interface{}) []byte {
+	var m map[string]interface{}
+	if err := json.Unmarshal(body, &m); err != nil {
+		return body
+	}
+	m[key] = value
+	b, err := json.Marshal(m)
+	if err != nil {
+		return body
+	}
+	return b
+}
+
+func replaceModelInBody(body []byte, model string) []byte {
+	var m map[string]interface{}
+	if err := json.Unmarshal(body, &m); err != nil {
+		return body
+	}
+	m["model"] = model
+	b, err := json.Marshal(m)
+	if err != nil {
+		return body
+	}
+	return b
+}
+
+// Alias for converter package functions to avoid import cycle.
+func geminiOpenAIToGemini(body []byte) ([]byte, error) {
+	return converter.OpenAIToGemini(body)
+}
+
+func geminiGeminiToOpenAI(body []byte, model string) ([]byte, error) {
+	return converter.GeminiToOpenAI(body, model)
 }

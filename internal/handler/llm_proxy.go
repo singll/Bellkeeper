@@ -370,6 +370,32 @@ func (h *LLMProxyHandler) ReloadConfig(c *gin.Context) {
 	response.Message(c, "configuration reloaded")
 }
 
+// --- Balance ---
+
+func (h *LLMProxyHandler) ChannelBalance(c *gin.Context) {
+	name := c.Param("name")
+	info := h.svc.GetChannelBalance(name)
+	if info == nil {
+		response.NotFound(c, "no balance info for channel: "+name)
+		return
+	}
+	response.Success(c, info)
+}
+
+func (h *LLMProxyHandler) AllBalances(c *gin.Context) {
+	infos := h.svc.GetAllBalances()
+	if infos == nil {
+		response.Success(c, map[string]interface{}{})
+		return
+	}
+	response.Success(c, infos)
+}
+
+func (h *LLMProxyHandler) RefreshBalances(c *gin.Context) {
+	h.svc.RefreshBalances()
+	response.Message(c, "balance refresh triggered")
+}
+
 // --- Token CRUD ---
 
 func (h *LLMProxyHandler) ListTokens(c *gin.Context) {

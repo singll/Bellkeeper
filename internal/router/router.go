@@ -159,6 +159,11 @@ func registerLLMProxyRoutes(api *gin.RouterGroup, h *handler.LLMProxyHandler) {
 
 	llm.POST("/reload", h.ReloadConfig)
 
+	// Balance
+	llm.GET("/channels/:name/balance", h.ChannelBalance)
+	llm.GET("/balances", h.AllBalances)
+	llm.POST("/balances/refresh", h.RefreshBalances)
+
 	// Token CRUD
 	llm.GET("/tokens", h.ListTokens)
 	llm.POST("/tokens", h.CreateToken)
