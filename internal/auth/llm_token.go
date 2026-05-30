@@ -12,7 +12,6 @@ import (
 	"github.com/gin-gonic/gin"
 	"github.com/singll/bellkeeper/internal/model"
 	"github.com/singll/bellkeeper/internal/pkg/response"
-	"go.uber.org/zap"
 )
 
 // LLMTokenStore abstracts token storage to avoid import cycles.

@@ -2,12 +2,14 @@ package router
 
 import (
 	"github.com/gin-gonic/gin"
+	"github.com/singll/bellkeeper/internal/auth"
 	"github.com/singll/bellkeeper/internal/handler"
 	"github.com/singll/bellkeeper/internal/middleware"
+	"github.com/singll/bellkeeper/internal/repository"
 )
 
 // Setup configures all routes on the Gin engine.
-func Setup(r *gin.Engine, handlers *handler.Handlers, mode string, apiKey string) {
+func Setup(r *gin.Engine, handlers *handler.Handlers, mode string, apiKey string, tokenRepo *repository.LLMTokenRepository) {
 	// Health check (no auth required)
 	r.GET("/api/health", handlers.Health.Check)
 	r.GET("/api/health/detailed", handlers.Health.Detailed)
@@ -27,7 +29,7 @@ func Setup(r *gin.Engine, handlers *handler.Handlers, mode string, apiKey string
 	registerSettingRoutes(api, handlers.Setting)
 	registerWorkflowRoutes(api, handlers.Workflow)
 	registerSystemRoutes(api, handlers.System)
-	registerLLMProxyRoutes(api, handlers.LLMProxy)
+	registerLLMProxyRoutes(api, handlers.LLMProxy, tokenRepo, apiKey)
 	registerClassifyRoutes(api, handlers.Classify)
 	registerActivityLogRoutes(api, handlers.ActivityLog)
 	registerLogCenterRoutes(api, handlers.LogCenter)
@@ -128,9 +130,10 @@ func registerSystemRoutes(api *gin.RouterGroup, h *handler.SystemHandler) {
 	api.POST("/system/backup", h.BackupRun)
 }
 
-func registerLLMProxyRoutes(api *gin.RouterGroup, h *handler.LLMProxyHandler) {
-	// OpenAI-compatible proxy endpoint
+func registerLLMProxyRoutes(api *gin.RouterGroup, h *handler.LLMProxyHandler, tokenRepo *repository.LLMTokenRepository, serverAPIKey string) {
+	// OpenAI-compatible proxy endpoint (with token auth)
 	llm := api.Group("/llm")
+	llm.Use(auth.LLMTokenAuth(tokenRepo, serverAPIKey))
 	llm.Any("/v1/*path", h.Proxy)
 
 	// Management endpoints (runtime status)
@@ -178,6 +181,22 @@ func registerLLMProxyRoutes(api *gin.RouterGroup, h *handler.LLMProxyHandler) {
 	llm.PUT("/pricing/:id", h.UpdatePricing)
 	llm.DELETE("/pricing/:id", h.DeletePricing)
 	llm.POST("/pricing/test-calc", h.TestPricingCalc)
+
+	// Conversations (sticky session management)
+	llm.GET("/conversations", h.ListConversations)
+	llm.DELETE("/conversations/:id", h.DeleteConversation)
+
+	// Usage / Billing
+	llm.GET("/usage", h.GetUsage)
+
+	// Rate Limits (adaptive learning)
+	llm.GET("/rate-limits", h.ListRateLimits)
+	llm.POST("/rate-limits/:channel_id/:model/reset", h.ResetRateLimit)
+	llm.POST("/rate-limits/:id/lock", h.LockRateLimit)
+
+	// Coding strategy
+	llm.GET("/coding-strategy", h.GetCodingStrategy)
+	llm.POST("/coding-strategy", h.SetCodingStrategy)
 }
 
 func registerClassifyRoutes(api *gin.RouterGroup, h *handler.ClassifyHandler) {

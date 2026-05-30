@@ -255,6 +255,17 @@ func (g *ModelGroup) SelectChannel(taskKey string) (*Channel, string) {
 	return selected.Channel, selected.Config.Model
 }
 
+// GetStickyBinding returns the current sticky binding for a task key without modifying it.
+func (g *ModelGroup) GetStickyBinding(taskKey string) (*Channel, string) {
+	if taskKey == "" || g.Sticky == nil {
+		return nil, ""
+	}
+	if binding := g.Sticky.Get(taskKey); binding != nil {
+		return binding.Channel, binding.Model
+	}
+	return nil, ""
+}
+
 // filterAvailable returns members whose channels are not circuit-broken
 // and have tokens remaining.
 func (g *ModelGroup) filterAvailable() []*ModelGroupMemberRuntime {

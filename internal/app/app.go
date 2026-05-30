@@ -290,7 +290,7 @@ func (a *App) SetupHTTP() {
 	r.Use(middleware.CORS())
 	r.Use(middleware.Logger())
 
-	router.Setup(r, a.handlers, a.cfg.Server.Mode, a.cfg.Server.APIKey)
+	router.Setup(r, a.handlers, a.cfg.Server.Mode, a.cfg.Server.APIKey, a.repos.LLMToken)
 
 	// Serve frontend static files
 	if _, err := os.Stat("web/dist"); err == nil {

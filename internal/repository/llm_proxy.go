@@ -85,3 +85,8 @@ func (r *LLMProxyRepository) GetLogsBefore(cutoff time.Time) ([]model.LLMProxyLo
 func (r *LLMProxyRepository) DeleteLogsBefore(cutoff time.Time) error {
 	return r.db.Where("created_at < ?", cutoff).Delete(&model.LLMProxyLog{}).Error
 }
+
+// SaveAlertEvent persists an alert event to the database.
+func (r *LLMProxyRepository) SaveAlertEvent(event *model.LLMAlertEvent) error {
+	return r.db.Create(event).Error
+}

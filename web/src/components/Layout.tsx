@@ -257,6 +257,8 @@ const navGroups: NavGroup[] = [
       { path: '/llm/groups', label: '模型组', icon: <GroupIcon /> },
       { path: '/llm/config', label: '配置', icon: <ConfigIcon /> },
       { path: '/llm/tokens', label: 'Token 管理', icon: <KeyIcon /> },
+      { path: '/llm/pricing', label: '定价配置', icon: <ConfigIcon /> },
+      { path: '/llm/billing', label: '计费统计', icon: <DashboardTabIcon /> },
       { path: '/llm/logs', label: '调用日志', icon: <LogListIcon /> },
     ],
   },

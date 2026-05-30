@@ -267,6 +267,31 @@ export const llmProxyApi = {
     request<{ message: string }>(`/llm/pricing/${id}`, { method: 'DELETE' }),
   testPricingCalc: (data: { channel_name: string; model: string; prompt_tokens: number; completion_tokens: number; cached_tokens: number }) =>
     request<{ cost_cents: number; cost_usd: string }>('/llm/pricing/test-calc', { method: 'POST', body: JSON.stringify(data) }),
+
+  // Usage / Billing
+  getUsage: (groupBy?: string, from?: string, to?: string) => {
+    const p = new URLSearchParams()
+    if (groupBy) p.set('group_by', groupBy)
+    if (from) p.set('from', from)
+    if (to) p.set('to', to)
+    return request<{ data: any[] }>(`/llm/usage?${p}`)
+  },
+
+  // Conversations
+  listConversations: () => request<{ data: any[] }>('/llm/conversations'),
+  deleteConversation: (id: string) => request<{ message: string }>(`/llm/conversations/${id}`, { method: 'DELETE' }),
+
+  // Rate Limits
+  listRateLimits: () => request<{ data: any[] }>('/llm/rate-limits'),
+  resetRateLimit: (channelId: number, model: string) =>
+    request<{ message: string }>(`/llm/rate-limits/${channelId}/${encodeURIComponent(model)}/reset`, { method: 'POST' }),
+  lockRateLimit: (id: number, locked: boolean) =>
+    request<{ message: string }>(`/llm/rate-limits/${id}/lock`, { method: 'POST', body: JSON.stringify({ locked }) }),
+
+  // Coding Strategy
+  getCodingStrategy: () => request<{ strategy: string }>('/llm/coding-strategy'),
+  setCodingStrategy: (strategy: string) =>
+    request<{ message: string }>('/llm/coding-strategy', { method: 'POST', body: JSON.stringify({ strategy }) }),
 }
 
 // Activity Logs API

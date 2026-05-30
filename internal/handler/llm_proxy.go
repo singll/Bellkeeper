@@ -674,3 +674,122 @@ func (h *LLMProxyHandler) TestPricingCalc(c *gin.Context) {
 		"cost_usd":   fmt.Sprintf("%.4f", float64(cost)/100),
 	})
 }
+
+// --- Conversations ---
+
+func (h *LLMProxyHandler) ListConversations(c *gin.Context) {
+	bindings := h.svc.GetConversations()
+	response.Success(c, bindings)
+}
+
+func (h *LLMProxyHandler) DeleteConversation(c *gin.Context) {
+	convID := c.Param("id")
+	if convID == "" {
+		response.BadRequest(c, "conversation id required")
+		return
+	}
+	if err := h.svc.DeleteConversation(convID); err != nil {
+		response.InternalError(c, err.Error())
+		return
+	}
+	response.Message(c, "conversation binding deleted")
+}
+
+// --- Usage / Billing ---
+
+func (h *LLMProxyHandler) GetUsage(c *gin.Context) {
+	groupBy := c.DefaultQuery("group_by", "date")
+	fromStr := c.Query("from")
+	toStr := c.Query("to")
+
+	from := time.Now().AddDate(0, 0, -30)
+	to := time.Now()
+	if fromStr != "" {
+		if t, err := time.Parse(time.RFC3339, fromStr); err == nil {
+			from = t
+		}
+	}
+	if toStr != "" {
+		if t, err := time.Parse(time.RFC3339, toStr); err == nil {
+			to = t
+		}
+	}
+
+	data, err := h.svc.GetUsageAggregates(groupBy, from, to)
+	if err != nil {
+		response.InternalError(c, err.Error())
+		return
+	}
+	response.Success(c, data)
+}
+
+// --- Rate Limits ---
+
+func (h *LLMProxyHandler) ListRateLimits(c *gin.Context) {
+	data, err := h.svc.GetRateLimits()
+	if err != nil {
+		response.InternalError(c, err.Error())
+		return
+	}
+	response.Success(c, data)
+}
+
+func (h *LLMProxyHandler) ResetRateLimit(c *gin.Context) {
+	channelID, err := strconv.ParseUint(c.Param("channel_id"), 10, 32)
+	if err != nil {
+		response.BadRequest(c, "invalid channel_id")
+		return
+	}
+	modelName := c.Param("model")
+	if modelName == "" {
+		response.BadRequest(c, "model required")
+		return
+	}
+	if err := h.svc.ResetRateLimit(uint(channelID), modelName); err != nil {
+		response.InternalError(c, err.Error())
+		return
+	}
+	response.Message(c, "rate limit reset")
+}
+
+func (h *LLMProxyHandler) LockRateLimit(c *gin.Context) {
+	id, err := strconv.ParseUint(c.Param("id"), 10, 32)
+	if err != nil {
+		response.BadRequest(c, "invalid id")
+		return
+	}
+	var req struct {
+		Locked bool `json:"locked"`
+	}
+	if err := c.ShouldBindJSON(&req); err != nil {
+		response.BadRequest(c, err.Error())
+		return
+	}
+	if err := h.svc.LockRateLimit(uint(id), req.Locked); err != nil {
+		response.InternalError(c, err.Error())
+		return
+	}
+	response.Message(c, "rate limit lock updated")
+}
+
+// --- Coding Strategy ---
+
+func (h *LLMProxyHandler) GetCodingStrategy(c *gin.Context) {
+	response.Success(c, gin.H{"strategy": h.svc.GetCodingStrategy()})
+}
+
+func (h *LLMProxyHandler) SetCodingStrategy(c *gin.Context) {
+	var req struct {
+		Strategy string `json:"strategy"`
+	}
+	if err := c.ShouldBindJSON(&req); err != nil {
+		response.BadRequest(c, err.Error())
+		return
+	}
+	if req.Strategy != "free_first" && req.Strategy != "quality_first" && req.Strategy != "complexity_aware" {
+		response.BadRequest(c, "strategy must be one of: free_first, quality_first, complexity_aware")
+		return
+	}
+	h.svc.SetCodingStrategy(req.Strategy)
+	response.Message(c, "coding strategy updated")
+}

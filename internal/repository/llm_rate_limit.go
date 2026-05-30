@@ -53,3 +53,8 @@ func (r *LLMRateLimitRepository) ListAll() ([]model.LLMModelRateLimit, error) {
 	}
 	return rls, nil
 }
+
+// SetLocked updates the locked state of a rate limit record by ID.
+func (r *LLMRateLimitRepository) SetLocked(id uint, locked bool) error {
+	return r.db.Model(&model.LLMModelRateLimit{}).Where("id = ?", id).Update("locked", locked).Error
+}

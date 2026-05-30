@@ -20,7 +20,7 @@ import MatrixCommandLogs from './pages/MatrixCommandLogs'
 // Knowledge pages
 import { KnowledgeFiles, KnowledgeSearch, KnowledgeAsk } from './pages/knowledge'
 // LLM pages (split from old LLMProxy)
-import { LLMOverview, LLMChannels, LLMGroups, LLMConfig, LLMLogs, LLMTokens } from './pages/llm'
+import { LLMOverview, LLMChannels, LLMGroups, LLMConfig, LLMLogs, LLMTokens, LLMPricing, LLMBilling } from './pages/llm'
 // Log pages (split from old LogCenter)
 import { LogBrowser, LogDashboard, LogSources, LogAlerts } from './pages/logs'
 import ErrorFallback from './components/ErrorFallback'
@@ -50,6 +50,8 @@ render(() => (
         <Route path="/llm/groups" component={LLMGroups} />
         <Route path="/llm/config" component={LLMConfig} />
         <Route path="/llm/tokens" component={LLMTokens} />
+        <Route path="/llm/pricing" component={LLMPricing} />
+        <Route path="/llm/billing" component={LLMBilling} />
         <Route path="/llm/logs" component={LLMLogs} />
         <Route path="/llm-proxy" component={LLMProxyRedirect} />
         {/* Logs (core system, split from old /logs tab) */}

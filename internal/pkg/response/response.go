@@ -65,6 +65,21 @@ func InternalError(c *gin.Context, msg string) {
 	c.JSON(http.StatusInternalServerError, gin.H{"error": msg})
 }
 
+// Unauthorized sends a 401 error response.
+func Unauthorized(c *gin.Context, msg string) {
+	c.JSON(http.StatusUnauthorized, gin.H{"error": msg})
+}
+
+// Forbidden sends a 403 error response.
+func Forbidden(c *gin.Context, msg string) {
+	c.JSON(http.StatusForbidden, gin.H{"error": msg})
+}
+
+// TooManyRequests sends a 429 error response.
+func TooManyRequests(c *gin.Context, msg string) {
+	c.JSON(http.StatusTooManyRequests, gin.H{"error": msg})
+}
+
 // ParsePagination extracts page and perPage from query parameters with defaults.
 func ParsePagination(c *gin.Context) (page, perPage int) {
 	page, _ = strconv.Atoi(c.DefaultQuery("page", "1"))

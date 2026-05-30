@@ -175,10 +175,12 @@ type LLMProxyService struct {
 	tokenUsageRepo *repository.LLMTokenUsageRepository
 	balanceMgr     *balance.Manager
 	rateLimitLearner *RateLimitLearner
+	taskRouter     *TaskRouter
+	convMgr        *ConversationBindingManager
 	stopChans      []chan struct{}           // cleanup goroutine stop channels
 }
 
-func NewLLMProxyService(cfg config.LLMProxyConfig, repo *repository.LLMProxyRepository, channelRepo *repository.LLMChannelRepository, groupRepo *repository.LLMModelGroupRepository, pricer *Pricer, tokenUsageRepo *repository.LLMTokenUsageRepository, rateLimitRepo *repository.LLMRateLimitRepository) *LLMProxyService {
+func NewLLMProxyService(cfg config.LLMProxyConfig, repo *repository.LLMProxyRepository, channelRepo *repository.LLMChannelRepository, groupRepo *repository.LLMModelGroupRepository, pricer *Pricer, tokenUsageRepo *repository.LLMTokenUsageRepository, rateLimitRepo *repository.LLMRateLimitRepository, convRepo *repository.ConversationBindingRepository) *LLMProxyService {
 	svc := &LLMProxyService{
 		cfg:            cfg,
 		channels:       make(map[string]*Channel),
@@ -206,6 +208,16 @@ func NewLLMProxyService(cfg config.LLMProxyConfig, repo *repository.LLMProxyRepo
 	svc.rateLimitLearner = NewRateLimitLearner(rateLimitRepo)
 	_ = svc.rateLimitLearner.LoadCache()
 	svc.rateLimitLearner.Start()
+
+	// Initialize task router
+	svc.taskRouter = NewTaskRouter(cfg.CodingRoutingStrategy)
+
+	// Initialize conversation binding manager
+	svc.convMgr = NewConversationBindingManager(convRepo, 24*time.Hour)
+	_ = svc.convMgr.LoadFromDB()
+	convStop := make(chan struct{})
+	svc.stopChans = append(svc.stopChans, convStop)
+	go svc.convCleanupLoop(convStop)
 
 	// Start log archival background task
 	svc.startLogArchival()
@@ -266,6 +278,50 @@ func (s *LLMProxyService) Stop() {
 	}
 	if s.rateLimitLearner != nil {
 		s.rateLimitLearner.Stop()
+	}
+}
+
+// validateBinding checks if a conversation binding is still valid.
+func (s *LLMProxyService) validateBinding(binding *model.LLMConversationBinding) error {
+	if time.Now().After(binding.ExpiresAt) {
+		return fmt.Errorf("binding expired")
+	}
+	s.mu.RLock()
+	ch, ok := s.channels[binding.ChannelName]
+	s.mu.RUnlock()
+	if !ok {
+		return fmt.Errorf("bound channel %s no longer exists", binding.ChannelName)
+	}
+	if !ch.Health.IsAvailable() {
+		return fmt.Errorf("bound channel %s is unavailable", binding.ChannelName)
+	}
+	return nil
+}
+
+// headerToMap converts http.Header to a simple map[string]string (first value only).
+func headerToMap(h http.Header) map[string]string {
+	m := make(map[string]string, len(h))
+	for k, v := range h {
+		if len(v) > 0 {
+			m[k] = v[0]
+		}
+	}
+	return m
+}
+
+// convCleanupLoop periodically cleans up expired conversation bindings.
+func (s *LLMProxyService) convCleanupLoop(stopCh <-chan struct{}) {
+	ticker := time.NewTicker(5 * time.Minute)
+	defer ticker.Stop()
+	for {
+		select {
+		case <-ticker.C:
+			if s.convMgr != nil {
+				s.convMgr.CleanupExpired()
+			}
+		case <-stopCh:
+			return
+		}
 	}
 }
 
@@ -501,9 +557,52 @@ func (s *LLMProxyService) ProxyRequest(
 		taskKey = callerID + ":" + modelName
 	}
 
+	// --- Task type detection (for logging and future task-aware routing) ---
+	headerMap := headerToMap(headers)
+	taskType := s.taskRouter.DetectTaskType(headerMap, modelName, body, 0)
+	_ = taskType // currently logged; task-aware tiered routing uses model-group configuration
+
+	// --- Conversation binding (sticky session) ---
+	convID := s.convMgr.ImplicitConversationID(headerMap, body)
+	allowSwitch := headers.Get("X-Allow-Channel-Switch") == "true"
+
+	if convID != "" && !allowSwitch {
+		binding := s.convMgr.Get(convID)
+		if binding != nil {
+			if err := s.validateBinding(binding); err == nil {
+				// Bound channel is healthy — route directly to protect prompt cache
+				s.mu.RLock()
+				ch := s.channels[binding.ChannelName]
+				s.mu.RUnlock()
+				if ch != nil {
+					rewrittenBody := rewriteModel(body, binding.Model)
+					statusCode, respBody, respHeaders, err := s.tryChannel(ch, method, path, headers, rewrittenBody, callerID)
+					if err == nil && statusCode < 500 && statusCode != 429 {
+						ch.Health.RecordSuccess()
+						s.convMgr.Touch(convID, 0, 0)
+						return statusCode, respBody, respHeaders, nil
+					}
+				}
+				return 503, []byte(`{"error":"bound channel unavailable for conversation ` + convID + `"}`), nil, nil
+			}
+		}
+	}
+
 	// Check if model matches a virtual model group
 	if group, ok := modelGroups[modelName]; ok {
-		return s.proxyViaGroup(group, taskKey, method, path, headers, body, callerID)
+		statusCode, respBody, respHeaders, err = s.proxyViaGroup(group, taskKey, method, path, headers, body, callerID)
+		if err == nil && statusCode < 500 && statusCode != 429 {
+			// Record conversation binding on success
+			if convID != "" {
+				// Find which channel was actually used (from sticky binding)
+				if taskKey != "" && group.Sticky != nil {
+					if stickyCh, stickyModel := group.GetStickyBinding(taskKey); stickyCh != nil {
+						s.convMgr.Set(convID, 0, stickyCh.Config.Name, stickyModel, string(taskType))
+					}
+				}
+			}
+		}
+		return statusCode, respBody, respHeaders, err
 	}
 
 	// Direct channel matching (existing logic)
@@ -524,6 +623,9 @@ func (s *LLMProxyService) ProxyRequest(
 		statusCode, respBody, respHeaders, err = s.tryChannel(ch, method, path, headers, body, callerID)
 		if err == nil && statusCode < 500 && statusCode != 429 {
 			ch.Health.RecordSuccess()
+			if convID != "" {
+				s.convMgr.Set(convID, 0, ch.Config.Name, modelName, string(taskType))
+			}
 			return statusCode, respBody, respHeaders, nil
 		}
 		errBody := ""
@@ -959,6 +1061,34 @@ func (s *LLMProxyService) ProxyStreamRequest(
 		taskKey = callerID + ":" + modelName
 	}
 
+	// --- Conversation binding (sticky session) ---
+	headerMap := headerToMap(headers)
+	convID := s.convMgr.ImplicitConversationID(headerMap, body)
+	allowSwitch := headers.Get("X-Allow-Channel-Switch") == "true"
+
+	if convID != "" && !allowSwitch {
+		binding := s.convMgr.Get(convID)
+		if binding != nil {
+			if err := s.validateBinding(binding); err == nil {
+				s.mu.RLock()
+				ch := s.channels[binding.ChannelName]
+				s.mu.RUnlock()
+				if ch != nil {
+					rewrittenBody := rewriteModel(body, binding.Model)
+					result, err := s.tryChannelStream(ch, method, path, headers, rewrittenBody, callerID)
+					if err == nil {
+						result.ModelName = binding.Model
+						s.logRequest(ch.Config.Name, binding.Model, path, result.StatusCode, false,
+							0, 0, 0, 0, 0, "", callerID)
+						s.convMgr.Touch(convID, 0, 0)
+					}
+					return result, err
+				}
+			}
+			return nil, fmt.Errorf("bound channel unavailable for conversation %s", convID)
+		}
+	}
+
 	// Check virtual model group
 	if group, ok := modelGroups[modelName]; ok {
 		ch, realModel := group.SelectChannel(taskKey)
@@ -972,6 +1102,13 @@ func (s *LLMProxyService) ProxyStreamRequest(
 			// Log stream start
 			s.logRequest(ch.Config.Name, modelName+"→"+realModel, path, result.StatusCode, false,
 				0, 0, 0, 0, 0, "", callerID)
+			if convID != "" {
+				if taskKey != "" && group.Sticky != nil {
+					if stickyCh, stickyModel := group.GetStickyBinding(taskKey); stickyCh != nil {
+						s.convMgr.Set(convID, 0, stickyCh.Config.Name, stickyModel, "")
+					}
+				}
+			}
 		}
 		return result, err
 	}
@@ -994,6 +1131,9 @@ func (s *LLMProxyService) ProxyStreamRequest(
 		result.ModelName = modelName
 		s.logRequest(ch.Config.Name, modelName, path, result.StatusCode, false,
 			0, 0, 0, 0, 0, "", callerID)
+		if convID != "" {
+			s.convMgr.Set(convID, 0, ch.Config.Name, modelName, "")
+		}
 	}
 	return result, err
 }
@@ -1210,6 +1350,94 @@ func (s *LLMProxyService) GetRecentLogs(channelName string, limit int) ([]model.
 func (s *LLMProxyService) GetRateLimitEvents(hours int, channelName string) ([]model.LLMProxyLog, error) {
 	since := time.Now().Add(-time.Duration(hours) * time.Hour)
 	return s.repo.GetRateLimitEvents(since, channelName)
+}
+
+// --- Conversations ---
+
+// GetConversations returns all active conversation bindings.
+func (s *LLMProxyService) GetConversations() []*model.LLMConversationBinding {
+	if s.convMgr == nil {
+		return nil
+	}
+	return s.convMgr.List()
+}
+
+// DeleteConversation removes a conversation binding.
+func (s *LLMProxyService) DeleteConversation(convID string) error {
+	if s.convMgr == nil {
+		return fmt.Errorf("conversation manager not initialized")
+	}
+	s.convMgr.Remove(convID)
+	if s.convMgr.repo != nil {
+		return s.convMgr.repo.Delete(convID)
+	}
+	return nil
+}
+
+// --- Rate Limits ---
+
+// GetRateLimits returns the adaptive rate-limit learning state for all channel×model pairs.
+func (s *LLMProxyService) GetRateLimits() ([]model.LLMModelRateLimit, error) {
+	if s.rateLimitLearner == nil || s.rateLimitLearner.repo == nil {
+		return nil, nil
+	}
+	return s.rateLimitLearner.repo.ListAll()
+}
+
+// ResetRateLimit resets learned rate limit for a channel×model to cold-start defaults.
+func (s *LLMProxyService) ResetRateLimit(channelID uint, model string) error {
+	if s.rateLimitLearner == nil || s.rateLimitLearner.repo == nil {
+		return fmt.Errorf("rate limit learner not initialized")
+	}
+	rl, err := s.rateLimitLearner.repo.GetOrCreate(channelID, model, 0)
+	if err != nil {
+		return err
+	}
+	// Reset to configured * 0.5
+	rl.LearnedRPMSafe = int(float64(rl.ConfiguredRPM) * 0.5)
+	rl.LearnedRPDSafe = 0
+	rl.ConfidenceScore = 0.1
+	rl.LastAdjustAt = nil
+	rl.Last429At = nil
+	rl.Last429ObservedRPM = 0
+	rl.AdjustmentLog = ""
+	return s.rateLimitLearner.repo.Update(rl)
+}
+
+// LockRateLimit toggles the locked state for a rate limit record.
+func (s *LLMProxyService) LockRateLimit(id uint, locked bool) error {
+	if s.rateLimitLearner == nil || s.rateLimitLearner.repo == nil {
+		return fmt.Errorf("rate limit learner not initialized")
+	}
+	return s.rateLimitLearner.repo.SetLocked(id, locked)
+}
+
+// --- Task Router ---
+
+// GetCodingStrategy returns the current coding routing strategy.
+func (s *LLMProxyService) GetCodingStrategy() string {
+	if s.taskRouter == nil {
+		return "complexity_aware"
+	}
+	return s.taskRouter.GetCodingStrategy()
+}
+
+// SetCodingStrategy updates the coding routing strategy.
+func (s *LLMProxyService) SetCodingStrategy(strategy string) {
+	if s.taskRouter == nil {
+		return
+	}
+	s.taskRouter.SetCodingStrategy(strategy)
+}
+
+// --- Usage / Billing ---
+
+// GetUsageAggregates returns token usage aggregated by the requested dimension.
+func (s *LLMProxyService) GetUsageAggregates(groupBy string, from, to time.Time) ([]map[string]interface{}, error) {
+	if s.tokenUsageRepo == nil {
+		return nil, fmt.Errorf("token usage repo not initialized")
+	}
+	return s.tokenUsageRepo.Aggregate(groupBy, from, to)
 }
 
 // parseModelSuffixes handles reasoning effort (-high/-medium/-low) and thinking mode (-thinking-N) suffixes.
