@@ -2,6 +2,7 @@ package service
 
 import (
 	"bytes"
+	"compress/gzip"
 	"encoding/json"
 	"fmt"
 	"io"
@@ -9,6 +10,7 @@ import (
 	"math/rand"
 	"net/http"
 	"os"
+	"path/filepath"
 	"sort"
 	"strconv"
 	"strings"
@@ -128,10 +130,31 @@ func (tb *TokenBucket) Status() map[string]interface{} {
 // Channel represents a single upstream LLM API endpoint with its own rate limiter
 // and health tracker.
 type Channel struct {
-	Config config.ChannelConfig
-	Bucket *TokenBucket
-	Client *httpclient.Client
-	Health *ChannelHealth
+	Config      config.ChannelConfig
+	Bucket      *TokenBucket
+	Client      *httpclient.Client
+	Health      *ChannelHealth
+	ewmaLatency float64 // ms, exponential weighted moving average
+	mu          sync.Mutex
+}
+
+// RecordLatency updates the channel's EWMA latency.
+func (ch *Channel) RecordLatency(durationMs int) {
+	ch.mu.Lock()
+	defer ch.mu.Unlock()
+	if ch.ewmaLatency == 0 {
+		ch.ewmaLatency = float64(durationMs)
+	} else {
+		const alpha = 0.1
+		ch.ewmaLatency = alpha*float64(durationMs) + (1-alpha)*ch.ewmaLatency
+	}
+}
+
+// EWMALatency returns the current EWMA latency in milliseconds.
+func (ch *Channel) EWMALatency() float64 {
+	ch.mu.Lock()
+	defer ch.mu.Unlock()
+	return ch.ewmaLatency
 }
 
 // --- LLM Proxy Service ---
@@ -176,6 +199,9 @@ func NewLLMProxyService(cfg config.LLMProxyConfig, repo *repository.LLMProxyRepo
 		svc.registerBalanceProviders()
 		svc.balanceMgr.Start()
 	}
+
+	// Start log archival background task
+	svc.startLogArchival()
 
 	return svc
 }
@@ -704,6 +730,11 @@ func (s *LLMProxyService) tryChannel(
 		s.logRequest(ch.Config.Name, modelName, path, resp.StatusCode, isRateLimit,
 			attempt, durationMs, promptTokens, compTokens, cachedTokens, "", callerID)
 
+		// Record latency for routing strategy scoring
+		if resp.StatusCode < 500 && resp.StatusCode != 429 {
+			ch.RecordLatency(durationMs)
+		}
+
 		if resp.StatusCode == 429 && attempt < maxRetries {
 			backoff := s.calculateBackoff(attempt)
 			middleware.GetLogger().Warn("upstream 429, backing off",
@@ -1231,4 +1262,80 @@ func geminiOpenAIToGemini(body []byte) ([]byte, error) {
 
 func geminiGeminiToOpenAI(body []byte, model string) ([]byte, error) {
 	return converter.GeminiToOpenAI(body, model)
+}
+
+// startLogArchival starts a background goroutine that archives old LLM proxy logs daily.
+func (s *LLMProxyService) startLogArchival() {
+	retentionDays := s.cfg.LogRetentionDays
+	if retentionDays <= 0 {
+		retentionDays = 30
+	}
+
+	go func() {
+		ticker := time.NewTicker(24 * time.Hour)
+		defer ticker.Stop()
+
+		// Run once at startup (after a short delay)
+		time.Sleep(5 * time.Minute)
+		s.archiveLogs(retentionDays)
+
+		for {
+			select {
+			case <-ticker.C:
+				s.archiveLogs(retentionDays)
+			case <-s.stopChans[0]:
+				return
+			}
+		}
+	}()
+}
+
+func (s *LLMProxyService) archiveLogs(retentionDays int) {
+	cutoff := time.Now().AddDate(0, 0, -retentionDays)
+	month := cutoff.Format("2006-01")
+
+	archiveDir := "/mnt/knowledge/logs-archive/llm"
+	if err := os.MkdirAll(archiveDir, 0755); err != nil {
+		middleware.GetLogger().Warn("failed to create archive dir", zap.String("dir", archiveDir), zap.Error(err))
+		return
+	}
+
+	archivePath := filepath.Join(archiveDir, month+".jsonl.gz")
+	file, err := os.OpenFile(archivePath, os.O_CREATE|os.O_APPEND|os.O_WRONLY, 0644)
+	if err != nil {
+		middleware.GetLogger().Warn("failed to open archive file", zap.String("path", archivePath), zap.Error(err))
+		return
+	}
+	defer file.Close()
+
+	gzWriter := gzip.NewWriter(file)
+	defer gzWriter.Close()
+
+	// Query old logs
+	logs, err := s.repo.GetLogsBefore(cutoff)
+	if err != nil {
+		middleware.GetLogger().Warn("failed to query old logs", zap.Error(err))
+		return
+	}
+	if len(logs) == 0 {
+		return
+	}
+
+	encoder := json.NewEncoder(gzWriter)
+	for _, log := range logs {
+		if err := encoder.Encode(log); err != nil {
+			middleware.GetLogger().Warn("failed to encode log", zap.Error(err))
+		}
+	}
+
+	// Delete archived logs
+	if err := s.repo.DeleteLogsBefore(cutoff); err != nil {
+		middleware.GetLogger().Warn("failed to delete old logs", zap.Error(err))
+		return
+	}
+
+	middleware.GetLogger().Info("archived LLM proxy logs",
+		zap.Int("count", len(logs)),
+		zap.String("archive", archivePath),
+		zap.Time("cutoff", cutoff))
 }

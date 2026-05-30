@@ -12,6 +12,7 @@ type LLMModelGroup struct {
 	Name             string                `gorm:"size:100;uniqueIndex;not null" json:"name"`
 	Description      string                `gorm:"size:500" json:"description"`
 	Strategy         string                `gorm:"size:50;default:'priority-health'" json:"strategy"`
+	StrategyParams   string                `gorm:"type:jsonb" json:"strategy_params"`
 	StickyTTLSeconds int                   `gorm:"default:600" json:"sticky_ttl_seconds"`
 	Members          []LLMModelGroupMember `gorm:"foreignKey:GroupID" json:"members"`
 	CreatedAt        time.Time             `json:"created_at"`

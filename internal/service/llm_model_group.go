@@ -123,8 +123,55 @@ func (t *StickyBindingTable) Count() int {
 
 // ModelGroupMemberRuntime holds the resolved runtime state for a group member.
 type ModelGroupMemberRuntime struct {
-	Config  config.ModelGroupMember
-	Channel *Channel
+	Config      config.ModelGroupMember
+	Channel     *Channel
+	totalReqs   int64
+	totalErrors int64
+	ewmaLatency float64 // milliseconds, exponential weighted moving average
+	mu          sync.Mutex
+}
+
+// RecordLatency updates the EWMA latency score.
+// alpha=0.1 gives 10% weight to the latest sample.
+func (m *ModelGroupMemberRuntime) RecordLatency(durationMs int) {
+	m.mu.Lock()
+	defer m.mu.Unlock()
+	m.totalReqs++
+	if m.ewmaLatency == 0 {
+		m.ewmaLatency = float64(durationMs)
+	} else {
+		const alpha = 0.1
+		m.ewmaLatency = alpha*float64(durationMs) + (1-alpha)*m.ewmaLatency
+	}
+}
+
+// RecordError increments the error counter.
+func (m *ModelGroupMemberRuntime) RecordError() {
+	m.mu.Lock()
+	defer m.mu.Unlock()
+	m.totalErrors++
+}
+
+// ErrorRate returns the fraction of requests that errored.
+func (m *ModelGroupMemberRuntime) ErrorRate() float64 {
+	m.mu.Lock()
+	defer m.mu.Unlock()
+	if m.totalReqs == 0 {
+		return 0
+	}
+	return float64(m.totalErrors) / float64(m.totalReqs)
+}
+
+// Score returns a composite score for least_latency strategy.
+// Lower is better. Combines EWMA latency with error-rate penalty.
+func (m *ModelGroupMemberRuntime) Score() float64 {
+	m.mu.Lock()
+	defer m.mu.Unlock()
+	errRate := 0.0
+	if m.totalReqs > 0 {
+		errRate = float64(m.totalErrors) / float64(m.totalReqs)
+	}
+	return m.ewmaLatency * (1 + errRate*10) // 100% error rate = 10x penalty
 }
 
 // ModelGroup represents a virtual model name that maps to multiple real channels.
@@ -188,6 +235,10 @@ func (g *ModelGroup) SelectChannel(taskKey string) (*Channel, string) {
 	switch g.Config.Strategy {
 	case "round-robin":
 		selected = weightedSelect(available)
+	case "least_latency":
+		selected = leastLatencySelect(available)
+	case "balance_aware":
+		selected = balanceAwareSelect(available)
 	default: // "priority-health"
 		selected = priorityHealthSelect(available)
 	}
@@ -284,6 +335,42 @@ func weightedSelect(candidates []*ModelGroupMemberRuntime) *ModelGroupMemberRunt
 		}
 	}
 	return best
+}
+
+// leastLatencySelect picks the member with the lowest EWMA latency score.
+func leastLatencySelect(candidates []*ModelGroupMemberRuntime) *ModelGroupMemberRuntime {
+	if len(candidates) == 0 {
+		return nil
+	}
+	best := candidates[0]
+	bestScore := best.Channel.EWMALatency()
+	for _, m := range candidates[1:] {
+		if s := m.Channel.EWMALatency(); s < bestScore {
+			best = m
+			bestScore = s
+		}
+	}
+	return best
+}
+
+// balanceAwareSelect prefers members with positive balance, then falls back to least_latency.
+func balanceAwareSelect(candidates []*ModelGroupMemberRuntime) *ModelGroupMemberRuntime {
+	if len(candidates) == 0 {
+		return nil
+	}
+	// Filter members with known positive balance (if balance info is available)
+	var positive []*ModelGroupMemberRuntime
+	for _, m := range candidates {
+		// Balance awareness is applied at channel level via balance.Manager
+		// For now, we use a heuristic: free channels are deprioritized if paid channels have balance
+		if !m.Channel.Config.IsFree {
+			positive = append(positive, m)
+		}
+	}
+	if len(positive) > 0 {
+		return leastLatencySelect(positive)
+	}
+	return leastLatencySelect(candidates)
 }
 
 // Status returns a snapshot of the model group state for management APIs.

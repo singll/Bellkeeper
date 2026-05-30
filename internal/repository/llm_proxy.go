@@ -73,3 +73,15 @@ func (r *LLMProxyRepository) CleanOldLogs(olderThanDays int) (int64, error) {
 	result := r.db.Where("created_at < ?", cutoff).Delete(&model.LLMProxyLog{})
 	return result.RowsAffected, result.Error
 }
+
+func (r *LLMProxyRepository) GetLogsBefore(cutoff time.Time) ([]model.LLMProxyLog, error) {
+	var logs []model.LLMProxyLog
+	if err := r.db.Where("created_at < ?", cutoff).Find(&logs).Error; err != nil {
+		return nil, err
+	}
+	return logs, nil
+}
+
+func (r *LLMProxyRepository) DeleteLogsBefore(cutoff time.Time) error {
+	return r.db.Where("created_at < ?", cutoff).Delete(&model.LLMProxyLog{}).Error
+}
