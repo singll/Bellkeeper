@@ -16,6 +16,7 @@ type Repositories struct {
 	LLMToken       *LLMTokenRepository
 	LLMTokenUsage  *LLMTokenUsageRepository
 	LLMModelPricing *LLMModelPricingRepository
+	LLMRateLimit   *LLMRateLimitRepository
 	ActivityLog    *ActivityLogRepository
 	LogSource      *LogSourceRepository
 	LogEntry       *LogEntryRepository
@@ -46,6 +47,7 @@ func NewRepositories(db *gorm.DB) *Repositories {
 		LLMToken:        NewLLMTokenRepository(db),
 		LLMTokenUsage:   NewLLMTokenUsageRepository(db),
 		LLMModelPricing: NewLLMModelPricingRepository(db),
+		LLMRateLimit:    NewLLMRateLimitRepository(db),
 		ActivityLog:    NewActivityLogRepository(db),
 		LogSource:      NewLogSourceRepository(db),
 		LogEntry:       NewLogEntryRepository(db),

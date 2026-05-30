@@ -50,6 +50,7 @@ func AutoMigrate(db *gorm.DB) error {
 		&LLMToken{},
 		&LLMTokenUsageDaily{},
 		&LLMModelPricing{},
+		&LLMModelRateLimit{},
 		&ActivityLog{},
 		&LogSource{},
 		&LogEntry{},

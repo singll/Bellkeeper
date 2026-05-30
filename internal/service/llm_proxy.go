@@ -174,10 +174,11 @@ type LLMProxyService struct {
 	pricer         *Pricer
 	tokenUsageRepo *repository.LLMTokenUsageRepository
 	balanceMgr     *balance.Manager
+	rateLimitLearner *RateLimitLearner
 	stopChans      []chan struct{}           // cleanup goroutine stop channels
 }
 
-func NewLLMProxyService(cfg config.LLMProxyConfig, repo *repository.LLMProxyRepository, channelRepo *repository.LLMChannelRepository, groupRepo *repository.LLMModelGroupRepository, pricer *Pricer, tokenUsageRepo *repository.LLMTokenUsageRepository) *LLMProxyService {
+func NewLLMProxyService(cfg config.LLMProxyConfig, repo *repository.LLMProxyRepository, channelRepo *repository.LLMChannelRepository, groupRepo *repository.LLMModelGroupRepository, pricer *Pricer, tokenUsageRepo *repository.LLMTokenUsageRepository, rateLimitRepo *repository.LLMRateLimitRepository) *LLMProxyService {
 	svc := &LLMProxyService{
 		cfg:            cfg,
 		channels:       make(map[string]*Channel),
@@ -200,6 +201,11 @@ func NewLLMProxyService(cfg config.LLMProxyConfig, repo *repository.LLMProxyRepo
 		svc.registerBalanceProviders()
 		svc.balanceMgr.Start()
 	}
+
+	// Initialize rate limit learner
+	svc.rateLimitLearner = NewRateLimitLearner(rateLimitRepo)
+	_ = svc.rateLimitLearner.LoadCache()
+	svc.rateLimitLearner.Start()
 
 	// Start log archival background task
 	svc.startLogArchival()
@@ -257,6 +263,9 @@ func (s *LLMProxyService) Stop() {
 	}
 	if s.balanceMgr != nil {
 		s.balanceMgr.Stop()
+	}
+	if s.rateLimitLearner != nil {
+		s.rateLimitLearner.Stop()
 	}
 }
 

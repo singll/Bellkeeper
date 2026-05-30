@@ -102,7 +102,7 @@ func NewServices(repos *repository.Repositories, cfg *config.Config, version str
 		Setting:        NewSettingService(repos.Setting),
 		Health:         NewHealthService(cfg, version, repos.Tag, repos.RSS, repos.DatasetMapping),
 		Workflow:       NewWorkflowService(cfg.N8N, repos.Setting),
-		LLMProxy:       NewLLMProxyService(cfg.LLMProxy, repos.LLMProxy, repos.LLMChannel, repos.LLMModelGroup, pricer, repos.LLMTokenUsage),
+		LLMProxy:       NewLLMProxyService(cfg.LLMProxy, repos.LLMProxy, repos.LLMChannel, repos.LLMModelGroup, pricer, repos.LLMTokenUsage, repos.LLMRateLimit),
 		Classify:       classifySvc,
 		ActivityLog:    activityLogSvc,
 		LogCenter:      logCenterSvc,
