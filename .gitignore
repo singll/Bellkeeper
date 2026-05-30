@@ -11,12 +11,15 @@ bellkeeper
 *.test
 *.out
 
-# IDE
+# IDE / Editor
 .idea/
 .vscode/
 *.swp
 *.swo
 *~
+
+# Claude Code session files
+.claude/
 
 # Build artifacts
 dist/
@@ -54,7 +57,12 @@ web/node_modules/
 web/dist/
 web/.cache/
 
-# Documentation (development plans)
+# Python
+__pycache__/
+*.py[cod]
+*$py.class
+
+# Documentation
 doc/
 
 # Temporary files

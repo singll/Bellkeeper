@@ -1,3 +1,31 @@
+# Infrastructure Operations Guide
+
+> **CRITICAL DIRECTIVE FOR AI ASSISTANTS (Claude Code):** > This project uses **SilkSpool V2** as the exclusive Infrastructure-as-Code (IaC) tool. The `spool` command is globally available in the `$PATH`.
+
+## Mandatory AI Execution Rules
+
+1. **NEVER** use raw `ssh`, `docker`, `docker-compose`, or `rsync` commands.
+2. **ALL** remote operations MUST be executed via the `spool` CLI tool using the `bash` environment.
+
+## Standard Operating Procedures
+
+### 1. Configuration Changes
+If you modify ANY configuration file (e.g., `hosts/<host>/.env`, Caddyfile, or YAML):
+- You MUST immediately push changes to the remote node: 
+  `spool sync push <host>`
+
+### 2. Service Management
+To restart, check status, or view logs:
+- ALWAYS check the `services` block in `silkspool.yaml` to find the correct `<service_alias>`.
+- Restart: `spool service <host> restart <service_alias>`
+- Status: `spool service <host> status`
+- Logs: `spool service <host> logs <service_alias>`
+
+### 3. Deployments
+- Init bundle: `spool bundle <bundle_name> init <host>`
+- Deploy/Update: `spool bundle <bundle_name> up <host>`
+- Teardown: `spool bundle <bundle_name> down <host>`
+
 # Bellkeeper
 
 **Bellkeeper (钟守者)** 是 SilkSpool 的知识治理中台 + LLM 代理网关 + Matrix 控制平面。它承担 n8n 工作流做不了的有状态工作：长连接（Matrix sync、LLM 代理）、持久化队列（爬取、解析）、分类与去重、Meilisearch 检索、文件治理。
@@ -67,40 +95,74 @@
 
 ```
 bellkeeper/
-├── cmd/bellkeeper/main.go          # 入口 (serve / migrate / version)
+├── cmd/bellkeeper/                 # Go 后端入口
+│   └── main.go                     #   serve / migrate / version 子命令
 │
-├── internal/
+├── internal/                       # Go 内部代码（不允许外部项目导入）
 │   ├── app/                        # 应用装配 (DB → repo → service → handler → matrix → 后台任务)
-│   ├── router/                     # 路由分组注册
-│   ├── handler/                    # HTTP 处理器 (26 个，按业务域拆分)
-│   ├── service/                    # 业务逻辑 (30+ 个 service)
-│   ├── repository/                 # GORM 数据访问
-│   ├── model/                      # GORM 模型 + AutoMigrate
+│   ├── auth/                       # 认证相关（Authelia Forward Auth 解析、API Key 校验）
+│   ├── config/                     # Viper 配置加载与结构定义
+│   ├── handler/                    # HTTP 处理器（按业务域拆分）
+│   ├── llm/                        # LLM Proxy 子系统（路由、渠道、模型组、协议转换）
 │   ├── matrix/                     # Matrix 集成模块
-│   │   ├── gateway/                #   mautrix-go sync 客户端
 │   │   ├── command/                #   命令 parser / router / handlers
-│   │   ├── infra/                  #   Redis / NATS
+│   │   ├── gateway/                #   mautrix-go sync 客户端
+│   │   ├── infra/                  #   Redis / NATS 连接管理
 │   │   ├── notify/                 #   通知网关
 │   │   ├── policy/                 #   权限引擎
 │   │   ├── queue/                  #   消息队列
+│   │   ├── registry/               #   Matrix 房间/频道注册表
 │   │   └── worker/                 #   后台 worker
-│   ├── middleware/                 # 认证 / CORS / 限速 / 日志
-│   ├── metrics/                    # Prometheus 指标
-│   └── pkg/                        # 内部工具包 (httpclient / meili / response / errors / defaults)
+│   ├── metrics/                    # Prometheus 指标收集
+│   ├── middleware/                 # Gin 中间件（认证、CORS、限速、日志）
+│   ├── model/                      # GORM 模型定义 + AutoMigrate
+│   ├── pkg/                        # 内部通用包（不允许依赖上层）
+│   │   ├── crypto/                 #   加密工具
+│   │   ├── defaults/               #   业务常量与默认值
+│   │   ├── errors/                 #   错误定义
+│   │   ├── httpclient/             #   HTTP 客户端封装
+│   │   ├── meili/                  #   Meilisearch 客户端
+│   │   ├── response/               #   统一 HTTP 响应格式
+│   │   ├── sanitizer/              #   输入清洗
+│   │   ├── urlutil/                #   URL 处理工具
+│   │   └── validator/              #   校验工具
+│   ├── repository/                 # GORM 数据访问层（Repository 模式）
+│   ├── router/                     # 路由分组注册
+│   └── service/                    # 业务逻辑层（Service 模式）
 │
 ├── web/                            # 前端 (SolidJS + Vite)
 │   ├── src/
-│   │   ├── api/index.ts            # 类型安全的 API 客户端
-│   │   ├── types/index.ts          # TypeScript 类型定义
-│   │   ├── components/             # Layout / Toast / Modal
-│   │   └── pages/                  # 四大核心域: Knowledge / LLM / Logs / Matrix
-│   └── vite.config.ts
+│   │   ├── api/                    #   类型安全的 API 客户端
+│   │   ├── components/             #   通用组件 (Layout / Toast / Modal)
+│   │   ├── hooks/                  #   SolidJS 自定义 hooks
+│   │   ├── pages/                  #   页面路由组件 (Knowledge / LLM / Logs / Matrix)
+│   │   ├── stores/                 #   全局状态管理
+│   │   ├── types/                  #   TypeScript 类型定义
+│   │   └── utils/                  #   前端工具函数
+│   ├── dist/                       #   构建产物（由 Vite 生成，.gitignore 忽略）
+│   └── index.html
 │
-├── config/bellkeeper.yaml          # 默认配置
-├── docker/Dockerfile               # 多阶段构建 (生产用)
-├── doc/                            # 项目文档 (见 doc/README.md)
-├── go.mod / go.sum
-├── Makefile
+├── config/                         # 配置文件
+│   └── bellkeeper.yaml             #   默认配置（可被 .env / .local.yaml 覆盖）
+│
+├── docker/                         # Docker 构建与编排
+│   ├── Dockerfile                  #   多阶段构建（生产用）
+│   └── docker-compose.yml          #   本地开发依赖（Postgres 等）
+│
+├── migrations/                     # 数据库迁移脚本（备用，主链使用 GORM AutoMigrate）
+│   ├── 001_init.up.sql
+│   └── 001_init.down.sql
+│
+├── scripts/                        # 辅助脚本（Python，独立运行）
+│   ├── scan_dups.py                #   重复文件扫描
+│   └── trafilatura_extract.py      #   网页内容提取
+│
+├── doc/                            # 项目文档（ architecture / guides / roadmap ）
+│
+├── bin/                            # 构建输出目录（.gitignore 忽略）
+│
+├── go.mod / go.sum                 # Go 模块定义
+├── Makefile                        # 构建、测试、开发任务
 └── README.md
 ```
 
@@ -191,47 +253,86 @@ Caddy (反向代理) + Authelia (Forward Auth)
 ### 生产 (SilkSpool 集成)
 
 ```bash
-cd /home/ubuntu/SilkSpool
-
 # 首次部署
-./spool.sh bundle keeper setup keeper
+spool bundle keeper setup keeper
 
 # 单独更新 Bellkeeper
-./spool.sh bundle keeper service keeper bellkeeper up
+spool bundle keeper service keeper bellkeeper up
 
 # 状态 / 日志
-./spool.sh status keeper bellkeeper
-./spool.sh logs keeper bellkeeper 100
+spool status keeper
+spool service keeper status
+spool service keeper logs bellkeeper 100
 ```
 
 线上 Bellkeeper 通过 Caddy + Authelia 暴露：`https://bellkeeper.singll.net`。
 
 ### 本地开发
 
+**前置要求**
+- Go 1.25+
+- Node.js 20+ + pnpm
+- Docker + Docker Compose（用于本地数据库）
+- air（可选，用于后端热重载）：`go install github.com/cosmtrek/air@latest`
+
+**环境准备**
 ```bash
-# Go 依赖
+# 1. 安装 Go 依赖
 make deps
 
-# 前端依赖
+# 2. 安装前端依赖
 cd web && pnpm install && cd ..
 
-# 启动数据库 (docker-compose.yml 中包含 Postgres)
+# 3. 启动本地数据库（docker-compose.yml 包含 Postgres）
 make docker-up
 
-# 数据库迁移（GORM AutoMigrate）
+# 4. 数据库迁移（GORM AutoMigrate）
 make migrate
-
-# 后端 + 前端开发服务器
-make dev          # 后端 air 热重载
-make dev-frontend # 前端 Vite
 ```
 
-### 常用命令
+**启动开发服务器**
+```bash
+make dev          # 后端 air 热重载（端口 8080）
+make dev-frontend # 前端 Vite（端口 3000）
+```
+
+### 构建
 
 ```bash
-make build           # 构建前后端
-make test            # 运行测试
-make fmt / make lint # 格式化 / 检查
+make build           # 构建全部（后端 + 前端）
+make build-backend   # 仅构建后端 → 输出到 bin/bellkeeper
+make build-frontend  # 仅构建前端 → 输出到 web/dist/
+make docker-build    # Docker 镜像构建
+```
+
+> **构建产物规范**
+> - 后端二进制：`bin/bellkeeper`（由 Makefile 统一输出，.gitignore 忽略）
+> - 前端静态文件：`web/dist/`（由 Vite 生成，.gitignore 忽略）
+> - 生产镜像：`bellkeeper:latest`
+
+### 测试
+
+```bash
+make test            # 运行所有 Go 测试
+make test-coverage   # 生成覆盖率报告（coverage.html）
+```
+
+### 代码质量
+
+```bash
+make fmt             # 格式化 Go 代码
+make lint            # 运行 golangci-lint（需提前安装）
+make all             # fmt + lint + test + build
+```
+
+### 常用维护命令
+
+```bash
+make clean           # 删除构建产物（bin/、coverage.out 等）
+make docker-up       # 启动本地依赖容器（Postgres）
+make docker-down     # 停止本地依赖容器
+make migrate         # 执行数据库迁移
+make swagger         # 生成 Swagger 文档（输出到 api/docs/）
 ```
 
 ## 配置
