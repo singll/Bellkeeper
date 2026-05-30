@@ -5,6 +5,7 @@ import (
 
 	"github.com/singll/bellkeeper/internal/model"
 	"gorm.io/gorm"
+	"gorm.io/gorm/clause"
 )
 
 type LLMTokenUsageRepository struct {
@@ -34,18 +35,34 @@ func (r *LLMTokenUsageRepository) GetOrCreate(tokenID uint, date time.Time) (*mo
 	return nil, err
 }
 
-func (r *LLMTokenUsageRepository) AddUsage(tokenID uint, date time.Time, requests, promptTokens, completionTokens, cachedTokens, costCents, errorCount int) error {
-	usage, err := r.GetOrCreate(tokenID, date)
-	if err != nil {
-		return err
+// AddUsage atomically upserts a daily usage row, incrementing counters in a single
+// statement (Postgres INSERT ... ON CONFLICT DO UPDATE). This avoids the read-
+// modify-write race where concurrent requests for the same (token_id, date) lose
+// increments. Requires the composite unique index idx_llm_usage_token_date.
+func (r *LLMTokenUsageRepository) AddUsage(tokenID uint, date time.Time, requests, promptTokens, completionTokens, cachedTokens, costCents int, costMicroCents int64, errorCount int) error {
+	row := model.LLMTokenUsageDaily{
+		TokenID:          tokenID,
+		Date:             date,
+		Requests:         requests,
+		PromptTokens:     promptTokens,
+		CompletionTokens: completionTokens,
+		CachedTokens:     cachedTokens,
+		CostCents:        costCents,
+		CostMicroCents:   costMicroCents,
+		ErrorCount:       errorCount,
 	}
-	usage.Requests += requests
-	usage.PromptTokens += promptTokens
-	usage.CompletionTokens += completionTokens
-	usage.CachedTokens += cachedTokens
-	usage.CostCents += costCents
-	usage.ErrorCount += errorCount
-	return r.db.Save(usage).Error
+	return r.db.Clauses(clause.OnConflict{
+		Columns: []clause.Column{{Name: "token_id"}, {Name: "date"}},
+		DoUpdates: clause.Assignments(map[string]interface{}{
+			"requests":          gorm.Expr("llm_token_usage_daily.requests + EXCLUDED.requests"),
+			"prompt_tokens":     gorm.Expr("llm_token_usage_daily.prompt_tokens + EXCLUDED.prompt_tokens"),
+			"completion_tokens": gorm.Expr("llm_token_usage_daily.completion_tokens + EXCLUDED.completion_tokens"),
+			"cached_tokens":     gorm.Expr("llm_token_usage_daily.cached_tokens + EXCLUDED.cached_tokens"),
+			"cost_cents":        gorm.Expr("llm_token_usage_daily.cost_cents + EXCLUDED.cost_cents"),
+			"cost_micro_cents":  gorm.Expr("llm_token_usage_daily.cost_micro_cents + EXCLUDED.cost_micro_cents"),
+			"error_count":       gorm.Expr("llm_token_usage_daily.error_count + EXCLUDED.error_count"),
+		}),
+	}).Create(&row).Error
 }
 
 func (r *LLMTokenUsageRepository) ListByToken(tokenID uint, from, to time.Time) ([]model.LLMTokenUsageDaily, error) {
@@ -66,26 +83,29 @@ func (r *LLMTokenUsageRepository) ListByDateRange(from, to time.Time) ([]model.L
 	return usages, nil
 }
 
-// Aggregate returns usage aggregated by the given dimension (token, date, model).
+// Aggregate returns usage aggregated by the given dimension (token or date).
+// Note: group_by=model is NOT served here (llm_token_usage_daily has no model
+// column) — the service routes that to LLMProxyRepository.AggregateByModel.
 func (r *LLMTokenUsageRepository) Aggregate(groupBy string, from, to time.Time) ([]map[string]interface{}, error) {
 	var results []map[string]interface{}
-	var selectCols string
+	sumCols := "SUM(requests) as requests, SUM(prompt_tokens) as prompt_tokens, SUM(completion_tokens) as completion_tokens, SUM(cached_tokens) as cached_tokens, SUM(cost_cents) as cost_cents, SUM(cost_micro_cents) as cost_micro_cents, SUM(error_count) as error_count"
+	var selectCols, groupCol string
 	switch groupBy {
 	case "token":
-		selectCols = "token_id, SUM(requests) as requests, SUM(prompt_tokens) as prompt_tokens, SUM(completion_tokens) as completion_tokens, SUM(cached_tokens) as cached_tokens, SUM(cost_cents) as cost_cents, SUM(error_count) as error_count"
+		selectCols = "token_id, " + sumCols
+		groupCol = "token_id"
 	case "date":
-		selectCols = "date, SUM(requests) as requests, SUM(prompt_tokens) as prompt_tokens, SUM(completion_tokens) as completion_tokens, SUM(cached_tokens) as cached_tokens, SUM(cost_cents) as cost_cents, SUM(error_count) as error_count"
-	case "model":
-		// model aggregation requires joining through tokens; for now aggregate by token_id as proxy
-		selectCols = "token_id, SUM(requests) as requests, SUM(prompt_tokens) as prompt_tokens, SUM(completion_tokens) as completion_tokens, SUM(cached_tokens) as cached_tokens, SUM(cost_cents) as cost_cents, SUM(error_count) as error_count"
+		selectCols = "date, " + sumCols
+		groupCol = "date"
 	default:
-		selectCols = "token_id, date, SUM(requests) as requests, SUM(prompt_tokens) as prompt_tokens, SUM(completion_tokens) as completion_tokens, SUM(cached_tokens) as cached_tokens, SUM(cost_cents) as cost_cents, SUM(error_count) as error_count"
+		selectCols = "token_id, date, " + sumCols
+		groupCol = "token_id, date"
 	}
 
 	rows, err := r.db.Model(&model.LLMTokenUsageDaily{}).
 		Select(selectCols).
 		Where("date >= ? AND date <= ?", from, to).
-		Group(groupBy).
+		Group(groupCol).
 		Rows()
 	if err != nil {
 		return nil, err

@@ -15,7 +15,8 @@ type LLMProxyLog struct {
 	PromptTokens int       `json:"prompt_tokens,omitempty"`
 	CompTokens   int       `json:"comp_tokens,omitempty"`
 	CachedTokens int       `json:"cached_tokens,omitempty"`
-	CostCents    int       `json:"cost_cents,omitempty"`
+	CostCents    int       `json:"cost_cents,omitempty"`           // rounded cents, for display
+	CostMicroCents int64   `json:"cost_micro_cents,omitempty"`     // 1 cent = 1000 micro-cents; precise accounting
 	ErrorMessage string    `gorm:"type:text" json:"error_message,omitempty"`
 	CallerID     string    `gorm:"size:100;index" json:"caller_id"`
 	CreatedAt    time.Time `gorm:"index" json:"created_at"`

@@ -24,9 +24,21 @@ type Usage struct {
 	CachedTokens     int // cached/prompt_tokens_details.cached_tokens
 }
 
-// Calc computes the cost in cents for a given channel, model, and usage.
-// Falls back to zero cost if no pricing is configured.
+// Calc computes the cost in cents (rounded, for display) for a given channel,
+// model, and usage. Falls back to zero cost if no pricing is configured.
 func (p *Pricer) Calc(channelName, model string, usage Usage) (int, error) {
+	mc, err := p.CalcMicroCents(channelName, model, usage)
+	if err != nil {
+		return 0, err
+	}
+	return int(MicroCentsToCents(mc)), nil
+}
+
+// CalcMicroCents computes the cost in micro-cents (1 cent = 1000 micro-cents) for
+// precise accounting. Cheap models (e.g. DeepSeek at 14¢/1M) produce sub-cent
+// per-request costs that integer-cent math would truncate to zero; micro-cents
+// preserves that precision so daily/monthly aggregation is accurate.
+func (p *Pricer) CalcMicroCents(channelName, model string, usage Usage) (int64, error) {
 	pricing, err := p.repo.GetByChannelAndModel(channelName, model)
 	if err != nil {
 		return 0, fmt.Errorf("lookup pricing: %w", err)
@@ -34,25 +46,43 @@ func (p *Pricer) Calc(channelName, model string, usage Usage) (int, error) {
 	if pricing == nil {
 		return 0, nil // No pricing configured → free
 	}
+	return computeMicroCents(pricing, usage), nil
+}
 
-	// Prices are per 1M tokens in cents
-	per1M := float64(1_000_000)
-
+// computeMicroCents is the pure pricing arithmetic (no DB), extracted for testing.
+func computeMicroCents(pricing *model.LLMModelPricing, usage Usage) int64 {
 	cachedTokens := usage.CachedTokens
 	if cachedTokens > usage.PromptTokens {
 		cachedTokens = usage.PromptTokens
 	}
 	uncachedPromptTokens := usage.PromptTokens - cachedTokens
 
-	inputCost := float64(uncachedPromptTokens) * float64(pricing.InputPricePer1MCents) / per1M
-	cachedCost := float64(cachedTokens) * float64(pricing.GetCachedInputPrice()) / per1M
-	outputCost := float64(usage.CompletionTokens) * float64(pricing.OutputPricePer1MCents) / per1M
+	// Prices are cents per 1M tokens. micro-cents = tokens * pricePer1MCents / 1000.
+	inputMC := int64(uncachedPromptTokens) * int64(pricing.InputPricePer1MCents) / 1000
+	outputMC := int64(usage.CompletionTokens) * int64(pricing.OutputPricePer1MCents) / 1000
 
-	totalCents := int(inputCost + cachedCost + outputCost)
-	if totalCents < 0 {
-		totalCents = 0
+	var cachedMC int64
+	if pricing.CachedInputPricePer1MCents > 0 {
+		cachedMC = int64(cachedTokens) * int64(pricing.CachedInputPricePer1MCents) / 1000
+	} else {
+		// Default cached price = input × 0.1. Divide LAST (÷10 then ÷1000 = ÷10000)
+		// so a small input price doesn't floor to zero before multiplying tokens.
+		cachedMC = int64(cachedTokens) * int64(pricing.InputPricePer1MCents) / 10000
 	}
-	return totalCents, nil
+
+	total := inputMC + cachedMC + outputMC
+	if total < 0 {
+		total = 0
+	}
+	return total
+}
+
+// MicroCentsToCents converts micro-cents to cents, rounding half up.
+func MicroCentsToCents(mc int64) int64 {
+	if mc < 0 {
+		return 0
+	}
+	return (mc + 500) / 1000
 }
 
 // SeedDefaultPricing inserts default pricing for known models if the table is empty.

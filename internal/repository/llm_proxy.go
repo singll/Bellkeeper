@@ -90,3 +90,49 @@ func (r *LLMProxyRepository) DeleteLogsBefore(cutoff time.Time) error {
 func (r *LLMProxyRepository) SaveAlertEvent(event *model.LLMAlertEvent) error {
 	return r.db.Create(event).Error
 }
+
+// AggregateByModel returns usage aggregated by model name from the proxy logs.
+// llm_token_usage_daily has no model dimension, so model-level billing must come
+// from llm_proxy_logs (which records Model + CostMicroCents per request).
+func (r *LLMProxyRepository) AggregateByModel(from, to time.Time) ([]map[string]interface{}, error) {
+	type modelStat struct {
+		Model            string `json:"model"`
+		Requests         int64  `json:"requests"`
+		PromptTokens     int64  `json:"prompt_tokens"`
+		CompletionTokens int64  `json:"completion_tokens"`
+		CachedTokens     int64  `json:"cached_tokens"`
+		CostCents        int64  `json:"cost_cents"`
+		CostMicroCents   int64  `json:"cost_micro_cents"`
+		ErrorCount       int64  `json:"error_count"`
+	}
+	var stats []modelStat
+	err := r.db.Model(&model.LLMProxyLog{}).
+		Select("model, COUNT(*) as requests, "+
+			"COALESCE(SUM(prompt_tokens),0) as prompt_tokens, "+
+			"COALESCE(SUM(comp_tokens),0) as completion_tokens, "+
+			"COALESCE(SUM(cached_tokens),0) as cached_tokens, "+
+			"COALESCE(SUM(cost_cents),0) as cost_cents, "+
+			"COALESCE(SUM(cost_micro_cents),0) as cost_micro_cents, "+
+			"SUM(CASE WHEN status_code >= 400 THEN 1 ELSE 0 END) as error_count").
+		Where("created_at >= ? AND created_at <= ?", from, to).
+		Group("model").
+		Order("cost_micro_cents DESC").
+		Scan(&stats).Error
+	if err != nil {
+		return nil, err
+	}
+	results := make([]map[string]interface{}, 0, len(stats))
+	for _, s := range stats {
+		results = append(results, map[string]interface{}{
+			"model":             s.Model,
+			"requests":          s.Requests,
+			"prompt_tokens":     s.PromptTokens,
+			"completion_tokens": s.CompletionTokens,
+			"cached_tokens":     s.CachedTokens,
+			"cost_cents":        s.CostCents,
+			"cost_micro_cents":  s.CostMicroCents,
+			"error_count":       s.ErrorCount,
+		})
+	}
+	return results, nil
+}

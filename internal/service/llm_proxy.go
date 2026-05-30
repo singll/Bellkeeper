@@ -577,7 +577,7 @@ func (s *LLMProxyService) ProxyRequest(
 				s.mu.RUnlock()
 				if ch != nil {
 					rewrittenBody := rewriteModel(body, binding.Model)
-					statusCode, respBody, respHeaders, err := s.tryChannel(ch, method, path, headers, rewrittenBody, callerID)
+					statusCode, respBody, respHeaders, err := s.tryChannel(ch, method, path, headers, rewrittenBody, callerID, tokenID)
 					if err == nil && statusCode < 500 && statusCode != 429 {
 						ch.Health.RecordSuccess()
 						s.convMgr.Touch(convID, 0, 0)
@@ -591,7 +591,7 @@ func (s *LLMProxyService) ProxyRequest(
 
 	// Check if model matches a virtual model group
 	if group, ok := modelGroups[modelName]; ok {
-		statusCode, respBody, respHeaders, err = s.proxyViaGroup(group, taskKey, method, path, headers, body, callerID)
+		statusCode, respBody, respHeaders, err = s.proxyViaGroup(group, taskKey, method, path, headers, body, callerID, tokenID)
 		if err == nil && statusCode < 500 && statusCode != 429 {
 			// Record conversation binding on success
 			if convID != "" {
@@ -621,7 +621,7 @@ func (s *LLMProxyService) ProxyRequest(
 
 	var lastErr error
 	for _, ch := range healthy {
-		statusCode, respBody, respHeaders, err = s.tryChannel(ch, method, path, headers, body, callerID)
+		statusCode, respBody, respHeaders, err = s.tryChannel(ch, method, path, headers, body, callerID, tokenID)
 		if err == nil && statusCode < 500 && statusCode != 429 {
 			ch.Health.RecordSuccess()
 			if convID != "" {
@@ -652,6 +652,7 @@ func (s *LLMProxyService) proxyViaGroup(
 	headers http.Header,
 	body []byte,
 	callerID string,
+	tokenID uint,
 ) (int, []byte, http.Header, error) {
 	modelName := extractModelFromBody(body) // original virtual model name for logging
 	maxAttempts := len(group.Members)
@@ -675,11 +676,11 @@ func (s *LLMProxyService) proxyViaGroup(
 		rewrittenBody := rewriteModel(body, realModel)
 
 		statusCode, respBody, respHeaders, err := s.tryChannel(
-			ch, method, path, headers, rewrittenBody, callerID,
+			ch, method, path, headers, rewrittenBody, callerID, tokenID,
 		)
 
 		// Log with original virtual model name for traceability
-		s.logGroupRequest(ch.Config.Name, modelName, realModel, path, statusCode, err, callerID)
+		s.logGroupRequest(ch.Config.Name, modelName, realModel, path, statusCode, err, callerID, tokenID)
 
 		if err == nil && statusCode < 500 && statusCode != 429 {
 			ch.Health.RecordSuccess()
@@ -726,6 +727,7 @@ func (s *LLMProxyService) tryChannel(
 	headers http.Header,
 	body []byte,
 	callerID string,
+	tokenID uint,
 ) (int, []byte, http.Header, error) {
 	maxRetries := s.cfg.MaxRetries
 	modelName := extractModelFromBody(body)
@@ -751,7 +753,7 @@ func (s *LLMProxyService) tryChannel(
 				continue
 			}
 			s.logRequest(ch.Config.Name, modelName, path, 429, true, attempt, 0, 0, 0, 0,
-				"client rate limit exhausted", callerID)
+				"client rate limit exhausted", callerID, tokenID)
 			return 429, []byte(`{"error":"rate limit: bucket exhausted after retries"}`), nil, nil
 		}
 
@@ -820,12 +822,20 @@ func (s *LLMProxyService) tryChannel(
 
 		if err != nil {
 			s.logRequest(ch.Config.Name, realModel, path, 0, false, attempt, durationMs, 0, 0, 0,
-				err.Error(), callerID)
+				err.Error(), callerID, tokenID)
 			return 0, nil, nil, fmt.Errorf("upstream request: %w", err)
 		}
 
 		respBytes, _ := io.ReadAll(resp.Body)
 		resp.Body.Close()
+
+		// Extract token usage. For Anthropic, read it from the RAW body BEFORE
+		// conversion — the OpenAI conversion drops cache_read_input_tokens, which
+		// would make Claude prompt-cache discounts invisible to billing.
+		var promptTokens, compTokens, cachedTokens int
+		if isAnthropic {
+			promptTokens, compTokens, cachedTokens = extractTokenUsage(respBytes)
+		}
 
 		// Convert provider response back to OpenAI format
 		if isAnthropic && resp.StatusCode < 500 {
@@ -851,10 +861,13 @@ func (s *LLMProxyService) tryChannel(
 		lastHeaders = resp.Header
 
 		isRateLimit := resp.StatusCode == 429
-		promptTokens, compTokens, cachedTokens := extractTokenUsage(respBytes)
+		// Non-Anthropic providers: extract from the (now OpenAI-shaped) body.
+		if !isAnthropic {
+			promptTokens, compTokens, cachedTokens = extractTokenUsage(respBytes)
+		}
 
 		s.logRequest(ch.Config.Name, modelName, path, resp.StatusCode, isRateLimit,
-			attempt, durationMs, promptTokens, compTokens, cachedTokens, "", callerID)
+			attempt, durationMs, promptTokens, compTokens, cachedTokens, "", callerID, tokenID)
 
 		// Record latency for routing strategy scoring
 		if resp.StatusCode < 500 && resp.StatusCode != 429 {
@@ -939,15 +952,23 @@ func extractTokenUsage(body []byte) (prompt, comp, cached int) {
 		return openaiResp.Usage.PromptTokens, openaiResp.Usage.CompletionTokens, cached
 	}
 
-	// Try Anthropic format
+	// Try Anthropic format (raw, pre-conversion). input_tokens EXCLUDES cached reads,
+	// so total prompt = input + cache_read + cache_creation; cached = cache_read.
 	var anthropicResp struct {
 		Usage struct {
-			InputTokens  int `json:"input_tokens"`
-			OutputTokens int `json:"output_tokens"`
+			InputTokens              int `json:"input_tokens"`
+			OutputTokens             int `json:"output_tokens"`
+			CacheReadInputTokens     int `json:"cache_read_input_tokens"`
+			CacheCreationInputTokens int `json:"cache_creation_input_tokens"`
 		} `json:"usage"`
 	}
-	if err := json.Unmarshal(body, &anthropicResp); err == nil && anthropicResp.Usage.InputTokens > 0 {
-		return anthropicResp.Usage.InputTokens, anthropicResp.Usage.OutputTokens, 0
+	if err := json.Unmarshal(body, &anthropicResp); err == nil &&
+		(anthropicResp.Usage.InputTokens > 0 || anthropicResp.Usage.CacheReadInputTokens > 0) {
+		cached := anthropicResp.Usage.CacheReadInputTokens
+		prompt := anthropicResp.Usage.InputTokens +
+			anthropicResp.Usage.CacheReadInputTokens +
+			anthropicResp.Usage.CacheCreationInputTokens
+		return prompt, anthropicResp.Usage.OutputTokens, cached
 	}
 
 	return 0, 0, 0
@@ -955,51 +976,63 @@ func extractTokenUsage(body []byte) (prompt, comp, cached int) {
 
 func (s *LLMProxyService) logRequest(channelName, modelName, path string, statusCode int,
 	isRateLimit bool, retryCount, durationMs, promptTokens, compTokens, cachedTokens int,
-	errMsg, callerID string) {
+	errMsg, callerID string, tokenID uint) {
 	if s.repo == nil {
 		return
 	}
 	go func() {
-		// Calculate cost
+		// Price by the real upstream model. Group requests log "virtual→real" for
+		// traceability, but pricing must use the real model name.
+		pricingModel := modelName
+		if i := strings.Index(modelName, "→"); i >= 0 {
+			pricingModel = modelName[i+len("→"):]
+		}
+
+		// Calculate cost in micro-cents (precise) and cents (rounded display).
+		var costMicroCents int64
 		var costCents int
 		if s.pricer != nil && promptTokens+compTokens > 0 {
-			costCents, _ = s.pricer.Calc(channelName, modelName, Usage{
+			costMicroCents, _ = s.pricer.CalcMicroCents(channelName, pricingModel, Usage{
 				PromptTokens:     promptTokens,
 				CompletionTokens: compTokens,
 				CachedTokens:     cachedTokens,
 			})
+			costCents = int(MicroCentsToCents(costMicroCents))
 		}
 
 		entry := &model.LLMProxyLog{
-			ChannelName:  channelName,
-			Model:        modelName,
-			RequestPath:  path,
-			StatusCode:   statusCode,
-			IsRateLimit:  isRateLimit,
-			RetryCount:   retryCount,
-			DurationMs:   durationMs,
-			PromptTokens: promptTokens,
-			CompTokens:   compTokens,
-			CachedTokens: cachedTokens,
-			CostCents:    costCents,
-			ErrorMessage: errMsg,
-			CallerID:     callerID,
-			CreatedAt:    time.Now(),
+			ChannelName:    channelName,
+			Model:          modelName,
+			RequestPath:    path,
+			StatusCode:     statusCode,
+			IsRateLimit:    isRateLimit,
+			RetryCount:     retryCount,
+			DurationMs:     durationMs,
+			PromptTokens:   promptTokens,
+			CompTokens:     compTokens,
+			CachedTokens:   cachedTokens,
+			CostCents:      costCents,
+			CostMicroCents: costMicroCents,
+			ErrorMessage:   errMsg,
+			CallerID:       callerID,
+			CreatedAt:      time.Now(),
 		}
 		if err := s.repo.CreateLog(entry); err != nil {
 			middleware.GetLogger().Warn("failed to log llm proxy request", zap.Error(err))
 			return
 		}
 
-		// Aggregate token usage by caller_id (daily)
-		if s.tokenUsageRepo != nil && callerID != "" && callerID != "unknown" {
+		// Aggregate token usage by token (daily). Skip the server/admin key (tokenID 0):
+		// it has no billable token row and would pollute aggregates with id 0.
+		if s.tokenUsageRepo != nil && tokenID != 0 {
 			requests := 1
 			errCount := 0
 			if statusCode >= 400 {
 				errCount = 1
 				requests = 0 // Don't count errors as successful requests
 			}
-			if err := s.tokenUsageRepo.AddUsage(0, time.Now().Truncate(24*time.Hour), requests, promptTokens, compTokens, cachedTokens, costCents, errCount); err != nil {
+			if err := s.tokenUsageRepo.AddUsage(tokenID, time.Now().Truncate(24*time.Hour),
+				requests, promptTokens, compTokens, cachedTokens, costCents, costMicroCents, errCount); err != nil {
 				middleware.GetLogger().Warn("failed to aggregate token usage", zap.Error(err))
 			}
 		}
@@ -1008,7 +1041,7 @@ func (s *LLMProxyService) logRequest(channelName, modelName, path string, status
 
 // logGroupRequest logs a model group proxy attempt for traceability.
 func (s *LLMProxyService) logGroupRequest(channelName, virtualModel, realModel, path string,
-	statusCode int, err error, callerID string) {
+	statusCode int, err error, callerID string, tokenID uint) {
 	errMsg := ""
 	if err != nil {
 		errMsg = err.Error()
@@ -1016,7 +1049,7 @@ func (s *LLMProxyService) logGroupRequest(channelName, virtualModel, realModel, 
 	isRateLimit := statusCode == 429
 	// Log with virtual model name so operators can trace group requests
 	s.logRequest(channelName, virtualModel+"→"+realModel, path, statusCode, isRateLimit,
-		0, 0, 0, 0, 0, errMsg, callerID)
+		0, 0, 0, 0, 0, errMsg, callerID, tokenID)
 }
 
 // --- Streaming Proxy ---
@@ -1081,7 +1114,7 @@ func (s *LLMProxyService) ProxyStreamRequest(
 					if err == nil {
 						result.ModelName = binding.Model
 						s.logRequest(ch.Config.Name, binding.Model, path, result.StatusCode, false,
-							0, 0, 0, 0, 0, "", callerID)
+							0, 0, 0, 0, 0, "", callerID, tokenID)
 						s.convMgr.Touch(convID, 0, 0)
 					}
 					return result, err
@@ -1103,7 +1136,7 @@ func (s *LLMProxyService) ProxyStreamRequest(
 			result.ModelName = modelName + "→" + realModel
 			// Log stream start
 			s.logRequest(ch.Config.Name, modelName+"→"+realModel, path, result.StatusCode, false,
-				0, 0, 0, 0, 0, "", callerID)
+				0, 0, 0, 0, 0, "", callerID, tokenID)
 			if convID != "" {
 				if taskKey != "" && group.Sticky != nil {
 					if stickyCh, stickyModel := group.GetStickyBinding(taskKey); stickyCh != nil {
@@ -1132,7 +1165,7 @@ func (s *LLMProxyService) ProxyStreamRequest(
 	if err == nil {
 		result.ModelName = modelName
 		s.logRequest(ch.Config.Name, modelName, path, result.StatusCode, false,
-			0, 0, 0, 0, 0, "", callerID)
+			0, 0, 0, 0, 0, "", callerID, tokenID)
 		if convID != "" {
 			s.convMgr.Set(convID, 0, ch.Config.Name, modelName, "")
 		}
@@ -1436,6 +1469,13 @@ func (s *LLMProxyService) SetCodingStrategy(strategy string) {
 
 // GetUsageAggregates returns token usage aggregated by the requested dimension.
 func (s *LLMProxyService) GetUsageAggregates(groupBy string, from, to time.Time) ([]map[string]interface{}, error) {
+	// model dimension has no column in llm_token_usage_daily; aggregate from proxy logs.
+	if groupBy == "model" {
+		if s.repo == nil {
+			return nil, fmt.Errorf("proxy repo not initialized")
+		}
+		return s.repo.AggregateByModel(from, to)
+	}
 	if s.tokenUsageRepo == nil {
 		return nil, fmt.Errorf("token usage repo not initialized")
 	}
