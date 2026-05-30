@@ -13,6 +13,9 @@ type Repositories struct {
 	LLMProxy       *LLMProxyRepository
 	LLMChannel     *LLMChannelRepository
 	LLMModelGroup  *LLMModelGroupRepository
+	LLMToken       *LLMTokenRepository
+	LLMTokenUsage  *LLMTokenUsageRepository
+	LLMModelPricing *LLMModelPricingRepository
 	ActivityLog    *ActivityLogRepository
 	LogSource      *LogSourceRepository
 	LogEntry       *LogEntryRepository
@@ -37,9 +40,12 @@ func NewRepositories(db *gorm.DB) *Repositories {
 		RSS:            NewRSSRepository(db),
 		DatasetMapping: NewDatasetMappingRepository(db),
 		Setting:        NewSettingRepository(db),
-		LLMProxy:       NewLLMProxyRepository(db),
-		LLMChannel:     NewLLMChannelRepository(db),
-		LLMModelGroup:  NewLLMModelGroupRepository(db),
+		LLMProxy:        NewLLMProxyRepository(db),
+		LLMChannel:      NewLLMChannelRepository(db),
+		LLMModelGroup:   NewLLMModelGroupRepository(db),
+		LLMToken:        NewLLMTokenRepository(db),
+		LLMTokenUsage:   NewLLMTokenUsageRepository(db),
+		LLMModelPricing: NewLLMModelPricingRepository(db),
 		ActivityLog:    NewActivityLogRepository(db),
 		LogSource:      NewLogSourceRepository(db),
 		LogEntry:       NewLogEntryRepository(db),

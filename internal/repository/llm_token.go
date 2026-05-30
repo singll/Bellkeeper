@@ -1,0 +1,85 @@
+package repository
+
+import (
+	"time"
+
+	"github.com/singll/bellkeeper/internal/model"
+	"gorm.io/gorm"
+)
+
+type LLMTokenRepository struct {
+	db *gorm.DB
+}
+
+func NewLLMTokenRepository(db *gorm.DB) *LLMTokenRepository {
+	return &LLMTokenRepository{db: db}
+}
+
+func (r *LLMTokenRepository) List() ([]model.LLMToken, error) {
+	var tokens []model.LLMToken
+	if err := r.db.Order("created_at DESC").Find(&tokens).Error; err != nil {
+		return nil, err
+	}
+	return tokens, nil
+}
+
+func (r *LLMTokenRepository) Get(id uint) (*model.LLMToken, error) {
+	var t model.LLMToken
+	if err := r.db.First(&t, id).Error; err != nil {
+		return nil, err
+	}
+	return &t, nil
+}
+
+func (r *LLMTokenRepository) GetByKeyHash(hash string) (*model.LLMToken, error) {
+	var t model.LLMToken
+	if err := r.db.Where("key_hash = ?", hash).First(&t).Error; err != nil {
+		return nil, err
+	}
+	return &t, nil
+}
+
+func (r *LLMTokenRepository) GetByCallerID(callerID string) (*model.LLMToken, error) {
+	var t model.LLMToken
+	if err := r.db.Where("caller_id = ?", callerID).First(&t).Error; err != nil {
+		return nil, err
+	}
+	return &t, nil
+}
+
+func (r *LLMTokenRepository) Create(t *model.LLMToken) error {
+	return r.db.Create(t).Error
+}
+
+func (r *LLMTokenRepository) Update(t *model.LLMToken) error {
+	return r.db.Save(t).Error
+}
+
+func (r *LLMTokenRepository) Delete(id uint) error {
+	return r.db.Delete(&model.LLMToken{}, id).Error
+}
+
+func (r *LLMTokenRepository) Count() (int64, error) {
+	var count int64
+	if err := r.db.Model(&model.LLMToken{}).Count(&count).Error; err != nil {
+		return 0, err
+	}
+	return count, nil
+}
+
+func (r *LLMTokenRepository) CountRequestsToday(tokenID uint) (int, error) {
+	var count int64
+	today := time.Now().Truncate(24 * time.Hour)
+	if err := r.db.Model(&model.LLMProxyLog{}).
+		Where("caller_id = (SELECT caller_id FROM llm_tokens WHERE id = ?)", tokenID).
+		Where("created_at >= ?", today).
+		Count(&count).Error; err != nil {
+		return 0, err
+	}
+	return int(count), nil
+}
+
+func (r *LLMTokenRepository) UpdateLastUsed(tokenID uint) error {
+	now := time.Now()
+	return r.db.Model(&model.LLMToken{}).Where("id = ?", tokenID).Update("last_used_at", now).Error
+}

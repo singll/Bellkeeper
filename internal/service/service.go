@@ -88,6 +88,11 @@ func NewServices(repos *repository.Repositories, cfg *config.Config, version str
 		rssFetcherSvc.SetCrawlQueueService(crawlQueueSvc)
 	}
 
+	// Create pricing service
+	pricer := NewPricer(repos.LLMModelPricing)
+	// Seed default pricing on first run
+	_ = pricer.SeedDefaultPricing()
+
 	return &Services{
 		Tag:            NewTagService(repos.Tag),
 		RSS:            NewRSSService(repos.RSS, repos.Tag),
@@ -97,7 +102,7 @@ func NewServices(repos *repository.Repositories, cfg *config.Config, version str
 		Setting:        NewSettingService(repos.Setting),
 		Health:         NewHealthService(cfg, version, repos.Tag, repos.RSS, repos.DatasetMapping),
 		Workflow:       NewWorkflowService(cfg.N8N, repos.Setting),
-		LLMProxy:       NewLLMProxyService(cfg.LLMProxy, repos.LLMProxy, repos.LLMChannel, repos.LLMModelGroup),
+		LLMProxy:       NewLLMProxyService(cfg.LLMProxy, repos.LLMProxy, repos.LLMChannel, repos.LLMModelGroup, pricer, repos.LLMTokenUsage),
 		Classify:       classifySvc,
 		ActivityLog:    activityLogSvc,
 		LogCenter:      logCenterSvc,

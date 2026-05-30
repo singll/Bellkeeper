@@ -2,23 +2,44 @@ package handler
 
 import (
 	"bufio"
+	"crypto/rand"
+	"encoding/hex"
+	"fmt"
 	"io"
 	"net/http"
 	"strconv"
 	"strings"
+	"time"
 
 	"github.com/gin-gonic/gin"
 	"github.com/singll/bellkeeper/internal/model"
 	"github.com/singll/bellkeeper/internal/pkg/response"
+	"github.com/singll/bellkeeper/internal/repository"
 	"github.com/singll/bellkeeper/internal/service"
 )
 
 type LLMProxyHandler struct {
-	svc *service.LLMProxyService
+	svc           *service.LLMProxyService
+	pricer        *service.Pricer
+	tokenRepo     *repository.LLMTokenRepository
+	tokenUsageRepo *repository.LLMTokenUsageRepository
+	pricingRepo   *repository.LLMModelPricingRepository
 }
 
-func NewLLMProxyHandler(svc *service.LLMProxyService) *LLMProxyHandler {
-	return &LLMProxyHandler{svc: svc}
+func NewLLMProxyHandler(
+	svc *service.LLMProxyService,
+	pricer *service.Pricer,
+	tokenRepo *repository.LLMTokenRepository,
+	tokenUsageRepo *repository.LLMTokenUsageRepository,
+	pricingRepo *repository.LLMModelPricingRepository,
+) *LLMProxyHandler {
+	return &LLMProxyHandler{
+		svc:            svc,
+		pricer:         pricer,
+		tokenRepo:      tokenRepo,
+		tokenUsageRepo: tokenUsageRepo,
+		pricingRepo:    pricingRepo,
+	}
 }
 
 // Proxy handles OpenAI-compatible proxy requests.
@@ -347,4 +368,283 @@ func (h *LLMProxyHandler) ReloadConfig(c *gin.Context) {
 		return
 	}
 	response.Message(c, "configuration reloaded")
+}
+
+// --- Token CRUD ---
+
+func (h *LLMProxyHandler) ListTokens(c *gin.Context) {
+	tokens, err := h.tokenRepo.List()
+	if err != nil {
+		response.InternalError(c, err.Error())
+		return
+	}
+	// Don't expose key_hash
+	for i := range tokens {
+		tokens[i].KeyHash = ""
+	}
+	response.Success(c, tokens)
+}
+
+func (h *LLMProxyHandler) CreateToken(c *gin.Context) {
+	var req struct {
+		Name                 string   `json:"name"`
+		CallerID             string   `json:"caller_id"`
+		AllowedModels        []string `json:"allowed_models"`
+		AllowedGroups        []string `json:"allowed_groups"`
+		QuotaRequestsDaily   int      `json:"quota_requests_daily"`
+		QuotaTokensDaily     int      `json:"quota_tokens_daily"`
+		QuotaCostMonthlyCents int     `json:"quota_cost_monthly_cents"`
+		ExpiresAt            *string  `json:"expires_at"`
+	}
+	if err := c.ShouldBindJSON(&req); err != nil {
+		response.BadRequest(c, err.Error())
+		return
+	}
+	if req.Name == "" || req.CallerID == "" {
+		response.BadRequest(c, "name and caller_id are required")
+		return
+	}
+
+	// Generate key: sk-bk-<random 32 hex chars>
+	b := make([]byte, 16)
+	if _, err := rand.Read(b); err != nil {
+		response.InternalError(c, "failed to generate key")
+		return
+	}
+	rawKey := "sk-bk-" + hex.EncodeToString(b)
+
+	token := model.LLMToken{
+		Name:                  req.Name,
+		KeyHash:               model.HashKey(rawKey),
+		KeyPrefix:             rawKey[:min(8, len(rawKey))],
+		CallerID:              req.CallerID,
+		QuotaRequestsDaily:    req.QuotaRequestsDaily,
+		QuotaTokensDaily:      req.QuotaTokensDaily,
+		QuotaCostMonthlyCents: req.QuotaCostMonthlyCents,
+	}
+	token.SetAllowedModels(req.AllowedModels)
+	token.SetAllowedGroups(req.AllowedGroups)
+	if req.ExpiresAt != nil {
+		if t, err := time.Parse(time.RFC3339, *req.ExpiresAt); err == nil {
+			token.ExpiresAt = &t
+		}
+	}
+
+	if err := h.tokenRepo.Create(&token); err != nil {
+		response.InternalError(c, err.Error())
+		return
+	}
+
+	// Return the raw key ONLY on creation
+	response.Success(c, gin.H{
+		"token": token,
+		"key":   rawKey,
+	})
+}
+
+func (h *LLMProxyHandler) UpdateToken(c *gin.Context) {
+	id, err := strconv.ParseUint(c.Param("id"), 10, 32)
+	if err != nil {
+		response.BadRequest(c, "invalid id")
+		return
+	}
+	var req struct {
+		Name                  string   `json:"name"`
+		AllowedModels         []string `json:"allowed_models"`
+		AllowedGroups         []string `json:"allowed_groups"`
+		QuotaRequestsDaily    int      `json:"quota_requests_daily"`
+		QuotaTokensDaily      int      `json:"quota_tokens_daily"`
+		QuotaCostMonthlyCents int      `json:"quota_cost_monthly_cents"`
+		Enabled               *bool    `json:"enabled"`
+		ExpiresAt             *string  `json:"expires_at"`
+	}
+	if err := c.ShouldBindJSON(&req); err != nil {
+		response.BadRequest(c, err.Error())
+		return
+	}
+
+	token, err := h.tokenRepo.Get(uint(id))
+	if err != nil {
+		response.NotFound(c, "token not found")
+		return
+	}
+
+	if req.Name != "" {
+		token.Name = req.Name
+	}
+	token.SetAllowedModels(req.AllowedModels)
+	token.SetAllowedGroups(req.AllowedGroups)
+	token.QuotaRequestsDaily = req.QuotaRequestsDaily
+	token.QuotaTokensDaily = req.QuotaTokensDaily
+	token.QuotaCostMonthlyCents = req.QuotaCostMonthlyCents
+	if req.Enabled != nil {
+		token.Enabled = *req.Enabled
+	}
+	if req.ExpiresAt != nil {
+		if t, err := time.Parse(time.RFC3339, *req.ExpiresAt); err == nil {
+			token.ExpiresAt = &t
+		} else {
+			token.ExpiresAt = nil
+		}
+	}
+
+	if err := h.tokenRepo.Update(token); err != nil {
+		response.InternalError(c, err.Error())
+		return
+	}
+	token.KeyHash = ""
+	response.Success(c, token)
+}
+
+func (h *LLMProxyHandler) DeleteToken(c *gin.Context) {
+	id, err := strconv.ParseUint(c.Param("id"), 10, 32)
+	if err != nil {
+		response.BadRequest(c, "invalid id")
+		return
+	}
+	if err := h.tokenRepo.Delete(uint(id)); err != nil {
+		response.InternalError(c, err.Error())
+		return
+	}
+	response.Message(c, "token deleted")
+}
+
+func (h *LLMProxyHandler) RegenerateTokenKey(c *gin.Context) {
+	id, err := strconv.ParseUint(c.Param("id"), 10, 32)
+	if err != nil {
+		response.BadRequest(c, "invalid id")
+		return
+	}
+	token, err := h.tokenRepo.Get(uint(id))
+	if err != nil {
+		response.NotFound(c, "token not found")
+		return
+	}
+
+	b := make([]byte, 16)
+	if _, err := rand.Read(b); err != nil {
+		response.InternalError(c, "failed to generate key")
+		return
+	}
+	rawKey := "sk-bk-" + hex.EncodeToString(b)
+	token.KeyHash = model.HashKey(rawKey)
+	token.KeyPrefix = rawKey[:min(8, len(rawKey))]
+
+	if err := h.tokenRepo.Update(token); err != nil {
+		response.InternalError(c, err.Error())
+		return
+	}
+	response.Success(c, gin.H{"key": rawKey})
+}
+
+func (h *LLMProxyHandler) GetTokenUsage(c *gin.Context) {
+	id, err := strconv.ParseUint(c.Param("id"), 10, 32)
+	if err != nil {
+		response.BadRequest(c, "invalid id")
+		return
+	}
+	daysStr := c.DefaultQuery("days", "7")
+	days, _ := strconv.Atoi(daysStr)
+	if days <= 0 {
+		days = 7
+	}
+	if days > 90 {
+		days = 90
+	}
+
+	to := time.Now()
+	from := to.AddDate(0, 0, -days)
+	usages, err := h.tokenUsageRepo.ListByToken(uint(id), from, to)
+	if err != nil {
+		response.InternalError(c, err.Error())
+		return
+	}
+	response.Success(c, usages)
+}
+
+// --- Pricing CRUD ---
+
+func (h *LLMProxyHandler) ListPricing(c *gin.Context) {
+	pricing, err := h.pricingRepo.List()
+	if err != nil {
+		response.InternalError(c, err.Error())
+		return
+	}
+	response.Success(c, pricing)
+}
+
+func (h *LLMProxyHandler) CreatePricing(c *gin.Context) {
+	var p model.LLMModelPricing
+	if err := c.ShouldBindJSON(&p); err != nil {
+		response.BadRequest(c, err.Error())
+		return
+	}
+	if p.ChannelName == "" || p.Model == "" {
+		response.BadRequest(c, "channel_name and model are required")
+		return
+	}
+	if err := h.pricingRepo.Create(&p); err != nil {
+		response.InternalError(c, err.Error())
+		return
+	}
+	response.Success(c, p)
+}
+
+func (h *LLMProxyHandler) UpdatePricing(c *gin.Context) {
+	id, err := strconv.ParseUint(c.Param("id"), 10, 32)
+	if err != nil {
+		response.BadRequest(c, "invalid id")
+		return
+	}
+	var p model.LLMModelPricing
+	if err := c.ShouldBindJSON(&p); err != nil {
+		response.BadRequest(c, err.Error())
+		return
+	}
+	p.ID = uint(id)
+	if err := h.pricingRepo.Update(&p); err != nil {
+		response.InternalError(c, err.Error())
+		return
+	}
+	response.Success(c, p)
+}
+
+func (h *LLMProxyHandler) DeletePricing(c *gin.Context) {
+	id, err := strconv.ParseUint(c.Param("id"), 10, 32)
+	if err != nil {
+		response.BadRequest(c, "invalid id")
+		return
+	}
+	if err := h.pricingRepo.Delete(uint(id)); err != nil {
+		response.InternalError(c, err.Error())
+		return
+	}
+	response.Message(c, "pricing deleted")
+}
+
+func (h *LLMProxyHandler) TestPricingCalc(c *gin.Context) {
+	var req struct {
+		ChannelName      string `json:"channel_name"`
+		Model            string `json:"model"`
+		PromptTokens     int    `json:"prompt_tokens"`
+		CompletionTokens int    `json:"completion_tokens"`
+		CachedTokens     int    `json:"cached_tokens"`
+	}
+	if err := c.ShouldBindJSON(&req); err != nil {
+		response.BadRequest(c, err.Error())
+		return
+	}
+	cost, err := h.pricer.Calc(req.ChannelName, req.Model, service.Usage{
+		PromptTokens:     req.PromptTokens,
+		CompletionTokens: req.CompletionTokens,
+		CachedTokens:     req.CachedTokens,
+	})
+	if err != nil {
+		response.InternalError(c, err.Error())
+		return
+	}
+	response.Success(c, gin.H{
+		"cost_cents": cost,
+		"cost_usd":   fmt.Sprintf("%.4f", float64(cost)/100),
+	})
 }

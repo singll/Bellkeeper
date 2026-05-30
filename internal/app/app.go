@@ -108,7 +108,7 @@ func (a *App) Setup() error {
 	// Initialize layers: Repository -> Service -> Handler
 	a.repos = repository.NewRepositories(a.db)
 	a.services = service.NewServices(a.repos, a.cfg, version)
-	a.handlers = handler.NewHandlers(a.services, a.shutdownChan, a.cfg.Server.APIKey, a.cfg.Memos.BaseURL, a.cfg.Memos.APIToken)
+	a.handlers = handler.NewHandlers(a.services, a.repos, a.shutdownChan, a.cfg.Server.APIKey, a.cfg.Memos.BaseURL, a.cfg.Memos.APIToken)
 
 	if err := a.setupKnowledge(); err != nil {
 		return fmt.Errorf("knowledge setup: %w", err)

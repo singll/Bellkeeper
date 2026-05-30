@@ -136,26 +136,30 @@ type Channel struct {
 // LLMProxyService provides a rate-limited, multi-channel OpenAI-compatible proxy
 // with virtual model groups, sticky routing, and circuit breaker support.
 type LLMProxyService struct {
-	mu          sync.RWMutex
-	cfg         config.LLMProxyConfig
-	channels    map[string]*Channel      // name -> channel
-	modelMap    map[string][]*Channel    // model -> sorted channels (by priority)
-	modelGroups map[string]*ModelGroup   // group name -> model group
-	repo        *repository.LLMProxyRepository
-	channelRepo *repository.LLMChannelRepository
-	groupRepo   *repository.LLMModelGroupRepository
-	stopChans   []chan struct{}           // cleanup goroutine stop channels
+	mu             sync.RWMutex
+	cfg            config.LLMProxyConfig
+	channels       map[string]*Channel      // name -> channel
+	modelMap       map[string][]*Channel    // model -> sorted channels (by priority)
+	modelGroups    map[string]*ModelGroup   // group name -> model group
+	repo           *repository.LLMProxyRepository
+	channelRepo    *repository.LLMChannelRepository
+	groupRepo      *repository.LLMModelGroupRepository
+	pricer         *Pricer
+	tokenUsageRepo *repository.LLMTokenUsageRepository
+	stopChans      []chan struct{}           // cleanup goroutine stop channels
 }
 
-func NewLLMProxyService(cfg config.LLMProxyConfig, repo *repository.LLMProxyRepository, channelRepo *repository.LLMChannelRepository, groupRepo *repository.LLMModelGroupRepository) *LLMProxyService {
+func NewLLMProxyService(cfg config.LLMProxyConfig, repo *repository.LLMProxyRepository, channelRepo *repository.LLMChannelRepository, groupRepo *repository.LLMModelGroupRepository, pricer *Pricer, tokenUsageRepo *repository.LLMTokenUsageRepository) *LLMProxyService {
 	svc := &LLMProxyService{
-		cfg:         cfg,
-		channels:    make(map[string]*Channel),
-		modelMap:    make(map[string][]*Channel),
-		modelGroups: make(map[string]*ModelGroup),
-		repo:        repo,
-		channelRepo: channelRepo,
-		groupRepo:   groupRepo,
+		cfg:            cfg,
+		channels:       make(map[string]*Channel),
+		modelMap:       make(map[string][]*Channel),
+		modelGroups:    make(map[string]*ModelGroup),
+		repo:           repo,
+		channelRepo:    channelRepo,
+		groupRepo:      groupRepo,
+		pricer:         pricer,
+		tokenUsageRepo: tokenUsageRepo,
 	}
 
 	if err := svc.loadFromDB(); err != nil {
@@ -527,7 +531,7 @@ func (s *LLMProxyService) tryChannel(
 				time.Sleep(waitTime)
 				continue
 			}
-			s.logRequest(ch.Config.Name, modelName, path, 429, true, attempt, 0, 0, 0,
+			s.logRequest(ch.Config.Name, modelName, path, 429, true, attempt, 0, 0, 0, 0,
 				"client rate limit exhausted", callerID)
 			return 429, []byte(`{"error":"rate limit: bucket exhausted after retries"}`), nil, nil
 		}
@@ -573,7 +577,7 @@ func (s *LLMProxyService) tryChannel(
 		durationMs := int(time.Since(start).Milliseconds())
 
 		if err != nil {
-			s.logRequest(ch.Config.Name, modelName, path, 0, false, attempt, durationMs, 0, 0,
+			s.logRequest(ch.Config.Name, modelName, path, 0, false, attempt, durationMs, 0, 0, 0,
 				err.Error(), callerID)
 			return 0, nil, nil, fmt.Errorf("upstream request: %w", err)
 		}
@@ -597,10 +601,10 @@ func (s *LLMProxyService) tryChannel(
 		lastHeaders = resp.Header
 
 		isRateLimit := resp.StatusCode == 429
-		promptTokens, compTokens := extractTokenUsage(respBytes)
+		promptTokens, compTokens, cachedTokens := extractTokenUsage(respBytes)
 
 		s.logRequest(ch.Config.Name, modelName, path, resp.StatusCode, isRateLimit,
-			attempt, durationMs, promptTokens, compTokens, "", callerID)
+			attempt, durationMs, promptTokens, compTokens, cachedTokens, "", callerID)
 
 		if resp.StatusCode == 429 && attempt < maxRetries {
 			backoff := s.calculateBackoff(attempt)
@@ -660,16 +664,24 @@ func extractModelFromBody(body []byte) string {
 	return req.Model
 }
 
-func extractTokenUsage(body []byte) (prompt, comp int) {
+func extractTokenUsage(body []byte) (prompt, comp, cached int) {
 	// Try OpenAI format first
 	var openaiResp struct {
 		Usage struct {
-			PromptTokens     int `json:"prompt_tokens"`
-			CompletionTokens int `json:"completion_tokens"`
+			PromptTokens        int `json:"prompt_tokens"`
+			CompletionTokens    int `json:"completion_tokens"`
+			CachedTokens        int `json:"cached_tokens,omitempty"`
+			PromptTokensDetails struct {
+				CachedTokens int `json:"cached_tokens"`
+			} `json:"prompt_tokens_details,omitempty"`
 		} `json:"usage"`
 	}
 	if err := json.Unmarshal(body, &openaiResp); err == nil && openaiResp.Usage.PromptTokens > 0 {
-		return openaiResp.Usage.PromptTokens, openaiResp.Usage.CompletionTokens
+		cached := openaiResp.Usage.CachedTokens
+		if cached == 0 {
+			cached = openaiResp.Usage.PromptTokensDetails.CachedTokens
+		}
+		return openaiResp.Usage.PromptTokens, openaiResp.Usage.CompletionTokens, cached
 	}
 
 	// Try Anthropic format
@@ -680,19 +692,29 @@ func extractTokenUsage(body []byte) (prompt, comp int) {
 		} `json:"usage"`
 	}
 	if err := json.Unmarshal(body, &anthropicResp); err == nil && anthropicResp.Usage.InputTokens > 0 {
-		return anthropicResp.Usage.InputTokens, anthropicResp.Usage.OutputTokens
+		return anthropicResp.Usage.InputTokens, anthropicResp.Usage.OutputTokens, 0
 	}
 
-	return 0, 0
+	return 0, 0, 0
 }
 
 func (s *LLMProxyService) logRequest(channelName, modelName, path string, statusCode int,
-	isRateLimit bool, retryCount, durationMs, promptTokens, compTokens int,
+	isRateLimit bool, retryCount, durationMs, promptTokens, compTokens, cachedTokens int,
 	errMsg, callerID string) {
 	if s.repo == nil {
 		return
 	}
 	go func() {
+		// Calculate cost
+		var costCents int
+		if s.pricer != nil && promptTokens+compTokens > 0 {
+			costCents, _ = s.pricer.Calc(channelName, modelName, Usage{
+				PromptTokens:     promptTokens,
+				CompletionTokens: compTokens,
+				CachedTokens:     cachedTokens,
+			})
+		}
+
 		entry := &model.LLMProxyLog{
 			ChannelName:  channelName,
 			Model:        modelName,
@@ -703,12 +725,28 @@ func (s *LLMProxyService) logRequest(channelName, modelName, path string, status
 			DurationMs:   durationMs,
 			PromptTokens: promptTokens,
 			CompTokens:   compTokens,
+			CachedTokens: cachedTokens,
+			CostCents:    costCents,
 			ErrorMessage: errMsg,
 			CallerID:     callerID,
 			CreatedAt:    time.Now(),
 		}
 		if err := s.repo.CreateLog(entry); err != nil {
 			middleware.GetLogger().Warn("failed to log llm proxy request", zap.Error(err))
+			return
+		}
+
+		// Aggregate token usage by caller_id (daily)
+		if s.tokenUsageRepo != nil && callerID != "" && callerID != "unknown" {
+			requests := 1
+			errCount := 0
+			if statusCode >= 400 {
+				errCount = 1
+				requests = 0 // Don't count errors as successful requests
+			}
+			if err := s.tokenUsageRepo.AddUsage(0, time.Now().Truncate(24*time.Hour), requests, promptTokens, compTokens, cachedTokens, costCents, errCount); err != nil {
+				middleware.GetLogger().Warn("failed to aggregate token usage", zap.Error(err))
+			}
 		}
 	}()
 }
@@ -723,7 +761,7 @@ func (s *LLMProxyService) logGroupRequest(channelName, virtualModel, realModel, 
 	isRateLimit := statusCode == 429
 	// Log with virtual model name so operators can trace group requests
 	s.logRequest(channelName, virtualModel+"→"+realModel, path, statusCode, isRateLimit,
-		0, 0, 0, 0, errMsg, callerID)
+		0, 0, 0, 0, 0, errMsg, callerID)
 }
 
 // --- Streaming Proxy ---
@@ -781,7 +819,7 @@ func (s *LLMProxyService) ProxyStreamRequest(
 			result.ModelName = modelName + "→" + realModel
 			// Log stream start
 			s.logRequest(ch.Config.Name, modelName+"→"+realModel, path, result.StatusCode, false,
-				0, 0, 0, 0, "", callerID)
+				0, 0, 0, 0, 0, "", callerID)
 		}
 		return result, err
 	}
@@ -803,7 +841,7 @@ func (s *LLMProxyService) ProxyStreamRequest(
 	if err == nil {
 		result.ModelName = modelName
 		s.logRequest(ch.Config.Name, modelName, path, result.StatusCode, false,
-			0, 0, 0, 0, "", callerID)
+			0, 0, 0, 0, 0, "", callerID)
 	}
 	return result, err
 }

@@ -14,6 +14,8 @@ type LLMProxyLog struct {
 	DurationMs   int       `json:"duration_ms"`
 	PromptTokens int       `json:"prompt_tokens,omitempty"`
 	CompTokens   int       `json:"comp_tokens,omitempty"`
+	CachedTokens int       `json:"cached_tokens,omitempty"`
+	CostCents    int       `json:"cost_cents,omitempty"`
 	ErrorMessage string    `gorm:"type:text" json:"error_message,omitempty"`
 	CallerID     string    `gorm:"size:100;index" json:"caller_id"`
 	CreatedAt    time.Time `gorm:"index" json:"created_at"`

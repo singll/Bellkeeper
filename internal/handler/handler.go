@@ -2,6 +2,7 @@ package handler
 
 import (
 	"github.com/singll/bellkeeper/internal/pkg/defaults"
+	"github.com/singll/bellkeeper/internal/repository"
 	"github.com/singll/bellkeeper/internal/service"
 )
 
@@ -35,7 +36,7 @@ type Handlers struct {
 }
 
 // NewHandlers creates all handler instances
-func NewHandlers(services *service.Services, shutdownChan chan struct{}, apiKey, memosBaseURL, memosAPIToken string) *Handlers {
+func NewHandlers(services *service.Services, repos *repository.Repositories, shutdownChan chan struct{}, apiKey, memosBaseURL, memosAPIToken string) *Handlers {
 	h := &Handlers{
 		Tag:           NewTagHandler(services.Tag),
 		RSS:           NewRSSHandler(services.RSS, services.RSSFetcher),
@@ -44,7 +45,7 @@ func NewHandlers(services *service.Services, shutdownChan chan struct{}, apiKey,
 		Health:        NewHealthHandler(services.Health),
 		Workflow:      NewWorkflowHandler(services.Workflow),
 		System:        NewSystemHandler(shutdownChan),
-		LLMProxy:      NewLLMProxyHandler(services.LLMProxy),
+		LLMProxy:      NewLLMProxyHandler(services.LLMProxy, service.NewPricer(repos.LLMModelPricing), repos.LLMToken, repos.LLMTokenUsage, repos.LLMModelPricing),
 		Classify:      NewClassifyHandler(services.Classify),
 		ActivityLog:   NewActivityLogHandler(services.ActivityLog),
 		LogCenter:     NewLogCenterHandler(services.LogCenter, apiKey),

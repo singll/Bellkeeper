@@ -158,6 +158,21 @@ func registerLLMProxyRoutes(api *gin.RouterGroup, h *handler.LLMProxyHandler) {
 	cfg.DELETE("/groups/:id", h.DeleteGroup)
 
 	llm.POST("/reload", h.ReloadConfig)
+
+	// Token CRUD
+	llm.GET("/tokens", h.ListTokens)
+	llm.POST("/tokens", h.CreateToken)
+	llm.PUT("/tokens/:id", h.UpdateToken)
+	llm.DELETE("/tokens/:id", h.DeleteToken)
+	llm.POST("/tokens/:id/regenerate", h.RegenerateTokenKey)
+	llm.GET("/tokens/:id/usage", h.GetTokenUsage)
+
+	// Pricing CRUD
+	llm.GET("/pricing", h.ListPricing)
+	llm.POST("/pricing", h.CreatePricing)
+	llm.PUT("/pricing/:id", h.UpdatePricing)
+	llm.DELETE("/pricing/:id", h.DeletePricing)
+	llm.POST("/pricing/test-calc", h.TestPricingCalc)
 }
 
 func registerClassifyRoutes(api *gin.RouterGroup, h *handler.ClassifyHandler) {

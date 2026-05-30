@@ -355,9 +355,54 @@ export interface LLMProxyLog {
   duration_ms: number
   prompt_tokens: number
   comp_tokens: number
+  cached_tokens: number
+  cost_cents: number
   error_message: string
   caller_id: string
   created_at: string
+}
+
+export interface LLMToken {
+  id: number
+  name: string
+  key_prefix: string
+  caller_id: string
+  allowed_models: string
+  allowed_groups: string
+  quota_requests_daily: number
+  quota_tokens_daily: number
+  quota_cost_monthly_cents: number
+  expires_at: string | null
+  enabled: boolean
+  last_used_at: string | null
+  created_at: string
+  updated_at: string
+}
+
+export interface LLMTokenUsageDaily {
+  id: number
+  token_id: number
+  date: string
+  requests: number
+  prompt_tokens: number
+  completion_tokens: number
+  cached_tokens: number
+  cost_cents: number
+  error_count: number
+}
+
+export interface LLMModelPricing {
+  id: number
+  channel_name: string
+  model: string
+  input_price_per_1m_cents: number
+  output_price_per_1m_cents: number
+  cached_input_price_per_1m_cents: number
+  currency: string
+  effective_from: string
+  notes: string
+  created_at: string
+  updated_at: string
 }
 
 // LLM Proxy Fetch Response Types (for raw fetch in LLMProxy.tsx)

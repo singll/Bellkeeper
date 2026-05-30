@@ -243,6 +243,30 @@ export const llmProxyApi = {
     if (limit) p.set('limit', String(limit))
     return request<{ data: LLMProxyLog[] }>(`/llm/logs?${p}`)
   },
+
+  // Token CRUD
+  listTokens: () => request<{ data: LLMToken[] }>('/llm/tokens'),
+  createToken: (data: Partial<LLMToken>) =>
+    request<{ token: LLMToken; key: string }>('/llm/tokens', { method: 'POST', body: JSON.stringify(data) }),
+  updateToken: (id: number, data: Partial<LLMToken>) =>
+    request<{ data: LLMToken }>(`/llm/tokens/${id}`, { method: 'PUT', body: JSON.stringify(data) }),
+  deleteToken: (id: number) =>
+    request<{ message: string }>(`/llm/tokens/${id}`, { method: 'DELETE' }),
+  regenerateTokenKey: (id: number) =>
+    request<{ key: string }>(`/llm/tokens/${id}/regenerate`, { method: 'POST' }),
+  getTokenUsage: (id: number, days?: number) =>
+    request<{ data: LLMTokenUsageDaily[] }>(`/llm/tokens/${id}/usage?days=${days || 7}`),
+
+  // Pricing CRUD
+  listPricing: () => request<{ data: LLMModelPricing[] }>('/llm/pricing'),
+  createPricing: (data: Partial<LLMModelPricing>) =>
+    request<{ data: LLMModelPricing }>('/llm/pricing', { method: 'POST', body: JSON.stringify(data) }),
+  updatePricing: (id: number, data: Partial<LLMModelPricing>) =>
+    request<{ data: LLMModelPricing }>(`/llm/pricing/${id}`, { method: 'PUT', body: JSON.stringify(data) }),
+  deletePricing: (id: number) =>
+    request<{ message: string }>(`/llm/pricing/${id}`, { method: 'DELETE' }),
+  testPricingCalc: (data: { channel_name: string; model: string; prompt_tokens: number; completion_tokens: number; cached_tokens: number }) =>
+    request<{ cost_cents: number; cost_usd: string }>('/llm/pricing/test-calc', { method: 'POST', body: JSON.stringify(data) }),
 }
 
 // Activity Logs API
