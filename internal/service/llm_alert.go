@@ -55,6 +55,15 @@ func (a *AlertAggregator) Start() {
 	go a.loop()
 }
 
+// SetNotifier sets (or replaces) the delivery notifier. Safe to call after Start —
+// the aggregator is constructed with a nil notifier and wired once the Matrix
+// notification service is available (it buffers + persists events meanwhile).
+func (a *AlertAggregator) SetNotifier(n AlertNotifier) {
+	a.mu.Lock()
+	a.notifier = n
+	a.mu.Unlock()
+}
+
 // Stop halts the background loop.
 func (a *AlertAggregator) Stop() {
 	a.mu.Lock()
@@ -117,6 +126,7 @@ func (a *AlertAggregator) Flush() {
 	batch := make([]model.LLMAlertEvent, len(a.buffer))
 	copy(batch, a.buffer)
 	a.buffer = a.buffer[:0]
+	notifier := a.notifier // capture under lock to avoid racing SetNotifier
 	a.mu.Unlock()
 
 	// Persist all events to DB
@@ -136,13 +146,13 @@ func (a *AlertAggregator) Flush() {
 		}
 	}
 
-	if len(notifyEvents) == 0 || a.notifier == nil {
+	if len(notifyEvents) == 0 || notifier == nil {
 		return
 	}
 
 	// Build aggregated message
 	msg := a.renderAggregation(notifyEvents)
-	if err := a.notifier.Notify(msg); err != nil {
+	if err := notifier.Notify(msg); err != nil {
 		middleware.GetLogger().Warn("failed to send aggregated alert", zap.Error(err))
 	} else {
 		// Update dedup timestamps on successful send

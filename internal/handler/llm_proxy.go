@@ -226,6 +226,21 @@ func (h *LLMProxyHandler) RateLimitEvents(c *gin.Context) {
 	response.Success(c, events)
 }
 
+// ListAlertEvents returns recent aggregated alert events (circuit-open, quota,
+// balance, session) for the alerts page. Route: GET /api/llm/alerts.
+func (h *LLMProxyHandler) ListAlertEvents(c *gin.Context) {
+	hours, _ := strconv.Atoi(c.DefaultQuery("hours", "24"))
+	limit, _ := strconv.Atoi(c.DefaultQuery("limit", "100"))
+	severity := c.Query("severity")
+	alertType := c.Query("type")
+	events, err := h.svc.ListAlertEvents(severity, alertType, hours, limit)
+	if err != nil {
+		response.InternalError(c, err.Error())
+		return
+	}
+	response.Success(c, events)
+}
+
 // HealthStatus returns health status of all channels including circuit breaker state.
 func (h *LLMProxyHandler) HealthStatus(c *gin.Context) {
 	response.Success(c, h.svc.GetHealthStatus())

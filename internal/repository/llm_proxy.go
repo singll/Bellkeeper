@@ -91,6 +91,26 @@ func (r *LLMProxyRepository) SaveAlertEvent(event *model.LLMAlertEvent) error {
 	return r.db.Create(event).Error
 }
 
+// ListAlertEvents returns recent alert events, optionally filtered by severity and
+// alert type, newest first.
+func (r *LLMProxyRepository) ListAlertEvents(since time.Time, severity, alertType string, limit int) ([]model.LLMAlertEvent, error) {
+	var events []model.LLMAlertEvent
+	q := r.db.Where("created_at >= ?", since)
+	if severity != "" {
+		q = q.Where("severity = ?", severity)
+	}
+	if alertType != "" {
+		q = q.Where("alert_type = ?", alertType)
+	}
+	if limit <= 0 || limit > 500 {
+		limit = 200
+	}
+	if err := q.Order("created_at DESC").Limit(limit).Find(&events).Error; err != nil {
+		return nil, err
+	}
+	return events, nil
+}
+
 // AggregateByModel returns usage aggregated by model name from the proxy logs.
 // llm_token_usage_daily has no model dimension, so model-level billing must come
 // from llm_proxy_logs (which records Model + CostMicroCents per request).

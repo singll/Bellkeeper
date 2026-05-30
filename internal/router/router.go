@@ -147,6 +147,7 @@ func registerLLMProxyRoutes(r *gin.Engine, api *gin.RouterGroup, h *handler.LLMP
 	llm.GET("/stats", h.Stats)
 	llm.GET("/logs", h.Logs)
 	llm.GET("/rate-limit-events", h.RateLimitEvents)
+	llm.GET("/alerts", h.ListAlertEvents)
 
 	// Health & model group management
 	llm.GET("/health", h.HealthStatus)

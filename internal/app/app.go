@@ -196,6 +196,12 @@ func (a *App) setupMatrixInfra() error {
 		a.services.CrawlQueue.SetNotificationService(notifySvc)
 	}
 
+	// Wire alert delivery into the LLM proxy's alert aggregator (until now it has
+	// only buffered + persisted events with a nil notifier).
+	if a.services.LLMProxy != nil {
+		a.services.LLMProxy.SetAlertNotifier(service.NewMatrixAlertNotifier(notifySvc, "alerts"))
+	}
+
 	// Notification worker
 	notifySender := service.NewNotificationSender(nil, a.repos)
 	a.notifyWorker = worker.NewNotificationWorker(a.cfg.NATS, a.natsClient, notifySender, a.cfg.Matrix.MaxRetry)

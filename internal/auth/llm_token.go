@@ -18,6 +18,8 @@ import (
 type LLMTokenStore interface {
 	GetByKeyHash(hash string) (*model.LLMToken, error)
 	CountRequestsToday(tokenID uint) (int, error)
+	TokensUsedToday(tokenID uint) (int, error)
+	CostThisMonthCents(tokenID uint) (int, error)
 	UpdateLastUsed(tokenID uint) error
 }
 
@@ -117,6 +119,33 @@ func LLMTokenAuth(tokenRepo LLMTokenStore, serverAPIKey string) gin.HandlerFunc 
 				c.Header("X-Quota-Reset", resetTime.Format(time.RFC3339))
 				c.Header("Retry-After", strconv.Itoa(int(resetTime.Sub(time.Now()).Seconds())))
 				response.TooManyRequests(c, "daily request quota exceeded")
+				c.Abort()
+				return
+			}
+		}
+
+		// Check daily token quota (prompt + completion tokens consumed today)
+		if token.QuotaTokensDaily > 0 {
+			used, err := tokenRepo.TokensUsedToday(token.ID)
+			if err == nil && used >= token.QuotaTokensDaily {
+				resetTime := time.Now().AddDate(0, 0, 1).Truncate(24 * time.Hour)
+				c.Header("X-Quota-Reset", resetTime.Format(time.RFC3339))
+				c.Header("Retry-After", strconv.Itoa(int(resetTime.Sub(time.Now()).Seconds())))
+				response.TooManyRequests(c, "daily token quota exceeded")
+				c.Abort()
+				return
+			}
+		}
+
+		// Check monthly cost quota (month-to-date cost in cents)
+		if token.QuotaCostMonthlyCents > 0 {
+			used, err := tokenRepo.CostThisMonthCents(token.ID)
+			if err == nil && used >= token.QuotaCostMonthlyCents {
+				now := time.Now()
+				resetTime := time.Date(now.Year(), now.Month(), 1, 0, 0, 0, 0, now.Location()).AddDate(0, 1, 0)
+				c.Header("X-Quota-Reset", resetTime.Format(time.RFC3339))
+				c.Header("Retry-After", strconv.Itoa(int(resetTime.Sub(time.Now()).Seconds())))
+				response.TooManyRequests(c, "monthly cost quota exceeded")
 				c.Abort()
 				return
 			}

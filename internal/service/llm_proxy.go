@@ -194,10 +194,13 @@ type LLMProxyService struct {
 	rateLimitLearner *RateLimitLearner
 	taskRouter     *TaskRouter
 	convMgr        *ConversationBindingManager
-	stopChans      []chan struct{}           // cleanup goroutine stop channels
+	tokenRepo      *repository.LLMTokenRepository
+	alertAggregator *AlertAggregator
+	groupStopChans []chan struct{} // per-load group-cleanup goroutines (recreated on reload)
+	bgStopChans    []chan struct{} // long-lived background loops (conv cleanup, archival, quota)
 }
 
-func NewLLMProxyService(cfg config.LLMProxyConfig, repo *repository.LLMProxyRepository, channelRepo *repository.LLMChannelRepository, groupRepo *repository.LLMModelGroupRepository, pricer *Pricer, tokenUsageRepo *repository.LLMTokenUsageRepository, rateLimitRepo *repository.LLMRateLimitRepository, convRepo *repository.ConversationBindingRepository) *LLMProxyService {
+func NewLLMProxyService(cfg config.LLMProxyConfig, repo *repository.LLMProxyRepository, channelRepo *repository.LLMChannelRepository, groupRepo *repository.LLMModelGroupRepository, pricer *Pricer, tokenUsageRepo *repository.LLMTokenUsageRepository, rateLimitRepo *repository.LLMRateLimitRepository, convRepo *repository.ConversationBindingRepository, tokenRepo *repository.LLMTokenRepository) *LLMProxyService {
 	svc := &LLMProxyService{
 		cfg:            cfg,
 		channels:       make(map[string]*Channel),
@@ -208,6 +211,7 @@ func NewLLMProxyService(cfg config.LLMProxyConfig, repo *repository.LLMProxyRepo
 		groupRepo:      groupRepo,
 		pricer:         pricer,
 		tokenUsageRepo: tokenUsageRepo,
+		tokenRepo:      tokenRepo,
 	}
 
 	// Initialize the rate-limit learner BEFORE loading channels so learned-safe RPM
@@ -230,15 +234,30 @@ func NewLLMProxyService(cfg config.LLMProxyConfig, repo *repository.LLMProxyRepo
 	// Initialize task router
 	svc.taskRouter = NewTaskRouter(cfg.CodingRoutingStrategy)
 
+	// Alert aggregator (nil notifier until Matrix infra wires one in via
+	// SetAlertNotifier — until then it still buffers + persists events to DB).
+	svc.alertAggregator = NewAlertAggregator(repo, nil)
+	svc.alertAggregator.Start()
+
 	// Initialize conversation binding manager
 	svc.convMgr = NewConversationBindingManager(convRepo, 24*time.Hour)
 	_ = svc.convMgr.LoadFromDB()
+
+	// Long-lived background loops — their stop channels live in bgStopChans and are
+	// NOT touched by Reload() (which only cycles group-cleanup goroutines).
 	convStop := make(chan struct{})
-	svc.stopChans = append(svc.stopChans, convStop)
+	svc.bgStopChans = append(svc.bgStopChans, convStop)
 	go svc.convCleanupLoop(convStop)
 
-	// Start log archival background task
-	svc.startLogArchival()
+	archiveStop := make(chan struct{})
+	svc.bgStopChans = append(svc.bgStopChans, archiveStop)
+	svc.startLogArchival(archiveStop)
+
+	if tokenRepo != nil {
+		quotaStop := make(chan struct{})
+		svc.bgStopChans = append(svc.bgStopChans, quotaStop)
+		go svc.quotaAlertLoop(quotaStop)
+	}
 
 	return svc
 }
@@ -286,10 +305,20 @@ func (s *LLMProxyService) RefreshBalances() {
 	s.balanceMgr.RefreshAll()
 }
 
-// Stop halts background services (balance manager, etc.).
+// Stop halts background services (balance manager, learner, aggregator, loops).
 func (s *LLMProxyService) Stop() {
-	for _, stop := range s.stopChans {
+	s.mu.Lock()
+	for _, stop := range s.groupStopChans {
 		close(stop)
+	}
+	s.groupStopChans = nil
+	s.mu.Unlock()
+	for _, stop := range s.bgStopChans {
+		close(stop)
+	}
+	s.bgStopChans = nil
+	if s.alertAggregator != nil {
+		s.alertAggregator.Stop()
 	}
 	if s.balanceMgr != nil {
 		s.balanceMgr.Stop()
@@ -297,6 +326,126 @@ func (s *LLMProxyService) Stop() {
 	if s.rateLimitLearner != nil {
 		s.rateLimitLearner.Stop()
 	}
+}
+
+// SetAlertNotifier wires the delivery notifier into the alert aggregator. Called
+// from app setup once the Matrix notification service is available.
+func (s *LLMProxyService) SetAlertNotifier(n AlertNotifier) {
+	if s.alertAggregator != nil {
+		s.alertAggregator.SetNotifier(n)
+	}
+}
+
+// recordAlert buffers an alert event (no-op if the aggregator isn't initialized).
+func (s *LLMProxyService) recordAlert(alertType, severity, channel, msg string) {
+	if s.alertAggregator != nil {
+		s.alertAggregator.Record(alertType, severity, channel, msg)
+	}
+}
+
+// alertForClass maps a semantic upstream error class to an aggregated alert so
+// operators learn about quota/balance/session/auth failures (§2.6.6).
+func (s *LLMProxyService) alertForClass(channel string, class llmerrors.Class) {
+	switch class {
+	case llmerrors.QuotaExhausted:
+		s.recordAlert("quota_exhausted", "error", channel, fmt.Sprintf("channel %s quota exhausted", channel))
+	case llmerrors.BalanceZero:
+		s.recordAlert("balance_zero", "error", channel, fmt.Sprintf("channel %s balance depleted — please top up", channel))
+	case llmerrors.SessionExpired:
+		s.recordAlert("session_expired", "error", channel, fmt.Sprintf("channel %s session expired — re-import credentials", channel))
+	case llmerrors.AuthFailed:
+		s.recordAlert("auth_failed", "critical", channel, fmt.Sprintf("channel %s auth failed — API key invalid", channel))
+	case llmerrors.SubscriptionInvalid:
+		s.recordAlert("subscription_invalid", "error", channel, fmt.Sprintf("channel %s subscription validation failed", channel))
+	}
+}
+
+// ListAlertEvents returns recent alert events for the alerts UI.
+func (s *LLMProxyService) ListAlertEvents(severity, alertType string, hours, limit int) ([]model.LLMAlertEvent, error) {
+	if s.repo == nil {
+		return nil, fmt.Errorf("proxy repo not initialized")
+	}
+	if hours <= 0 {
+		hours = 24
+	}
+	since := time.Now().Add(-time.Duration(hours) * time.Hour)
+	return s.repo.ListAlertEvents(since, severity, alertType, limit)
+}
+
+// quotaAlertLoop runs hourly, comparing each token's usage against its quotas and
+// emitting 80% / 95% / 100% alerts through the aggregator (§2.6.2).
+func (s *LLMProxyService) quotaAlertLoop(stopCh <-chan struct{}) {
+	ticker := time.NewTicker(1 * time.Hour)
+	defer ticker.Stop()
+	for {
+		select {
+		case <-ticker.C:
+			s.checkQuotas()
+		case <-stopCh:
+			return
+		}
+	}
+}
+
+func (s *LLMProxyService) checkQuotas() {
+	if s.tokenRepo == nil || s.tokenUsageRepo == nil || s.alertAggregator == nil {
+		return
+	}
+	tokens, err := s.tokenRepo.List()
+	if err != nil {
+		middleware.GetLogger().Warn("quota check: list tokens failed", zap.Error(err))
+		return
+	}
+	nowUTC := time.Now().UTC()
+	today := time.Now().Truncate(24 * time.Hour)
+	monthStart := time.Date(nowUTC.Year(), nowUTC.Month(), 1, 0, 0, 0, 0, time.UTC)
+	for _, tok := range tokens {
+		if !tok.Enabled {
+			continue
+		}
+		if tok.QuotaRequestsDaily > 0 || tok.QuotaTokensDaily > 0 {
+			usages, _ := s.tokenUsageRepo.ListByToken(tok.ID, today, today)
+			reqs, toks := 0, 0
+			for _, u := range usages {
+				reqs += u.Requests
+				toks += u.PromptTokens + u.CompletionTokens
+			}
+			if tok.QuotaRequestsDaily > 0 {
+				s.emitQuotaAlert(tok.Name, "daily requests", reqs, tok.QuotaRequestsDaily)
+			}
+			if tok.QuotaTokensDaily > 0 {
+				s.emitQuotaAlert(tok.Name, "daily tokens", toks, tok.QuotaTokensDaily)
+			}
+		}
+		if tok.QuotaCostMonthlyCents > 0 {
+			usages, _ := s.tokenUsageRepo.ListByToken(tok.ID, monthStart, nowUTC)
+			var micro int64
+			for _, u := range usages {
+				micro += u.CostMicroCents
+			}
+			s.emitQuotaAlert(tok.Name, "monthly cost (cents)", int(MicroCentsToCents(micro)), tok.QuotaCostMonthlyCents)
+		}
+	}
+}
+
+func (s *LLMProxyService) emitQuotaAlert(tokenName, dimension string, used, limit int) {
+	if limit <= 0 {
+		return
+	}
+	pct := float64(used) / float64(limit) * 100
+	var severity string
+	switch {
+	case pct >= 100:
+		severity = "critical"
+	case pct >= 95:
+		severity = "error"
+	case pct >= 80:
+		severity = "warning"
+	default:
+		return
+	}
+	s.recordAlert("quota_threshold", severity, tokenName,
+		fmt.Sprintf("token %q %s at %.0f%% (%d/%d)", tokenName, dimension, pct, used, limit))
 }
 
 // validateBinding checks if a conversation binding is still valid.
@@ -411,7 +560,7 @@ func (s *LLMProxyService) loadFromDB() error {
 	s.channels = channels
 	s.modelMap = modelMap
 	s.modelGroups = modelGroups
-	s.stopChans = stopChans
+	s.groupStopChans = stopChans
 
 	middleware.GetLogger().Info("loaded llm-proxy config from DB",
 		zap.Int("channels", len(channels)), zap.Int("models", len(modelMap)),
@@ -425,10 +574,13 @@ func (s *LLMProxyService) Reload() error {
 	s.mu.Lock()
 	defer s.mu.Unlock()
 
-	// Stop old cleanup goroutines
-	for _, stop := range s.stopChans {
+	// Stop only the per-load group-cleanup goroutines. Long-lived background loops
+	// (conv cleanup, log archival, quota alerts) live in bgStopChans and must NOT be
+	// touched here, or they'd silently die on the first reload (audit #9).
+	for _, stop := range s.groupStopChans {
 		close(stop)
 	}
+	s.groupStopChans = nil
 
 	// Preserve existing channel state
 	oldChannels := s.channels
@@ -689,6 +841,11 @@ func (s *LLMProxyService) ProxyRequest(
 		result := llmerrors.Classify(statusCode, errBody, ch.Config.ProviderType)
 		duration := llmerrors.BreakdownDuration(result.BreakdownUntil)
 		ch.Health.RecordClassifiedFailure(classifyError(statusCode, err), string(result.Class), duration)
+		s.alertForClass(ch.Config.Name, result.Class)
+		if !ch.Health.IsAvailable() {
+			s.recordAlert("circuit_open", "warning", ch.Config.Name,
+				fmt.Sprintf("channel %s circuit opened (%s)", ch.Config.Name, result.Class))
+		}
 		lastErr = err
 		middleware.GetLogger().Warn("channel returned error, trying next",
 			zap.String("channel", ch.Config.Name), zap.Int("status", statusCode),
@@ -785,6 +942,11 @@ func (s *LLMProxyService) proxyViaGroup(
 		result := llmerrors.Classify(statusCode, errBody, ch.Config.ProviderType)
 		duration := llmerrors.BreakdownDuration(result.BreakdownUntil)
 		ch.Health.RecordClassifiedFailure(classifyError(statusCode, err), string(result.Class), duration)
+		s.alertForClass(ch.Config.Name, result.Class)
+		if !ch.Health.IsAvailable() {
+			s.recordAlert("circuit_open", "warning", ch.Config.Name,
+				fmt.Sprintf("channel %s circuit opened (%s)", ch.Config.Name, result.Class))
+		}
 		if taskKey != "" && group.Sticky != nil {
 			group.Sticky.Remove(taskKey)
 		}
@@ -1659,7 +1821,7 @@ func geminiGeminiToOpenAI(body []byte, model string) ([]byte, error) {
 }
 
 // startLogArchival starts a background goroutine that archives old LLM proxy logs daily.
-func (s *LLMProxyService) startLogArchival() {
+func (s *LLMProxyService) startLogArchival(stopCh <-chan struct{}) {
 	retentionDays := s.cfg.LogRetentionDays
 	if retentionDays <= 0 {
 		retentionDays = 30
@@ -1670,14 +1832,18 @@ func (s *LLMProxyService) startLogArchival() {
 		defer ticker.Stop()
 
 		// Run once at startup (after a short delay)
-		time.Sleep(5 * time.Minute)
-		s.archiveLogs(retentionDays)
+		select {
+		case <-time.After(5 * time.Minute):
+			s.archiveLogs(retentionDays)
+		case <-stopCh:
+			return
+		}
 
 		for {
 			select {
 			case <-ticker.C:
 				s.archiveLogs(retentionDays)
-			case <-s.stopChans[0]:
+			case <-stopCh:
 				return
 			}
 		}

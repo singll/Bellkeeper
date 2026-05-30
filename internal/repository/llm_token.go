@@ -83,3 +83,28 @@ func (r *LLMTokenRepository) UpdateLastUsed(tokenID uint) error {
 	now := time.Now()
 	return r.db.Model(&model.LLMToken{}).Where("id = ?", tokenID).Update("last_used_at", now).Error
 }
+
+// TokensUsedToday returns the prompt+completion tokens consumed by a token today,
+// from the aggregated daily usage table. Used to enforce QuotaTokensDaily.
+func (r *LLMTokenRepository) TokensUsedToday(tokenID uint) (int, error) {
+	today := time.Now().Truncate(24 * time.Hour)
+	var result struct{ Total int64 }
+	err := r.db.Model(&model.LLMTokenUsageDaily{}).
+		Select("COALESCE(SUM(prompt_tokens + completion_tokens), 0) as total").
+		Where("token_id = ? AND date = ?", tokenID, today).
+		Scan(&result).Error
+	return int(result.Total), err
+}
+
+// CostThisMonthCents returns the month-to-date cost (rounded cents) for a token,
+// summed from precise micro-cents. Used to enforce QuotaCostMonthlyCents.
+func (r *LLMTokenRepository) CostThisMonthCents(tokenID uint) (int, error) {
+	nowUTC := time.Now().UTC()
+	monthStart := time.Date(nowUTC.Year(), nowUTC.Month(), 1, 0, 0, 0, 0, time.UTC)
+	var result struct{ Total int64 }
+	err := r.db.Model(&model.LLMTokenUsageDaily{}).
+		Select("COALESCE(SUM(cost_micro_cents), 0) as total").
+		Where("token_id = ? AND date >= ?", tokenID, monthStart).
+		Scan(&result).Error
+	return int((result.Total + 500) / 1000), err // micro-cents → cents, round half up
+}
