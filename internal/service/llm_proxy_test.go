@@ -96,3 +96,25 @@ func TestComputeMicroCents(t *testing.T) {
 	assert.Equal(t, int64(2), MicroCentsToCents(1500))
 	assert.Equal(t, int64(0), MicroCentsToCents(14))
 }
+
+func TestImplicitConversationID(t *testing.T) {
+	m := NewConversationBindingManager(nil, 0)
+
+	// Explicit header always wins.
+	got := m.ImplicitConversationID(map[string]string{"X-Conversation-ID": "abc"}, []byte(`{}`))
+	assert.Equal(t, "abc", got)
+
+	// No header + no cache_control → no implicit binding (audit #11: don't pin
+	// stateless requests).
+	got = m.ImplicitConversationID(nil, []byte(`{"messages":[{"role":"user","content":"hi"}]}`))
+	assert.Equal(t, "", got)
+
+	// cache_control present → stable id derived from the FIRST messages, so a
+	// follow-up turn (extra trailing message) maps to the SAME id.
+	turn1 := []byte(`{"messages":[{"role":"system","content":[{"type":"text","text":"sys","cache_control":{"type":"ephemeral"}}]},{"role":"user","content":"a"}]}`)
+	turn2 := []byte(`{"messages":[{"role":"system","content":[{"type":"text","text":"sys","cache_control":{"type":"ephemeral"}}]},{"role":"user","content":"a"},{"role":"assistant","content":"b"},{"role":"user","content":"c"}]}`)
+	id1 := m.ImplicitConversationID(nil, turn1)
+	id2 := m.ImplicitConversationID(nil, turn2)
+	assert.NotEmpty(t, id1)
+	assert.Equal(t, id1, id2, "multi-turn requests sharing a prefix must hash to the same conversation id")
+}

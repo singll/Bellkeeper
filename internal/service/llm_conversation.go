@@ -1,14 +1,18 @@
 package service
 
 import (
+	"bytes"
 	"crypto/sha256"
 	"encoding/hex"
+	"encoding/json"
 	"fmt"
 	"sync"
 	"time"
 
+	"github.com/singll/bellkeeper/internal/middleware"
 	"github.com/singll/bellkeeper/internal/model"
 	"github.com/singll/bellkeeper/internal/repository"
+	"go.uber.org/zap"
 )
 
 // ConversationBindingManager manages X-Conversation-ID → channel bindings
@@ -71,18 +75,39 @@ func (m *ConversationBindingManager) Set(conversationID string, channelID uint, 
 	}
 	m.bindings[conversationID] = b
 	m.mu.Unlock()
+	m.persist(b)
+}
+
+// persist asynchronously upserts a binding to the DB so sticky routing survives
+// process restarts (without it, bindings live only in memory and are lost on
+// reload — defeating prompt-cache protection).
+func (m *ConversationBindingManager) persist(b *model.LLMConversationBinding) {
+	if m.repo == nil {
+		return
+	}
+	snapshot := *b // copy so the goroutine doesn't race with in-memory mutation
+	go func() {
+		if err := m.repo.Upsert(&snapshot); err != nil {
+			middleware.GetLogger().Warn("failed to persist conversation binding",
+				zap.String("conversation_id", snapshot.ConversationID), zap.Error(err))
+		}
+	}()
 }
 
 // Touch updates LastSeenAt and renews TTL for an existing binding.
 func (m *ConversationBindingManager) Touch(conversationID string, tokens, costCents int) {
 	m.mu.Lock()
-	defer m.mu.Unlock()
-	if b, ok := m.bindings[conversationID]; ok {
+	b, ok := m.bindings[conversationID]
+	if ok {
 		b.LastSeenAt = time.Now()
 		b.ExpiresAt = time.Now().Add(m.ttl)
 		b.RequestCount++
 		b.TotalTokens += tokens
 		b.TotalCostCents += costCents
+	}
+	m.mu.Unlock()
+	if ok {
+		m.persist(b)
 	}
 }
 
@@ -149,16 +174,44 @@ func HashMessages(messagesJSON []byte) string {
 	return "conv-" + hex.EncodeToString(h.Sum(nil))[:16]
 }
 
+// HashCachedPrefix derives a stable conversation ID from the cached prefix of the
+// request — the messages up to and including the last one carrying a cache_control
+// marker. Prompt caching requires that prefix to be byte-identical across turns, so
+// hashing it yields the same id for every turn of a conversation while still
+// distinguishing conversations with different cached prefixes.
+func HashCachedPrefix(body []byte) string {
+	var req struct {
+		Messages []json.RawMessage `json:"messages"`
+	}
+	if err := json.Unmarshal(body, &req); err != nil || len(req.Messages) == 0 {
+		return HashMessages(body) // fall back to whole-body hash on unexpected shape
+	}
+	lastCC := 0 // anchor on the first message if no per-message marker is found
+	for i, msg := range req.Messages {
+		if bytes.Contains(msg, []byte("cache_control")) {
+			lastCC = i
+		}
+	}
+	h := sha256.New()
+	for i := 0; i <= lastCC && i < len(req.Messages); i++ {
+		h.Write(req.Messages[i])
+	}
+	return "conv-" + hex.EncodeToString(h.Sum(nil))[:16]
+}
+
 // ImplicitConversationID extracts or generates a conversation ID from request headers/body.
 func (m *ConversationBindingManager) ImplicitConversationID(headers map[string]string, body []byte) string {
 	if cid := headers["X-Conversation-ID"]; cid != "" {
 		return cid
 	}
-	// If body contains cache_control, use messages hash as implicit ID
-	if len(body) > 0 {
-		return HashMessages(body)
+	// Only derive an implicit ID when the request opts into prompt caching (body
+	// contains a cache_control marker). Stateless requests get no sticky binding —
+	// hashing every body would wrongly pin one-off requests and rarely collide for
+	// genuine multi-turn conversations. (ROADMAP §2.6.7)
+	if len(body) == 0 || !bytes.Contains(body, []byte("cache_control")) {
+		return ""
 	}
-	return ""
+	return HashCachedPrefix(body)
 }
 
 // ValidateBinding checks if a binding is still valid for the given channel.

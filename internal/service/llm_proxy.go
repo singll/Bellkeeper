@@ -442,6 +442,7 @@ func dbChannelToConfig(ch model.LLMChannel) config.ChannelConfig {
 	}
 
 	return config.ChannelConfig{
+		ID:                  ch.ID,
 		Name:                ch.Name,
 		BaseURL:             ch.BaseURL,
 		APIKey:              apiKey,
@@ -598,7 +599,7 @@ func (s *LLMProxyService) ProxyRequest(
 				// Find which channel was actually used (from sticky binding)
 				if taskKey != "" && group.Sticky != nil {
 					if stickyCh, stickyModel := group.GetStickyBinding(taskKey); stickyCh != nil {
-						s.convMgr.Set(convID, 0, stickyCh.Config.Name, stickyModel, string(taskType))
+						s.convMgr.Set(convID, stickyCh.Config.ID, stickyCh.Config.Name, stickyModel, string(taskType))
 					}
 				}
 			}
@@ -625,7 +626,7 @@ func (s *LLMProxyService) ProxyRequest(
 		if err == nil && statusCode < 500 && statusCode != 429 {
 			ch.Health.RecordSuccess()
 			if convID != "" {
-				s.convMgr.Set(convID, 0, ch.Config.Name, modelName, string(taskType))
+				s.convMgr.Set(convID, ch.Config.ID, ch.Config.Name, modelName, string(taskType))
 			}
 			return statusCode, respBody, respHeaders, nil
 		}
@@ -1140,7 +1141,7 @@ func (s *LLMProxyService) ProxyStreamRequest(
 			if convID != "" {
 				if taskKey != "" && group.Sticky != nil {
 					if stickyCh, stickyModel := group.GetStickyBinding(taskKey); stickyCh != nil {
-						s.convMgr.Set(convID, 0, stickyCh.Config.Name, stickyModel, "")
+						s.convMgr.Set(convID, stickyCh.Config.ID, stickyCh.Config.Name, stickyModel, "")
 					}
 				}
 			}
@@ -1167,7 +1168,7 @@ func (s *LLMProxyService) ProxyStreamRequest(
 		s.logRequest(ch.Config.Name, modelName, path, result.StatusCode, false,
 			0, 0, 0, 0, 0, "", callerID, tokenID)
 		if convID != "" {
-			s.convMgr.Set(convID, 0, ch.Config.Name, modelName, "")
+			s.convMgr.Set(convID, ch.Config.ID, ch.Config.Name, modelName, "")
 		}
 	}
 	return result, err

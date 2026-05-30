@@ -74,6 +74,7 @@ type ModelGroupMember struct {
 }
 
 type ChannelConfig struct {
+	ID        uint     `mapstructure:"-"` // DB row id (0 for YAML-only config); used for rate-limit learning + bindings
 	Name      string   `mapstructure:"name"`
 	BaseURL   string   `mapstructure:"base_url"`
 	APIKey       string   `mapstructure:"api_key"`
@@ -88,6 +89,8 @@ type ChannelConfig struct {
 	Models    []string `mapstructure:"models"`
 	IsEnabled bool     `mapstructure:"is_enabled"`
 	IsFree    bool     `mapstructure:"is_free"`
+	TaskTypes []string `mapstructure:"task_types"` // empty = eligible for all task types
+	Tier      string   `mapstructure:"tier"`       // free | standard | premium; empty = derived from IsFree
 }
 
 type ServerConfig struct {

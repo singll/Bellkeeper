@@ -5,6 +5,7 @@ import (
 
 	"github.com/singll/bellkeeper/internal/model"
 	"gorm.io/gorm"
+	"gorm.io/gorm/clause"
 )
 
 // ConversationBindingRepository manages LLM conversation bindings in DB.
@@ -42,6 +43,18 @@ func (r *ConversationBindingRepository) Create(b *model.LLMConversationBinding) 
 // Update saves an existing binding.
 func (r *ConversationBindingRepository) Update(b *model.LLMConversationBinding) error {
 	return r.db.Save(b).Error
+}
+
+// Upsert inserts or updates a binding keyed by conversation_id (atomic). Used by
+// the in-memory manager to persist bindings so sticky routing survives restarts.
+func (r *ConversationBindingRepository) Upsert(b *model.LLMConversationBinding) error {
+	return r.db.Clauses(clause.OnConflict{
+		Columns: []clause.Column{{Name: "conversation_id"}},
+		DoUpdates: clause.AssignmentColumns([]string{
+			"channel_id", "channel_name", "model", "task_type",
+			"last_seen_at", "expires_at", "request_count", "total_tokens", "total_cost_cents",
+		}),
+	}).Create(b).Error
 }
 
 // Delete removes a binding by conversation ID.
