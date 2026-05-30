@@ -58,6 +58,11 @@ type ChannelHealth struct {
 	circuitOpenUntil time.Time
 	halfOpenInFlight int
 
+	// Semantic breakdown (Iteration 4)
+	breakdownUntil   time.Time
+	breakdownReason  string
+	breakdownClass   string
+
 	// Timestamps
 	lastSuccessAt time.Time
 	lastErrorAt   time.Time
@@ -114,31 +119,54 @@ func (h *ChannelHealth) RecordSuccess() {
 // RecordFailure records a failed request and potentially opens the circuit.
 // Returns true if the circuit was tripped open.
 func (h *ChannelHealth) RecordFailure(errorType string) bool {
+	return h.recordFailureLocked(errorType, "", 0)
+}
+
+// RecordClassifiedFailure records a classified failure with semantic breakdown.
+// class: semantic error class (e.g. "quota_exhausted", "rate_limited_retry")
+// breakdownDuration: 0 = use default cooldown from config.
+func (h *ChannelHealth) RecordClassifiedFailure(errorType, class string, breakdownDuration time.Duration) bool {
 	h.mu.Lock()
 	defer h.mu.Unlock()
+	return h.recordFailureLocked(errorType, class, breakdownDuration)
+}
 
+func (h *ChannelHealth) recordFailureLocked(errorType, class string, breakdownDuration time.Duration) bool {
 	h.appendResult(requestResult{at: time.Now(), success: false, errorType: errorType})
 	h.consecutiveFails++
 	h.lastErrorAt = time.Now()
 	h.lastErrorType = errorType
 
 	if h.state == CircuitHalfOpen {
-		h.tripOpen()
+		h.tripOpenLocked(class, breakdownDuration)
 		return true
 	}
 
 	if h.consecutiveFails >= h.cfg.FailureThreshold {
-		h.tripOpen()
+		h.tripOpenLocked(class, breakdownDuration)
 		return true
 	}
 
 	return false
 }
 
-// tripOpen transitions the circuit to Open state.
+// tripOpen transitions the circuit to Open state with optional semantic duration.
 func (h *ChannelHealth) tripOpen() {
+	h.mu.Lock()
+	defer h.mu.Unlock()
+	h.tripOpenLocked("", 0)
+}
+
+func (h *ChannelHealth) tripOpenLocked(class string, breakdownDuration time.Duration) {
+	cooldown := time.Duration(h.cfg.CooldownSeconds) * time.Second
+	if breakdownDuration > 0 {
+		cooldown = breakdownDuration
+	}
 	h.state = CircuitOpen
-	h.circuitOpenUntil = time.Now().Add(time.Duration(h.cfg.CooldownSeconds) * time.Second)
+	h.circuitOpenUntil = time.Now().Add(cooldown)
+	h.breakdownUntil = time.Now().Add(cooldown)
+	h.breakdownReason = class
+	h.breakdownClass = class
 	h.halfOpenInFlight = 0
 }
 
@@ -206,6 +234,8 @@ func (h *ChannelHealth) Status() map[string]interface{} {
 		"state":             h.state.String(),
 		"consecutive_fails": h.consecutiveFails,
 		"last_error_type":   h.lastErrorType,
+		"breakdown_reason":  h.breakdownReason,
+		"breakdown_class":   h.breakdownClass,
 	}
 
 	// Calculate recent success rate

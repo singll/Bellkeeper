@@ -20,6 +20,7 @@ import (
 	"github.com/singll/bellkeeper/internal/config"
 	"github.com/singll/bellkeeper/internal/llm/balance"
 	"github.com/singll/bellkeeper/internal/llm/converter"
+	llmerrors "github.com/singll/bellkeeper/internal/llm/errors"
 	"github.com/singll/bellkeeper/internal/middleware"
 	"github.com/singll/bellkeeper/internal/model"
 	"github.com/singll/bellkeeper/internal/pkg/httpclient"
@@ -516,11 +517,17 @@ func (s *LLMProxyService) ProxyRequest(
 			ch.Health.RecordSuccess()
 			return statusCode, respBody, respHeaders, nil
 		}
-		ch.Health.RecordFailure(classifyError(statusCode, err))
+		errBody := ""
+		if statusCode != 0 {
+			errBody = string(respBody)
+		}
+		result := llmerrors.Classify(statusCode, errBody, ch.Config.ProviderType)
+		duration := llmerrors.BreakdownDuration(result.BreakdownUntil)
+		ch.Health.RecordClassifiedFailure(classifyError(statusCode, err), string(result.Class), duration)
 		lastErr = err
 		middleware.GetLogger().Warn("channel returned error, trying next",
 			zap.String("channel", ch.Config.Name), zap.Int("status", statusCode),
-			zap.String("model", modelName))
+			zap.String("model", modelName), zap.String("class", string(result.Class)))
 	}
 
 	return statusCode, respBody, respHeaders, lastErr
@@ -570,14 +577,21 @@ func (s *LLMProxyService) proxyViaGroup(
 			return statusCode, respBody, respHeaders, nil
 		}
 
-		// Failure: update health, clear sticky binding, try next
-		ch.Health.RecordFailure(classifyError(statusCode, err))
+		// Failure: classify error, update health with semantic breakdown, clear sticky binding, try next
+		errBody := ""
+		if statusCode != 0 {
+			errBody = string(respBody)
+		}
+		result := llmerrors.Classify(statusCode, errBody, ch.Config.ProviderType)
+		duration := llmerrors.BreakdownDuration(result.BreakdownUntil)
+		ch.Health.RecordClassifiedFailure(classifyError(statusCode, err), string(result.Class), duration)
 		if taskKey != "" && group.Sticky != nil {
 			group.Sticky.Remove(taskKey)
 		}
 		middleware.GetLogger().Warn("group channel failed, trying next member",
 			zap.String("group", group.Config.Name), zap.String("channel", ch.Config.Name),
-			zap.String("model", realModel), zap.Int("status", statusCode))
+			zap.String("model", realModel), zap.Int("status", statusCode),
+			zap.String("class", string(result.Class)))
 	}
 
 	return 503, []byte(`{"error":"all group members exhausted for: ` + modelName + `"}`), nil, nil
