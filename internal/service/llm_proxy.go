@@ -126,6 +126,23 @@ func (tb *TokenBucket) Status() map[string]interface{} {
 	}
 }
 
+// Resize adjusts the bucket's RPM (max tokens + refill rate) while preserving the
+// current token level and daily counter. Used when adaptive rate-limit learning
+// updates the safe RPM and the config is reloaded.
+func (tb *TokenBucket) Resize(rpm, defaultBucketRPM int) {
+	tb.mu.Lock()
+	defer tb.mu.Unlock()
+	maxTokens := float64(rpm)
+	if maxTokens == 0 {
+		maxTokens = float64(defaultBucketRPM)
+	}
+	tb.maxTokens = maxTokens
+	tb.refillRate = maxTokens / 60.0
+	if tb.tokens > tb.maxTokens {
+		tb.tokens = tb.maxTokens
+	}
+}
+
 // --- Channel ---
 
 // Channel represents a single upstream LLM API endpoint with its own rate limiter
@@ -193,6 +210,12 @@ func NewLLMProxyService(cfg config.LLMProxyConfig, repo *repository.LLMProxyRepo
 		tokenUsageRepo: tokenUsageRepo,
 	}
 
+	// Initialize the rate-limit learner BEFORE loading channels so learned-safe RPM
+	// is available to size token buckets at first load (not just after a reload).
+	svc.rateLimitLearner = NewRateLimitLearner(rateLimitRepo)
+	_ = svc.rateLimitLearner.LoadCache()
+	svc.rateLimitLearner.Start()
+
 	if err := svc.loadFromDB(); err != nil {
 		middleware.GetLogger().Error("failed to load llm-proxy config from DB", zap.Error(err))
 	}
@@ -203,11 +226,6 @@ func NewLLMProxyService(cfg config.LLMProxyConfig, repo *repository.LLMProxyRepo
 		svc.registerBalanceProviders()
 		svc.balanceMgr.Start()
 	}
-
-	// Initialize rate limit learner
-	svc.rateLimitLearner = NewRateLimitLearner(rateLimitRepo)
-	_ = svc.rateLimitLearner.LoadCache()
-	svc.rateLimitLearner.Start()
 
 	// Initialize task router
 	svc.taskRouter = NewTaskRouter(cfg.CodingRoutingStrategy)
@@ -339,7 +357,7 @@ func (s *LLMProxyService) loadFromDB() error {
 		chCfg := dbChannelToConfig(dbCh)
 		ch := &Channel{
 			Config: chCfg,
-			Bucket: NewTokenBucket(chCfg.RPM, chCfg.RPD, s.cfg.DefaultBucketRPM),
+			Bucket: NewTokenBucket(s.effectiveBucketRPM(chCfg), chCfg.RPD, s.cfg.DefaultBucketRPM),
 			Client: httpclient.NewClientWithTimeout(time.Duration(s.cfg.DefaultTimeout) * time.Second),
 			Health: NewChannelHealth(s.cfg.CircuitBreaker),
 		}
@@ -419,10 +437,13 @@ func (s *LLMProxyService) Reload() error {
 		return err
 	}
 
-	// Restore health + bucket state for channels that still exist
+	// Restore health + bucket state for channels that still exist. Carry the old
+	// bucket (preserves token level + daily counter) but RESIZE it to the freshly
+	// learned-safe RPM so adaptive rate-limit learning takes effect on reload.
 	for name, newCh := range s.channels {
 		if oldCh, ok := oldChannels[name]; ok {
 			newCh.Health = oldCh.Health
+			oldCh.Bucket.Resize(s.effectiveBucketRPM(newCh.Config), s.cfg.DefaultBucketRPM)
 			newCh.Bucket = oldCh.Bucket
 		}
 	}
@@ -457,6 +478,36 @@ func dbChannelToConfig(ch model.LLMChannel) config.ChannelConfig {
 		BalanceConfigJSON:   ch.BalanceConfigJSON,
 		ModelRPMOverrides:   ch.ModelRPMOverrides,
 	}
+}
+
+// effectiveBucketRPM seeds per-channel-model rate-limit rows with the configured
+// baseline and returns the learned-safe RPM used to size the channel's token bucket
+// (min across the channel's models — conservative). Falls back to the configured RPM
+// when no learner is present. This is what makes adaptive learning actually feed back
+// into client-side throttling (audit #5).
+func (s *LLMProxyService) effectiveBucketRPM(cfg config.ChannelConfig) int {
+	if s.rateLimitLearner == nil || s.rateLimitLearner.repo == nil || cfg.ID == 0 || len(cfg.Models) == 0 {
+		return cfg.RPM
+	}
+	effective := 0
+	for _, m := range cfg.Models {
+		rl, err := s.rateLimitLearner.repo.GetOrCreate(cfg.ID, m, cfg.RPM)
+		if err != nil || rl == nil {
+			continue
+		}
+		s.rateLimitLearner.CachePut(rl) // so GetSafeRPM/Record429 see the seeded row
+		safe := rl.LearnedRPMSafe
+		if safe <= 0 {
+			safe = int(float64(cfg.RPM) * 0.5) // cold-start fallback
+		}
+		if effective == 0 || safe < effective {
+			effective = safe
+		}
+	}
+	if effective == 0 {
+		return cfg.RPM
+	}
+	return effective
 }
 
 func dbGroupToConfig(g model.LLMModelGroup) config.ModelGroupConfig {
@@ -875,13 +926,22 @@ func (s *LLMProxyService) tryChannel(
 			ch.RecordLatency(durationMs)
 		}
 
-		if resp.StatusCode == 429 && attempt < maxRetries {
-			backoff := s.calculateBackoff(attempt)
-			middleware.GetLogger().Warn("upstream 429, backing off",
-				zap.String("channel", ch.Config.Name), zap.Duration("backoff", backoff),
-				zap.Int("attempt", attempt+1), zap.Int("max_retries", maxRetries))
-			time.Sleep(backoff)
-			continue
+		if resp.StatusCode == 429 {
+			// Adaptive rate-limit learning (stage 3): an upstream 429 means our
+			// configured RPM is too high. Record it so the learner downgrades the
+			// learned-safe RPM to ~85% of the configured rate. Use realModel (the
+			// rewritten upstream model), which is what the learner keys on.
+			if s.rateLimitLearner != nil && ch.Config.ID != 0 {
+				s.rateLimitLearner.Record429(ch.Config.ID, realModel, ch.Config.RPM)
+			}
+			if attempt < maxRetries {
+				backoff := s.calculateBackoff(attempt)
+				middleware.GetLogger().Warn("upstream 429, backing off",
+					zap.String("channel", ch.Config.Name), zap.Duration("backoff", backoff),
+					zap.Int("attempt", attempt+1), zap.Int("max_retries", maxRetries))
+				time.Sleep(backoff)
+				continue
+			}
 		}
 
 		return resp.StatusCode, respBytes, resp.Header, nil

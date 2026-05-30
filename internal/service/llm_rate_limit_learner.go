@@ -214,9 +214,22 @@ func (l *RateLimitLearner) LoadCache() error {
 	}
 	l.cacheMu.Lock()
 	defer l.cacheMu.Unlock()
-	for _, rl := range rls {
+	for i := range rls {
+		rl := rls[i]
 		key := fmt.Sprintf("%d:%s", rl.ChannelID, rl.Model)
 		l.cache[key] = &rl
 	}
 	return nil
+}
+
+// CachePut inserts or replaces a record in the in-memory cache. Called at channel
+// load to ensure GetSafeRPM/Record429 see freshly-seeded rows without re-querying.
+func (l *RateLimitLearner) CachePut(rl *model.LLMModelRateLimit) {
+	if rl == nil {
+		return
+	}
+	key := fmt.Sprintf("%d:%s", rl.ChannelID, rl.Model)
+	l.cacheMu.Lock()
+	l.cache[key] = rl
+	l.cacheMu.Unlock()
 }
