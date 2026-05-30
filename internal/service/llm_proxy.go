@@ -542,6 +542,7 @@ func (s *LLMProxyService) ProxyRequest(
 	headers http.Header,
 	body []byte,
 	callerID string,
+	tokenID uint,
 ) (statusCode int, respBody []byte, respHeaders http.Header, err error) {
 	modelName := extractModelFromBody(body)
 
@@ -1048,6 +1049,7 @@ func (s *LLMProxyService) ProxyStreamRequest(
 	headers http.Header,
 	body []byte,
 	callerID string,
+	tokenID uint,
 ) (*StreamResult, error) {
 	modelName := extractModelFromBody(body)
 

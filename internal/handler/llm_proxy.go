@@ -12,6 +12,7 @@ import (
 	"time"
 
 	"github.com/gin-gonic/gin"
+	"github.com/singll/bellkeeper/internal/auth"
 	"github.com/singll/bellkeeper/internal/model"
 	"github.com/singll/bellkeeper/internal/pkg/response"
 	"github.com/singll/bellkeeper/internal/repository"
@@ -52,22 +53,26 @@ func (h *LLMProxyHandler) Proxy(c *gin.Context) {
 		return
 	}
 
-	callerID := c.GetHeader("X-Caller-ID")
+	// Use authenticated identity from middleware, not the client-supplied X-Caller-ID header.
+	// This prevents spoofing: only the token auth middleware can set this.
+	identity := auth.GetCallerIdentity(c)
+	callerID := identity.CallerID
+	tokenID := identity.TokenID
 	if callerID == "" {
 		callerID = "unknown"
 	}
 
 	if h.svc.IsStreamRequest(body) {
-		h.proxyStream(c, path, body, callerID)
+		h.proxyStream(c, path, body, callerID, tokenID)
 	} else {
-		h.proxyBuffered(c, path, body, callerID)
+		h.proxyBuffered(c, path, body, callerID, tokenID)
 	}
 }
 
 // proxyBuffered handles non-streaming proxy requests (original behavior).
-func (h *LLMProxyHandler) proxyBuffered(c *gin.Context, path string, body []byte, callerID string) {
+func (h *LLMProxyHandler) proxyBuffered(c *gin.Context, path string, body []byte, callerID string, tokenID uint) {
 	statusCode, respBody, respHeaders, err := h.svc.ProxyRequest(
-		c.Request.Method, path, c.Request.Header, body, callerID,
+		c.Request.Method, path, c.Request.Header, body, callerID, tokenID,
 	)
 
 	if err != nil {
@@ -84,9 +89,9 @@ func (h *LLMProxyHandler) proxyBuffered(c *gin.Context, path string, body []byte
 }
 
 // proxyStream handles streaming proxy requests.
-func (h *LLMProxyHandler) proxyStream(c *gin.Context, path string, body []byte, callerID string) {
+func (h *LLMProxyHandler) proxyStream(c *gin.Context, path string, body []byte, callerID string, tokenID uint) {
 	result, err := h.svc.ProxyStreamRequest(
-		c.Request.Method, path, c.Request.Header, body, callerID,
+		c.Request.Method, path, c.Request.Header, body, callerID, tokenID,
 	)
 	if err != nil {
 		response.InternalError(c, err.Error())

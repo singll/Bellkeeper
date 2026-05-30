@@ -21,7 +21,34 @@ type LLMTokenStore interface {
 	UpdateLastUsed(tokenID uint) error
 }
 
-const LLMTokenContextKey = "llm_token"
+const (
+	LLMTokenContextKey     = "llm_token"
+	LLMCallerIDContextKey  = "caller_id"
+	LLMTokenIDContextKey   = "token_id"
+)
+
+// CallerIdentity holds the validated identity for a request.
+// Used to pass authenticated info from middleware to service without token pointer.
+type CallerIdentity struct {
+	CallerID string
+	TokenID  uint
+}
+
+// GetCallerIdentity retrieves the validated caller identity from gin context.
+func GetCallerIdentity(c *gin.Context) CallerIdentity {
+	var id CallerIdentity
+	if v, exists := c.Get(LLMCallerIDContextKey); exists {
+		if s, ok := v.(string); ok {
+			id.CallerID = s
+		}
+	}
+	if v, exists := c.Get(LLMTokenIDContextKey); exists {
+		if u, ok := v.(uint); ok {
+			id.TokenID = u
+		}
+	}
+	return id
+}
 
 // LLMTokenAuth middleware validates Bearer tokens against the llm_tokens table.
 // It supports the existing server.api_key for backward compatibility (bypasses token check).
@@ -45,6 +72,8 @@ func LLMTokenAuth(tokenRepo LLMTokenStore, serverAPIKey string) gin.HandlerFunc 
 		// Backward compatibility: server-level API key bypasses token table
 		if key == serverAPIKey {
 			c.Set(LLMTokenContextKey, (*model.LLMToken)(nil)) // nil = internal/admin
+			c.Set(LLMCallerIDContextKey, "server")
+			c.Set(LLMTokenIDContextKey, uint(0))
 			c.Next()
 			return
 		}
@@ -97,7 +126,8 @@ func LLMTokenAuth(tokenRepo LLMTokenStore, serverAPIKey string) gin.HandlerFunc 
 		_ = tokenRepo.UpdateLastUsed(token.ID)
 
 		c.Set(LLMTokenContextKey, token)
-		c.Set("caller_id", token.CallerID)
+		c.Set(LLMCallerIDContextKey, token.CallerID)
+		c.Set(LLMTokenIDContextKey, token.ID)
 		c.Next()
 	}
 }

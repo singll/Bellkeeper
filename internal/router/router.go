@@ -29,7 +29,7 @@ func Setup(r *gin.Engine, handlers *handler.Handlers, mode string, apiKey string
 	registerSettingRoutes(api, handlers.Setting)
 	registerWorkflowRoutes(api, handlers.Workflow)
 	registerSystemRoutes(api, handlers.System)
-	registerLLMProxyRoutes(api, handlers.LLMProxy, tokenRepo, apiKey)
+	registerLLMProxyRoutes(r, api, handlers.LLMProxy, tokenRepo, apiKey)
 	registerClassifyRoutes(api, handlers.Classify)
 	registerActivityLogRoutes(api, handlers.ActivityLog)
 	registerLogCenterRoutes(api, handlers.LogCenter)
@@ -130,11 +130,17 @@ func registerSystemRoutes(api *gin.RouterGroup, h *handler.SystemHandler) {
 	api.POST("/system/backup", h.BackupRun)
 }
 
-func registerLLMProxyRoutes(api *gin.RouterGroup, h *handler.LLMProxyHandler, tokenRepo *repository.LLMTokenRepository, serverAPIKey string) {
-	// OpenAI-compatible proxy endpoint (with token auth)
+func registerLLMProxyRoutes(r *gin.Engine, api *gin.RouterGroup, h *handler.LLMProxyHandler, tokenRepo *repository.LLMTokenRepository, serverAPIKey string) {
+	// Proxy endpoint: registered on the engine (NOT the api group) so it bypasses the
+	// global Authelia middleware. External Bearer tokens (sk-bk-*) authenticate via
+	// LLMTokenAuth only; the server.api_key bypass is handled inside that middleware.
+	proxy := r.Group("/api/llm")
+	proxy.Use(auth.LLMTokenAuth(tokenRepo, serverAPIKey))
+	proxy.Any("/v1/*path", h.Proxy)
+
+	// Management endpoints: inherit Authelia auth from the parent api group (web UI +
+	// internal callers). These must NOT be reachable with a plain LLM token.
 	llm := api.Group("/llm")
-	llm.Use(auth.LLMTokenAuth(tokenRepo, serverAPIKey))
-	llm.Any("/v1/*path", h.Proxy)
 
 	// Management endpoints (runtime status)
 	llm.GET("/channels/status", h.ChannelsStatus)
