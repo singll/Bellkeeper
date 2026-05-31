@@ -18,6 +18,8 @@ type Repositories struct {
 	LLMModelPricing *LLMModelPricingRepository
 	LLMRateLimit            *LLMRateLimitRepository
 	LLMConversationBinding  *ConversationBindingRepository
+	LLMChannelCredential       *LLMChannelCredentialRepository
+	LLMChannelBalanceSnapshot  *LLMChannelBalanceSnapshotRepository
 	ActivityLog    *ActivityLogRepository
 	LogSource      *LogSourceRepository
 	LogEntry       *LogEntryRepository
@@ -50,6 +52,8 @@ func NewRepositories(db *gorm.DB) *Repositories {
 		LLMModelPricing: NewLLMModelPricingRepository(db),
 		LLMRateLimit:            NewLLMRateLimitRepository(db),
 		LLMConversationBinding:  NewConversationBindingRepository(db),
+		LLMChannelCredential:       NewLLMChannelCredentialRepository(db),
+		LLMChannelBalanceSnapshot:  NewLLMChannelBalanceSnapshotRepository(db),
 		ActivityLog:    NewActivityLogRepository(db),
 		LogSource:      NewLogSourceRepository(db),
 		LogEntry:       NewLogEntryRepository(db),

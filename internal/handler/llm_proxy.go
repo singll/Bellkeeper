@@ -328,6 +328,101 @@ func (h *LLMProxyHandler) DeleteChannel(c *gin.Context) {
 	response.Message(c, "channel deleted")
 }
 
+// --- Channel credentials (encrypted at rest, Tier 6) ---
+
+// ListChannelCredentials returns the masked credentials for a channel.
+// Route: GET /api/llm/config/channels/:id/credentials
+func (h *LLMProxyHandler) ListChannelCredentials(c *gin.Context) {
+	id, err := strconv.ParseUint(c.Param("id"), 10, 32)
+	if err != nil {
+		response.BadRequest(c, "invalid id")
+		return
+	}
+	creds, err := h.svc.ListChannelCredentials(uint(id))
+	if err != nil {
+		response.InternalError(c, err.Error())
+		return
+	}
+	response.Success(c, creds)
+}
+
+// CreateChannelCredential stores a new encrypted credential for a channel.
+// Route: POST /api/llm/config/channels/:id/credentials
+func (h *LLMProxyHandler) CreateChannelCredential(c *gin.Context) {
+	id, err := strconv.ParseUint(c.Param("id"), 10, 32)
+	if err != nil {
+		response.BadRequest(c, "invalid id")
+		return
+	}
+	var req struct {
+		ProviderType string `json:"provider_type"`
+		Credential   string `json:"credential"`
+	}
+	if err := c.ShouldBindJSON(&req); err != nil {
+		response.BadRequest(c, err.Error())
+		return
+	}
+	view, err := h.svc.CreateChannelCredential(uint(id), req.ProviderType, req.Credential)
+	if err != nil {
+		response.InternalError(c, err.Error())
+		return
+	}
+	response.Success(c, view)
+}
+
+// UpdateChannelCredential updates metadata and optionally rotates the secret.
+// Route: PUT /api/llm/config/credentials/:id
+func (h *LLMProxyHandler) UpdateChannelCredential(c *gin.Context) {
+	id, err := strconv.ParseUint(c.Param("id"), 10, 32)
+	if err != nil {
+		response.BadRequest(c, "invalid id")
+		return
+	}
+	var req struct {
+		ProviderType string `json:"provider_type"`
+		Status       string `json:"status"`
+		Credential   string `json:"credential"`
+	}
+	if err := c.ShouldBindJSON(&req); err != nil {
+		response.BadRequest(c, err.Error())
+		return
+	}
+	view, err := h.svc.UpdateChannelCredential(uint(id), req.ProviderType, req.Status, req.Credential)
+	if err != nil {
+		response.InternalError(c, err.Error())
+		return
+	}
+	response.Success(c, view)
+}
+
+// DeleteChannelCredential removes a stored credential.
+// Route: DELETE /api/llm/config/credentials/:id
+func (h *LLMProxyHandler) DeleteChannelCredential(c *gin.Context) {
+	id, err := strconv.ParseUint(c.Param("id"), 10, 32)
+	if err != nil {
+		response.BadRequest(c, "invalid id")
+		return
+	}
+	if err := h.svc.DeleteChannelCredential(uint(id)); err != nil {
+		response.InternalError(c, err.Error())
+		return
+	}
+	response.Message(c, "credential deleted")
+}
+
+// ChannelBalanceHistory returns recent balance snapshots for a channel, newest first.
+// Route: GET /api/llm/channels/:name/balance/history
+func (h *LLMProxyHandler) ChannelBalanceHistory(c *gin.Context) {
+	name := c.Param("name")
+	limit, _ := strconv.Atoi(c.DefaultQuery("limit", "200"))
+	snaps, err := h.svc.ChannelBalanceHistory(name, limit)
+	if err != nil {
+		response.InternalError(c, err.Error())
+		return
+	}
+	response.Success(c, snaps)
+}
+
 func (h *LLMProxyHandler) ListGroups(c *gin.Context) {
 	groups, err := h.svc.ListGroupConfigs()
 	if err != nil {
@@ -755,7 +850,7 @@ func (h *LLMProxyHandler) ListRateLimits(c *gin.Context) {
 }
 
 func (h *LLMProxyHandler) ResetRateLimit(c *gin.Context) {
-	channelID, err := strconv.ParseUint(c.Param("channel_id"), 10, 32)
+	channelID, err := strconv.ParseUint(c.Param("id"), 10, 32)
 	if err != nil {
 		response.BadRequest(c, "invalid channel_id")
 		return

@@ -162,6 +162,12 @@ func registerLLMProxyRoutes(r *gin.Engine, api *gin.RouterGroup, h *handler.LLMP
 	cfg.PUT("/channels/:id", h.UpdateChannel)
 	cfg.DELETE("/channels/:id", h.DeleteChannel)
 
+	// Channel credentials (encrypted at rest, Tier 6)
+	cfg.GET("/channels/:id/credentials", h.ListChannelCredentials)
+	cfg.POST("/channels/:id/credentials", h.CreateChannelCredential)
+	cfg.PUT("/credentials/:id", h.UpdateChannelCredential)
+	cfg.DELETE("/credentials/:id", h.DeleteChannelCredential)
+
 	cfg.GET("/groups", h.ListGroups)
 	cfg.POST("/groups", h.CreateGroup)
 	cfg.PUT("/groups/:id", h.UpdateGroup)
@@ -171,6 +177,7 @@ func registerLLMProxyRoutes(r *gin.Engine, api *gin.RouterGroup, h *handler.LLMP
 
 	// Balance
 	llm.GET("/channels/:name/balance", h.ChannelBalance)
+	llm.GET("/channels/:name/balance/history", h.ChannelBalanceHistory)
 	llm.GET("/balances", h.AllBalances)
 	llm.POST("/balances/refresh", h.RefreshBalances)
 
@@ -198,7 +205,10 @@ func registerLLMProxyRoutes(r *gin.Engine, api *gin.RouterGroup, h *handler.LLMP
 
 	// Rate Limits (adaptive learning)
 	llm.GET("/rate-limits", h.ListRateLimits)
-	llm.POST("/rate-limits/:channel_id/:model/reset", h.ResetRateLimit)
+	// Both routes share the same first param name (:id) so gin's radix tree accepts
+	// them as siblings (a differing name here panics at registration). reset addresses
+	// a channel+model pair; lock addresses the same channel id.
+	llm.POST("/rate-limits/:id/:model/reset", h.ResetRateLimit)
 	llm.POST("/rate-limits/:id/lock", h.LockRateLimit)
 
 	// Coding strategy

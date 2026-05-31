@@ -19,6 +19,7 @@ services:
       - BELLKEEPER_RAGFLOW_BASE_URL=http://ragflow:9380
       - BELLKEEPER_RAGFLOW_API_KEY=${RAGFLOW_API_KEY}
       - BELLKEEPER_N8N_WEBHOOK_BASE_URL=http://n8n:5678
+      - BELLKEEPER_CREDENTIAL_KEY=${CREDENTIAL_KEY}
     depends_on:
       postgres:
         condition: service_healthy

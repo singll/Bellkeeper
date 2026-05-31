@@ -195,12 +195,14 @@ type LLMProxyService struct {
 	taskRouter     *TaskRouter
 	convMgr        *ConversationBindingManager
 	tokenRepo      *repository.LLMTokenRepository
+	credentialRepo      *repository.LLMChannelCredentialRepository
+	balanceSnapshotRepo *repository.LLMChannelBalanceSnapshotRepository
 	alertAggregator *AlertAggregator
 	groupStopChans []chan struct{} // per-load group-cleanup goroutines (recreated on reload)
 	bgStopChans    []chan struct{} // long-lived background loops (conv cleanup, archival, quota)
 }
 
-func NewLLMProxyService(cfg config.LLMProxyConfig, repo *repository.LLMProxyRepository, channelRepo *repository.LLMChannelRepository, groupRepo *repository.LLMModelGroupRepository, pricer *Pricer, tokenUsageRepo *repository.LLMTokenUsageRepository, rateLimitRepo *repository.LLMRateLimitRepository, convRepo *repository.ConversationBindingRepository, tokenRepo *repository.LLMTokenRepository) *LLMProxyService {
+func NewLLMProxyService(cfg config.LLMProxyConfig, repo *repository.LLMProxyRepository, channelRepo *repository.LLMChannelRepository, groupRepo *repository.LLMModelGroupRepository, pricer *Pricer, tokenUsageRepo *repository.LLMTokenUsageRepository, rateLimitRepo *repository.LLMRateLimitRepository, convRepo *repository.ConversationBindingRepository, tokenRepo *repository.LLMTokenRepository, credentialRepo *repository.LLMChannelCredentialRepository, balanceSnapshotRepo *repository.LLMChannelBalanceSnapshotRepository) *LLMProxyService {
 	svc := &LLMProxyService{
 		cfg:            cfg,
 		channels:       make(map[string]*Channel),
@@ -212,6 +214,8 @@ func NewLLMProxyService(cfg config.LLMProxyConfig, repo *repository.LLMProxyRepo
 		pricer:         pricer,
 		tokenUsageRepo: tokenUsageRepo,
 		tokenRepo:      tokenRepo,
+		credentialRepo:      credentialRepo,
+		balanceSnapshotRepo: balanceSnapshotRepo,
 	}
 
 	// Initialize the rate-limit learner BEFORE loading channels so learned-safe RPM
@@ -259,6 +263,15 @@ func NewLLMProxyService(cfg config.LLMProxyConfig, repo *repository.LLMProxyRepo
 		go svc.quotaAlertLoop(quotaStop)
 	}
 
+	// Balance snapshot loop — persists a history row per channel whenever the
+	// balance manager publishes a fresh fetch (deduped by FetchedAt). Long-lived,
+	// so its stop channel lives in bgStopChans (not cycled by Reload).
+	if svc.balanceMgr != nil && balanceSnapshotRepo != nil {
+		snapStop := make(chan struct{})
+		svc.bgStopChans = append(svc.bgStopChans, snapStop)
+		go svc.balanceSnapshotLoop(snapStop)
+	}
+
 	return svc
 }
 
@@ -303,6 +316,79 @@ func (s *LLMProxyService) RefreshBalances() {
 		return
 	}
 	s.balanceMgr.RefreshAll()
+}
+
+// balanceSnapshotLoop persists a balance-history row per channel each time the
+// balance manager publishes a fresh fetch. It ticks at the balance sync interval
+// and dedupes by FetchedAt so a channel that hasn't refreshed isn't re-recorded.
+func (s *LLMProxyService) balanceSnapshotLoop(stopCh <-chan struct{}) {
+	interval := time.Duration(s.cfg.BalanceSyncInterval) * time.Second
+	if interval <= 0 {
+		interval = 5 * time.Minute
+	}
+	ticker := time.NewTicker(interval)
+	defer ticker.Stop()
+	lastSnapped := make(map[string]time.Time) // channel -> last persisted FetchedAt
+	for {
+		select {
+		case <-ticker.C:
+			s.snapshotBalances(lastSnapped)
+		case <-stopCh:
+			return
+		}
+	}
+}
+
+// snapshotBalances reads the latest balances and persists one history row per
+// channel whose fetch timestamp advanced since the previous tick. Failed fetches
+// (info.Error set) are skipped so the history stays a clean record of real balances.
+func (s *LLMProxyService) snapshotBalances(lastSnapped map[string]time.Time) {
+	if s.balanceMgr == nil || s.balanceSnapshotRepo == nil {
+		return
+	}
+	all := s.balanceMgr.GetAll()
+	if len(all) == 0 {
+		return
+	}
+	// Resolve channel name -> DB id from the in-memory channel table (one RLock,
+	// no per-channel DB round-trip).
+	ids := make(map[string]uint, len(all))
+	s.mu.RLock()
+	for name, ch := range s.channels {
+		ids[name] = ch.Config.ID
+	}
+	s.mu.RUnlock()
+
+	for name, info := range all {
+		if info == nil || info.Error != "" || info.FetchedAt.IsZero() {
+			continue
+		}
+		if prev, ok := lastSnapped[name]; ok && !info.FetchedAt.After(prev) {
+			continue // already captured this fetch
+		}
+		raw, err := json.Marshal(info)
+		if err != nil {
+			middleware.GetLogger().Warn("balance snapshot: marshal failed",
+				zap.String("channel", name), zap.Error(err))
+			continue
+		}
+		snap := &model.LLMChannelBalanceSnapshot{
+			ChannelID:    ids[name],
+			ChannelName:  name,
+			BalanceUSD:   info.Balance,
+			Currency:     info.Currency,
+			TotalGranted: info.TotalGranted,
+			TotalUsed:    info.TotalUsed,
+			BalanceRaw:   string(raw),
+			FetchedAt:    info.FetchedAt,
+		}
+		if err := s.balanceSnapshotRepo.Create(snap); err != nil {
+			middleware.GetLogger().Warn("balance snapshot: persist failed",
+				zap.String("channel", name), zap.Error(err))
+			continue
+		}
+		lastSnapped[name] = info.FetchedAt
+	}
 }
 
 // Stop halts background services (balance manager, learner, aggregator, loops).

@@ -345,6 +345,7 @@ make swagger         # 生成 Swagger 文档（输出到 api/docs/）
 |------|------|
 | `DB_PASSWORD` | PostgreSQL 密码 |
 | `BELLKEEPER_API_KEY` | API 内部调用 Key |
+| `BELLKEEPER_CREDENTIAL_KEY` | 渠道凭证 AES-256-GCM 加密密钥（未设则降级为明文存储并启动告警）|
 | `BELLKEEPER_MATRIX_*` | Matrix Gateway 凭证 |
 | `LLM_*_API_KEY` | LLM Proxy 渠道凭证（DashScope、SiliconFlow、DeepSeek、Kimi、Qwen、new-api 等）|
 | `MEILI_MASTER_KEY` | Meilisearch 主密钥 |

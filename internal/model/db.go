@@ -53,6 +53,8 @@ func AutoMigrate(db *gorm.DB) error {
 		&LLMModelRateLimit{},
 		&LLMConversationBinding{},
 		&LLMAlertEvent{},
+		&LLMChannelCredential{},
+		&LLMChannelBalanceSnapshot{},
 		&ActivityLog{},
 		&LogSource{},
 		&LogEntry{},
