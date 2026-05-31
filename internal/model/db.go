@@ -97,7 +97,40 @@ func AutoMigrateWithLLMSeed(db *gorm.DB, cfg *config.Config) error {
 	if err := AutoMigrate(db); err != nil {
 		return err
 	}
-	return SeedLLMProxyConfig(db, cfg.LLMProxy)
+	if err := SeedLLMProxyConfig(db, cfg.LLMProxy); err != nil {
+		return err
+	}
+	return SeedDefaultLLMToken(db, cfg.Server.APIKey)
+}
+
+// SeedDefaultLLMToken seeds a single "default" token keyed off the server API key
+// when the llm_tokens table is empty. This lets internal callers that authenticate
+// with server.api_key resolve to a real token (non-zero token_id) so their usage is
+// recorded in billing instead of bypassing it (LLMTokenAuth resolves the server key
+// to this token). No-op when the table is non-empty or no server key is configured.
+// (ROADMAP line 210.)
+func SeedDefaultLLMToken(db *gorm.DB, serverAPIKey string) error {
+	if serverAPIKey == "" {
+		return nil
+	}
+	var count int64
+	db.Model(&LLMToken{}).Count(&count)
+	if count > 0 {
+		return nil
+	}
+	prefix := serverAPIKey
+	if len(prefix) > 8 {
+		prefix = prefix[:8]
+	}
+	token := LLMToken{
+		Name:      "default",
+		KeyHash:   HashKey(serverAPIKey),
+		KeyPrefix: prefix,
+		CallerID:  "default",
+		Enabled:   true,
+		// no quotas (0 = unlimited); empty allowed models/groups = all allowed
+	}
+	return db.Create(&token).Error
 }
 
 // SeedLLMProxyConfig imports channels and model groups from YAML config into DB

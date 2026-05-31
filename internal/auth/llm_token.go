@@ -71,8 +71,19 @@ func LLMTokenAuth(tokenRepo LLMTokenStore, serverAPIKey string) gin.HandlerFunc 
 		}
 		key := parts[1]
 
-		// Backward compatibility: server-level API key bypasses token table
+		// Backward compatibility: the server-level API key authenticates internal
+		// callers. If a matching token row exists (the seeded "default" token keyed
+		// off the same api_key), resolve to it so the traffic is billed (token_id != 0);
+		// otherwise fall back to the legacy admin bypass (token_id 0, unbilled).
 		if key == serverAPIKey {
+			if token, err := tokenRepo.GetByKeyHash(model.HashKey(key)); err == nil && token != nil && token.Enabled {
+				_ = tokenRepo.UpdateLastUsed(token.ID)
+				c.Set(LLMTokenContextKey, token)
+				c.Set(LLMCallerIDContextKey, token.CallerID)
+				c.Set(LLMTokenIDContextKey, token.ID)
+				c.Next()
+				return
+			}
 			c.Set(LLMTokenContextKey, (*model.LLMToken)(nil)) // nil = internal/admin
 			c.Set(LLMCallerIDContextKey, "server")
 			c.Set(LLMTokenIDContextKey, uint(0))
