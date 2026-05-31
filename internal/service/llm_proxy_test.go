@@ -1,9 +1,12 @@
 package service
 
 import (
+	"net/http"
 	"testing"
+	"time"
 
 	"github.com/singll/bellkeeper/internal/config"
+	llmerrors "github.com/singll/bellkeeper/internal/llm/errors"
 	"github.com/singll/bellkeeper/internal/model"
 	"github.com/stretchr/testify/assert"
 )
@@ -170,4 +173,42 @@ func TestSelectChannel_TaskEligibility(t *testing.T) {
 	// A classify task must NOT route to the coding-only kimi channel.
 	ch, _ := g.SelectChannel("", TaskClassify, "", nil, nil)
 	assert.Equal(t, "free", ch.Config.Name, "classify must skip coding-only members")
+}
+
+// TestChannelHealth_BreakdownInfo covers the getter the Kimi Code probe loop keys on:
+// a classified quota_exhausted failure must trip the circuit open and be reported
+// verbatim (class + ~5h until), and Reset must close it again.
+func TestChannelHealth_BreakdownInfo(t *testing.T) {
+	h := NewChannelHealth(config.CircuitBreakerConfig{FailureThreshold: 1, CooldownSeconds: 30})
+
+	state, class, until := h.BreakdownInfo()
+	assert.Equal(t, CircuitClosed, state)
+	assert.Empty(t, class)
+	assert.True(t, until.IsZero(), "no breakdown before any failure")
+
+	h.RecordClassifiedFailure("403", string(llmerrors.QuotaExhausted), 5*time.Hour)
+	state, class, until = h.BreakdownInfo()
+	assert.Equal(t, CircuitOpen, state)
+	assert.Equal(t, "quota_exhausted", class)
+	assert.True(t, until.After(time.Now().Add(4*time.Hour)), "quota breakdown should last ~5h")
+
+	h.Reset()
+	state, _, _ = h.BreakdownInfo()
+	assert.Equal(t, CircuitClosed, state, "probe success (Reset) must close the circuit")
+}
+
+// TestProxyRerank_RequiresRerankProvider verifies a /v1/rerank request is refused
+// when the only channel serving the model is not provider_type=="rerank" — i.e. the
+// rerank body is never sent to a chat channel that happens to share the model name.
+func TestProxyRerank_RequiresRerankProvider(t *testing.T) {
+	chatCh := newTestChannel("chat", "standard", false, nil)
+	chatCh.Config.ProviderType = "openai"
+	s := &LLMProxyService{modelMap: map[string][]*Channel{"bge-reranker-v2-m3": {chatCh}}}
+
+	status, body, _, err := s.proxyRerank("bge-reranker-v2-m3", "POST", "/v1/rerank",
+		http.Header{}, []byte(`{"model":"bge-reranker-v2-m3","query":"q","documents":["a"]}`), "tester", 0)
+
+	assert.Equal(t, 400, status)
+	assert.Error(t, err)
+	assert.Contains(t, string(body), "no rerank channel")
 }

@@ -272,6 +272,12 @@ func NewLLMProxyService(cfg config.LLMProxyConfig, repo *repository.LLMProxyRepo
 		go svc.balanceSnapshotLoop(snapStop)
 	}
 
+	// Kimi Code probe loop — re-probes quota_exhausted channels after their breakdown
+	// window elapses (§2.6.4). Long-lived → bgStopChans.
+	probeStop := make(chan struct{})
+	svc.bgStopChans = append(svc.bgStopChans, probeStop)
+	go svc.kimiCodeProbeLoop(probeStop)
+
 	return svc
 }
 
@@ -389,6 +395,73 @@ func (s *LLMProxyService) snapshotBalances(lastSnapped map[string]time.Time) {
 		}
 		lastSnapped[name] = info.FetchedAt
 	}
+}
+
+// kimiCodeProbeLoop periodically re-probes channels stuck in a long quota_exhausted
+// breakdown (notably Kimi Code, whose quota resets on a ~5h/7d cycle). When a
+// channel's breakdown window has elapsed but no live traffic has reopened it, a
+// minimal 1-token probe checks whether the upstream quota actually recovered; on
+// success the circuit is reset, otherwise the breakdown is re-armed so probes stay
+// ~5h apart rather than firing every tick. Long-lived → registered in bgStopChans.
+func (s *LLMProxyService) kimiCodeProbeLoop(stopCh <-chan struct{}) {
+	ticker := time.NewTicker(30 * time.Minute)
+	defer ticker.Stop()
+	for {
+		select {
+		case <-ticker.C:
+			s.probeQuotaExhausted()
+		case <-stopCh:
+			return
+		}
+	}
+}
+
+// probeQuotaExhausted sends a recovery probe to each channel whose circuit is open
+// with a quota_exhausted breakdown whose window has elapsed.
+func (s *LLMProxyService) probeQuotaExhausted() {
+	s.mu.RLock()
+	channels := make([]*Channel, 0, len(s.channels))
+	for _, ch := range s.channels {
+		channels = append(channels, ch)
+	}
+	s.mu.RUnlock()
+
+	now := time.Now()
+	for _, ch := range channels {
+		state, class, until := ch.Health.BreakdownInfo()
+		if state == CircuitClosed || class != string(llmerrors.QuotaExhausted) {
+			continue
+		}
+		if until.IsZero() || now.Before(until) {
+			continue // still within the breakdown window — wait
+		}
+		statusCode, respBody, _, err := s.probeChannel(ch)
+		if err == nil && statusCode >= 200 && statusCode < 400 {
+			ch.Health.Reset()
+			middleware.GetLogger().Info("quota-exhausted channel recovered via probe",
+				zap.String("channel", ch.Config.Name), zap.Int("status", statusCode))
+			continue
+		}
+		// Still down — re-arm the breakdown silently (no alert) so the next probe is
+		// ~5h out, not on the next tick.
+		result := llmerrors.Classify(statusCode, string(respBody), ch.Config.ProviderType)
+		ch.Health.RecordClassifiedFailure(classifyError(statusCode, err), string(result.Class),
+			llmerrors.BreakdownDuration(result.BreakdownUntil))
+		middleware.GetLogger().Info("quota-exhausted channel still down after probe",
+			zap.String("channel", ch.Config.Name), zap.Int("status", statusCode))
+	}
+}
+
+// probeChannel sends a minimal 1-token chat completion to verify upstream recovery.
+// It uses tokenID 0 (skips billing) and a synthetic caller id, and goes through
+// tryChannel so provider auth/bucket/logging apply identically to real traffic.
+func (s *LLMProxyService) probeChannel(ch *Channel) (int, []byte, http.Header, error) {
+	model := ch.Config.Name
+	if len(ch.Config.Models) > 0 {
+		model = ch.Config.Models[0]
+	}
+	body := []byte(fmt.Sprintf(`{"model":%q,"messages":[{"role":"user","content":"ping"}],"max_tokens":1}`, model))
+	return s.tryChannel(ch, "POST", "/v1/chat/completions", http.Header{}, body, "kimi-code-probe", 0)
 }
 
 // Stop halts background services (balance manager, learner, aggregator, loops).
@@ -838,6 +911,13 @@ func (s *LLMProxyService) ProxyRequest(
 ) (statusCode int, respBody []byte, respHeaders http.Header, err error) {
 	modelName := extractModelFromBody(body)
 
+	// Rerank requests (Tier 7) route only to provider_type=="rerank" channels and
+	// bypass virtual groups, sticky binding, and chat conversion — they carry no
+	// chat or conversation semantics. Reuses tryChannel (circuit + bucket + logging).
+	if path == "/v1/rerank" {
+		return s.proxyRerank(modelName, method, path, headers, body, callerID, tokenID)
+	}
+
 	// Snapshot current routing state for lock-free proxy operation
 	s.mu.RLock()
 	modelGroups := s.modelGroups
@@ -920,24 +1000,80 @@ func (s *LLMProxyService) ProxyRequest(
 			}
 			return statusCode, respBody, respHeaders, nil
 		}
-		errBody := ""
-		if statusCode != 0 {
-			errBody = string(respBody)
-		}
-		result := llmerrors.Classify(statusCode, errBody, ch.Config.ProviderType)
-		duration := llmerrors.BreakdownDuration(result.BreakdownUntil)
-		ch.Health.RecordClassifiedFailure(classifyError(statusCode, err), string(result.Class), duration)
-		s.alertForClass(ch.Config.Name, result.Class)
-		if !ch.Health.IsAvailable() {
-			s.recordAlert("circuit_open", "warning", ch.Config.Name,
-				fmt.Sprintf("channel %s circuit opened (%s)", ch.Config.Name, result.Class))
-		}
+		result := s.recordChannelFailure(ch, statusCode, respBody, err)
 		lastErr = err
 		middleware.GetLogger().Warn("channel returned error, trying next",
 			zap.String("channel", ch.Config.Name), zap.Int("status", statusCode),
 			zap.String("model", modelName), zap.String("class", string(result.Class)))
 	}
 
+	return statusCode, respBody, respHeaders, lastErr
+}
+
+// recordChannelFailure classifies an upstream failure, applies the semantic breakdown
+// to the channel's circuit breaker, and emits the matching aggregated alert (plus a
+// circuit-open alert if the breaker tripped). It returns the classification so callers
+// can branch on the class / log it. Shared by direct-match routing and rerank routing.
+func (s *LLMProxyService) recordChannelFailure(ch *Channel, statusCode int, respBody []byte, err error) llmerrors.Result {
+	errBody := ""
+	if statusCode != 0 {
+		errBody = string(respBody)
+	}
+	result := llmerrors.Classify(statusCode, errBody, ch.Config.ProviderType)
+	duration := llmerrors.BreakdownDuration(result.BreakdownUntil)
+	ch.Health.RecordClassifiedFailure(classifyError(statusCode, err), string(result.Class), duration)
+	s.alertForClass(ch.Config.Name, result.Class)
+	if !ch.Health.IsAvailable() {
+		s.recordAlert("circuit_open", "warning", ch.Config.Name,
+			fmt.Sprintf("channel %s circuit opened (%s)", ch.Config.Name, result.Class))
+	}
+	return result
+}
+
+// proxyRerank routes a /v1/rerank request to a channel whose provider_type=="rerank"
+// (Tier 7). It reuses tryChannel's circuit-breaker + token-bucket + logging path but
+// skips chat conversion, virtual groups, and sticky conversation binding — rerank has
+// no conversation semantics. Body is forwarded/returned verbatim (Cohere/Jina schema).
+func (s *LLMProxyService) proxyRerank(
+	modelName, method, path string,
+	headers http.Header,
+	body []byte,
+	callerID string,
+	tokenID uint,
+) (statusCode int, respBody []byte, respHeaders http.Header, err error) {
+	s.mu.RLock()
+	modelMap := s.modelMap
+	s.mu.RUnlock()
+
+	candidates := findChannelsInMap(modelMap, modelName)
+	rerank := make([]*Channel, 0, len(candidates))
+	for _, ch := range candidates {
+		if ch.Config.ProviderType == "rerank" {
+			rerank = append(rerank, ch)
+		}
+	}
+	if len(rerank) == 0 {
+		errMsg := fmt.Sprintf("no rerank channel available for model: %s", modelName)
+		return 400, []byte(`{"error":"` + errMsg + `"}`), nil, fmt.Errorf("%s", errMsg)
+	}
+	healthy := s.filterHealthy(rerank)
+	if len(healthy) == 0 {
+		return 503, []byte(`{"error":"all rerank channels circuit-broken for model: ` + modelName + `"}`), nil, nil
+	}
+
+	var lastErr error
+	for _, ch := range healthy {
+		statusCode, respBody, respHeaders, err = s.tryChannel(ch, method, path, headers, body, callerID, tokenID)
+		if err == nil && statusCode < 500 && statusCode != 429 {
+			ch.Health.RecordSuccess()
+			return statusCode, respBody, respHeaders, nil
+		}
+		result := s.recordChannelFailure(ch, statusCode, respBody, err)
+		lastErr = err
+		middleware.GetLogger().Warn("rerank channel returned error, trying next",
+			zap.String("channel", ch.Config.Name), zap.Int("status", statusCode),
+			zap.String("model", modelName), zap.String("class", string(result.Class)))
+	}
 	return statusCode, respBody, respHeaders, lastErr
 }
 

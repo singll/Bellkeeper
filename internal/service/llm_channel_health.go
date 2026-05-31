@@ -215,6 +215,16 @@ func (h *ChannelHealth) Reset() {
 	h.halfOpenInFlight = 0
 }
 
+// BreakdownInfo returns the circuit state plus the semantic breakdown class and the
+// time the current breakdown lasts until. The Kimi Code probe loop uses it to find
+// channels stuck in a long quota_exhausted breakdown that are due for a recovery
+// probe (§2.6.4). Read-only: it does not transition the circuit (unlike IsAvailable).
+func (h *ChannelHealth) BreakdownInfo() (state CircuitState, class string, until time.Time) {
+	h.mu.Lock()
+	defer h.mu.Unlock()
+	return h.state, h.breakdownClass, h.breakdownUntil
+}
+
 // TrackHalfOpenRequest increments the half-open in-flight counter.
 // Call this before sending a request when in half-open state.
 func (h *ChannelHealth) TrackHalfOpenRequest() {
