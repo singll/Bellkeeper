@@ -12,6 +12,13 @@ import type {
   LLMChannelConfig,
   LLMModelGroupConfig,
   LLMProxyLog,
+  LLMConversationBinding,
+  LLMModelRateLimit,
+  LLMAlertEvent,
+  LLMBalanceInfo,
+  LLMChannelBalanceSnapshot,
+  LLMChannelCredentialView,
+  LLMCodingStrategy,
   ActivityLogsPage,
   ModuleStat,
   MatrixRoom,
@@ -277,21 +284,52 @@ export const llmProxyApi = {
     return request<{ data: any[] }>(`/llm/usage?${p}`)
   },
 
-  // Conversations
-  listConversations: () => request<{ data: any[] }>('/llm/conversations'),
-  deleteConversation: (id: string) => request<{ message: string }>(`/llm/conversations/${id}`, { method: 'DELETE' }),
+  // Conversations (sticky bindings)
+  listConversations: () => request<{ data: LLMConversationBinding[] }>('/llm/conversations'),
+  deleteConversation: (id: string) => request<{ message: string }>(`/llm/conversations/${encodeURIComponent(id)}`, { method: 'DELETE' }),
 
-  // Rate Limits
-  listRateLimits: () => request<{ data: any[] }>('/llm/rate-limits'),
+  // Rate Limits (adaptive learning)
+  listRateLimits: () => request<{ data: LLMModelRateLimit[] }>('/llm/rate-limits'),
   resetRateLimit: (channelId: number, model: string) =>
     request<{ message: string }>(`/llm/rate-limits/${channelId}/${encodeURIComponent(model)}/reset`, { method: 'POST' }),
   lockRateLimit: (id: number, locked: boolean) =>
     request<{ message: string }>(`/llm/rate-limits/${id}/lock`, { method: 'POST', body: JSON.stringify({ locked }) }),
 
-  // Coding Strategy
-  getCodingStrategy: () => request<{ strategy: string }>('/llm/coding-strategy'),
-  setCodingStrategy: (strategy: string) =>
+  // Coding Strategy (Tier 4). Backend wraps the value in { data: { strategy } } via response.Success.
+  getCodingStrategy: () => request<{ data: { strategy: LLMCodingStrategy } }>('/llm/coding-strategy'),
+  setCodingStrategy: (strategy: LLMCodingStrategy) =>
     request<{ message: string }>('/llm/coding-strategy', { method: 'POST', body: JSON.stringify({ strategy }) }),
+
+  // Alerts (Tier 5 aggregator)
+  listAlerts: (params: { hours?: number; limit?: number; severity?: string; type?: string } = {}) => {
+    const p = new URLSearchParams()
+    if (params.hours) p.set('hours', String(params.hours))
+    if (params.limit) p.set('limit', String(params.limit))
+    if (params.severity) p.set('severity', params.severity)
+    if (params.type) p.set('type', params.type)
+    return request<{ data: LLMAlertEvent[] }>(`/llm/alerts?${p}`)
+  },
+
+  // Balances (Tier 6). GET /llm/balances returns a map keyed by channel name.
+  allBalances: () => request<{ data: Record<string, LLMBalanceInfo> }>('/llm/balances'),
+  refreshBalances: () => request<{ message: string }>('/llm/balances/refresh', { method: 'POST' }),
+  channelBalance: (name: string) =>
+    request<{ data: LLMBalanceInfo }>(`/llm/channels/${encodeURIComponent(name)}/balance`),
+  channelBalanceHistory: (name: string, limit?: number) => {
+    const p = new URLSearchParams()
+    if (limit) p.set('limit', String(limit))
+    return request<{ data: LLMChannelBalanceSnapshot[] }>(`/llm/channels/${encodeURIComponent(name)}/balance/history?${p}`)
+  },
+
+  // Channel credentials (Tier 6, encrypted at rest; API returns a masked preview only)
+  listChannelCredentials: (channelId: number) =>
+    request<{ data: LLMChannelCredentialView[] }>(`/llm/config/channels/${channelId}/credentials`),
+  createChannelCredential: (channelId: number, data: { provider_type: string; credential: string }) =>
+    request<{ data: LLMChannelCredentialView }>(`/llm/config/channels/${channelId}/credentials`, { method: 'POST', body: JSON.stringify(data) }),
+  updateChannelCredential: (id: number, data: { provider_type?: string; status?: string; credential?: string }) =>
+    request<{ data: LLMChannelCredentialView }>(`/llm/config/credentials/${id}`, { method: 'PUT', body: JSON.stringify(data) }),
+  deleteChannelCredential: (id: number) =>
+    request<{ message: string }>(`/llm/config/credentials/${id}`, { method: 'DELETE' }),
 }
 
 // Activity Logs API

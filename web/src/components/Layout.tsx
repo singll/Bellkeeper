@@ -7,6 +7,7 @@ interface NavItem {
   label: string
   icon: JSX.Element
   badge?: string
+  sectionStart?: string  // when set, render a small section header above this item
 }
 
 interface NavGroup {
@@ -252,14 +253,16 @@ const navGroups: NavGroup[] = [
     defaultExpanded: true,
     accentColor: 'amber',
     items: [
-      { path: '/llm', label: '总览', icon: <DashboardIcon /> },
+      { path: '/llm', label: '总览', icon: <DashboardIcon />, sectionStart: '运行时' },
       { path: '/llm/channels', label: '渠道', icon: <ChannelIcon /> },
       { path: '/llm/groups', label: '模型组', icon: <GroupIcon /> },
-      { path: '/llm/config', label: '配置', icon: <ConfigIcon /> },
+      { path: '/llm/logs', label: '调用日志', icon: <LogListIcon /> },
+      { path: '/llm/config', label: '配置', icon: <ConfigIcon />, sectionStart: '配置' },
+      { path: '/llm/pools', label: '池子路由', icon: <GroupIcon /> },
       { path: '/llm/tokens', label: 'Token 管理', icon: <KeyIcon /> },
       { path: '/llm/pricing', label: '定价配置', icon: <ConfigIcon /> },
-      { path: '/llm/billing', label: '计费统计', icon: <DashboardTabIcon /> },
-      { path: '/llm/logs', label: '调用日志', icon: <LogListIcon /> },
+      { path: '/llm/billing', label: '计费统计', icon: <DashboardTabIcon />, sectionStart: '计费' },
+      { path: '/llm/alerts', label: '告警', icon: <AlertIcon />, sectionStart: '告警' },
     ],
   },
   {
@@ -479,20 +482,25 @@ const Layout: Component<RouteSectionProps> = (props) => {
                       <div class={`mt-1 ml-2 space-y-0.5 ${accent ? accentBorderLeft[accent] : 'border-l border-dark-600/30'} pl-2`}>
                         <For each={group.items}>
                           {(item) => (
-                            <A
-                              href={item.path}
-                              class={`flex items-center gap-3 px-3 py-2 rounded-lg transition-all duration-200
-                                      ${isActive(item.path)
-                                        ? `${accent ? accentBgActive[accent] : 'bg-primary-500/20'} ${accent ? accentTextClass[accent] : 'text-primary-300'} shadow-sm`
-                                        : isMore ? 'text-dark-500 hover:text-dark-300 hover:bg-dark-700/30' : 'text-dark-400 hover:bg-dark-700/50 hover:text-dark-200'
-                                      }`}
-                              onClick={() => setMobileMenuOpen(false)}
-                            >
-                              <span class={`flex-shrink-0 ${isActive(item.path) && accent ? accentTextClass[accent] : ''}`}>
-                                {item.icon}
-                              </span>
-                              <span class={`font-medium ${isMore ? 'text-xs' : 'text-sm'}`}>{item.label}</span>
-                            </A>
+                            <>
+                              <Show when={item.sectionStart}>
+                                <div class="px-3 pt-3 pb-1 text-xs uppercase tracking-wider text-dark-500 font-semibold">{item.sectionStart}</div>
+                              </Show>
+                              <A
+                                href={item.path}
+                                class={`flex items-center gap-3 px-3 py-2 rounded-lg transition-all duration-200
+                                        ${isActive(item.path)
+                                          ? `${accent ? accentBgActive[accent] : 'bg-primary-500/20'} ${accent ? accentTextClass[accent] : 'text-primary-300'} shadow-sm`
+                                          : isMore ? 'text-dark-500 hover:text-dark-300 hover:bg-dark-700/30' : 'text-dark-400 hover:bg-dark-700/50 hover:text-dark-200'
+                                        }`}
+                                onClick={() => setMobileMenuOpen(false)}
+                              >
+                                <span class={`flex-shrink-0 ${isActive(item.path) && accent ? accentTextClass[accent] : ''}`}>
+                                  {item.icon}
+                                </span>
+                                <span class={`font-medium ${isMore ? 'text-xs' : 'text-sm'}`}>{item.label}</span>
+                              </A>
+                            </>
                           )}
                         </For>
                       </div>

@@ -150,6 +150,12 @@ export interface LLMChannelConfig {
   is_free: boolean
   is_enabled: boolean
   models: string // JSON array string
+  // Tier 4 capability tags / balance config (optional; backend defaults to empty string)
+  balance_provider_type?: string
+  balance_config_json?: string
+  model_rpm_overrides?: string // JSON: {"model": rpm}
+  task_types?: string // JSON array string, e.g. ["coding","analysis"]; empty = eligible for all task types
+  tier?: string // "free" | "standard" | "premium"; empty = derived from is_free
   created_at: string
   updated_at: string
 }
@@ -404,6 +410,118 @@ export interface LLMModelPricing {
   created_at: string
   updated_at: string
 }
+
+// LLM Proxy — Alert events (Tier 5 aggregator)
+
+export interface LLMAlertEvent {
+  id: number
+  alert_type: string   // circuit_open | quota_threshold | balance_zero | session_expired | ...
+  severity: string     // info | warning | error | critical
+  channel_id: number
+  channel_name: string
+  message: string
+  dedup_key: string
+  flushed_at: string | null  // null until the alert has been delivered to a notifier
+  created_at: string
+}
+
+// LLM Proxy — Balances (Tier 6). GET /llm/balances returns a map keyed by channel name.
+
+export interface LLMBalanceInfo {
+  provider_type: string
+  channel_name: string
+  balance: number
+  currency: string
+  total_granted: number
+  total_used: number
+  expires_at: string | null
+  fetched_at: string
+  error?: string
+}
+
+export interface LLMChannelBalanceSnapshot {
+  id: number
+  channel_id: number
+  channel_name: string
+  balance_usd: number
+  currency: string
+  total_granted: number
+  total_used: number
+  balance_raw: string  // full balance.Info JSON
+  latency_ms: number
+  fetched_at: string
+  created_at: string
+}
+
+// LLM Proxy — Channel credentials (Tier 6, masked view; secret never leaves the server)
+
+export interface LLMChannelCredentialView {
+  id: number
+  channel_id: number
+  provider_type: string
+  status: string  // active | error | expired
+  error_message?: string
+  last_refreshed_at: string | null
+  created_at: string
+  updated_at: string
+  credential_preview: string  // masked, e.g. "abcd...wxyz"
+}
+
+// LLM Proxy — Conversation sticky bindings (Tier 2)
+
+export interface LLMConversationBinding {
+  id: number
+  conversation_id: string
+  channel_id: number
+  channel_name: string
+  model: string
+  task_type: string
+  first_seen_at: string
+  last_seen_at: string
+  expires_at: string
+  request_count: number
+  total_tokens: number
+  total_cost_cents: number
+}
+
+// LLM Proxy — Adaptive rate-limit learning state (Tier 3)
+
+export interface LLMModelRateLimit {
+  id: number
+  channel_id: number
+  model: string
+  configured_rpm: number
+  configured_rpd: number
+  learned_rpm_safe: number
+  learned_rpd_safe: number
+  learned_concurrent_max: number
+  reset_pattern: string  // sliding_60s | fixed_minute | sliding_5h | sliding_7d | daily_utc8 | daily_utc
+  confidence_score: number
+  last_429_at: string | null
+  last_429_observed_rpm: number
+  last_adjust_at: string | null
+  locked: boolean
+  adjustment_log: string  // JSON array
+  created_at: string
+  updated_at: string
+}
+
+// LLM Proxy — Usage aggregation by model (Tier 1, group_by=model)
+
+export interface LLMUsageByModel {
+  model: string
+  requests: number
+  prompt_tokens: number
+  completion_tokens: number
+  cached_tokens: number
+  cost_cents: number
+  cost_micro_cents: number
+  error_count: number
+}
+
+// LLM Proxy — Coding routing strategy (Tier 4)
+
+export type LLMCodingStrategy = 'free_first' | 'quality_first' | 'complexity_aware'
 
 // LLM Proxy Fetch Response Types (for raw fetch in LLMProxy.tsx)
 

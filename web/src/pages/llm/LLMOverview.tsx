@@ -1,27 +1,41 @@
 import { Component, For, Show, createMemo, createResource } from 'solid-js'
 import { A } from '@solidjs/router'
-import type { LLMChannelStatus, LLMGroupStatus } from '@/types'
+import type { LLMUsageByModel } from '@/types'
 import { llmProxyApi } from '@/api'
 import { useToast } from '@/components/Toast'
-import { getCircuitDot } from './shared'
+import { getCircuitDot, getSeverityDot, getSeverityBadge, getSeverityLabel, formatCents, formatDateShort } from './shared'
 
 const LLMOverview: Component = () => {
   const toast = useToast()
 
-  const [channelsData, { refetch: refetchChannels }] = createResource(
-    () => llmProxyApi.channelsStatus()
-  )
-  const [groupsData, { refetch: refetchGroups }] = createResource(
-    () => llmProxyApi.groupsStatus()
-  )
+  const [channelsData, { refetch: refetchChannels }] = createResource(() => llmProxyApi.channelsStatus())
+  const [groupsData, { refetch: refetchGroups }] = createResource(() => llmProxyApi.groupsStatus())
+  const [usageData, { refetch: refetchUsage }] = createResource(() => llmProxyApi.getUsage('model'))
+  const [balancesData, { refetch: refetchBalances }] = createResource(() => llmProxyApi.allBalances())
+  const [alertsData, { refetch: refetchAlerts }] = createResource(() => llmProxyApi.listAlerts({ limit: 6 }))
 
   const channels = () => channelsData()?.data || []
   const groups = () => groupsData()?.data || []
+  const usageRows = () => (usageData()?.data || []) as LLMUsageByModel[]
+  const balancesMap = () => balancesData()?.data || {}
+  const recentAlerts = () => alertsData()?.data || []
 
   const totalChannels = createMemo(() => channels().length)
   const healthyChannels = createMemo(() => channels().filter((item) => item.health.state === 'closed').length)
   const circuitBrokenChannels = createMemo(() => channels().filter((item) => item.health.state === 'open').length)
   const halfOpenChannels = createMemo(() => channels().filter((item) => item.health.state === 'half_open').length)
+
+  // Estimated cost (from usage aggregates) vs real balance (from upstream snapshots)
+  const estCostCents = createMemo(() => usageRows().reduce((sum, r) => sum + (r.cost_cents || 0), 0))
+  const topModels = createMemo(() =>
+    [...usageRows()].sort((a, b) => (b.cost_cents || 0) - (a.cost_cents || 0)).slice(0, 5)
+  )
+  const balanceList = createMemo(() => Object.values(balancesMap()))
+  const totalUsdBalance = createMemo(() =>
+    balanceList()
+      .filter((b) => (b.currency || '').toUpperCase() === 'USD')
+      .reduce((sum, b) => sum + (b.balance || 0), 0)
+  )
 
   const overviewStatus = createMemo(() => {
     if (totalChannels() === 0) {
@@ -36,7 +50,8 @@ const LLMOverview: Component = () => {
     return { label: '运行正常', badge: 'badge-success', description: '所有已启用渠道均可正常服务' }
   })
 
-  const alerts = createMemo(() => {
+  // Health-derived issues (live inference from channel/group state, distinct from persisted alert events)
+  const healthIssues = createMemo(() => {
     const items: string[] = []
     const openChs = channels().filter((item) => item.health.state === 'open')
     if (openChs.length > 0) items.push(`熔断渠道：${openChs.map((item) => item.name).join('、')}`)
@@ -48,7 +63,7 @@ const LLMOverview: Component = () => {
   })
 
   const handleRefresh = async () => {
-    await Promise.all([refetchChannels(), refetchGroups()])
+    await Promise.all([refetchChannels(), refetchGroups(), refetchUsage(), refetchBalances(), refetchAlerts()])
     toast.success('LLM Proxy 状态已刷新')
   }
 
@@ -76,7 +91,7 @@ const LLMOverview: Component = () => {
       <div class="flex flex-col xl:flex-row xl:items-center justify-between gap-4 mb-6">
         <div>
           <h1 class="text-2xl font-bold text-white">LLM Proxy</h1>
-          <p class="text-sm text-dark-400 mt-1">查看渠道健康、模型组路由与熔断/粘性运行态</p>
+          <p class="text-sm text-dark-400 mt-1">渠道健康、成本与余额、模型组路由与告警一览</p>
         </div>
         <button class="btn btn-primary" onClick={handleRefresh} disabled={channelsData.loading || groupsData.loading}>
           <svg class={`w-4 h-4 ${channelsData.loading ? 'animate-spin' : ''}`} fill="none" stroke="currentColor" viewBox="0 0 24 24">
@@ -119,7 +134,98 @@ const LLMOverview: Component = () => {
             </div>
           </div>
 
-          {/* Main content grid */}
+          {/* Estimated cost vs real balance */}
+          <div class="grid grid-cols-1 xl:grid-cols-2 gap-6">
+            {/* Estimated cost (from usage) */}
+            <div class="card">
+              <div class="flex items-center justify-between mb-4">
+                <h2 class="text-lg font-semibold text-white">预估成本</h2>
+                <span class="text-sm text-dark-400">近 30 天 · 按用量计费</span>
+              </div>
+              <div class="text-3xl font-bold text-white mb-1">{formatCents(estCostCents())}</div>
+              <div class="text-xs text-dark-400 mb-4">基于 llm_proxy_logs 按模型计费聚合</div>
+              <Show
+                when={topModels().length > 0}
+                fallback={<div class="text-sm text-dark-500">暂无用量数据。</div>}
+              >
+                <div class="space-y-0">
+                  <For each={topModels()}>
+                    {(m) => (
+                      <div class="flex items-center justify-between py-2 border-b border-dark-700/40 last:border-0">
+                        <span class="text-sm text-dark-200 font-mono truncate max-w-[200px]" title={m.model}>{m.model}</span>
+                        <div class="flex items-center gap-4">
+                          <span class="text-xs text-dark-500">{(m.requests || 0).toLocaleString()} 次</span>
+                          <span class="text-sm font-medium text-white">{formatCents(m.cost_cents || 0)}</span>
+                        </div>
+                      </div>
+                    )}
+                  </For>
+                </div>
+              </Show>
+            </div>
+
+            {/* Real balance (from /llm/balances) */}
+            <div class="card">
+              <div class="flex items-center justify-between mb-4">
+                <h2 class="text-lg font-semibold text-white">真实余额</h2>
+                <span class="text-sm text-dark-400">上游渠道快照</span>
+              </div>
+              <div class="text-3xl font-bold text-emerald-400 mb-1">${totalUsdBalance().toFixed(2)}</div>
+              <div class="text-xs text-dark-400 mb-4">USD 渠道合计（其他币种单列见下）</div>
+              <Show
+                when={balanceList().length > 0}
+                fallback={<div class="text-sm text-dark-500">暂无余额数据（可在配置后触发刷新）。</div>}
+              >
+                <div class="space-y-0">
+                  <For each={balanceList()}>
+                    {(b) => (
+                      <div class="flex items-center justify-between py-2 border-b border-dark-700/40 last:border-0">
+                        <div class="flex items-center gap-2">
+                          <span class="text-sm text-dark-200">{b.channel_name}</span>
+                          <span class="text-xs text-dark-500">{b.provider_type}</span>
+                        </div>
+                        <Show
+                          when={!b.error}
+                          fallback={<span class="text-xs text-red-400 max-w-[160px] truncate" title={b.error}>{b.error}</span>}
+                        >
+                          <span class="text-sm font-medium text-white">{(b.balance || 0).toFixed(2)} {b.currency || ''}</span>
+                        </Show>
+                      </div>
+                    )}
+                  </For>
+                </div>
+              </Show>
+            </div>
+          </div>
+
+          {/* Recent alerts strip */}
+          <div class="card">
+            <div class="flex items-center justify-between mb-4">
+              <h2 class="text-lg font-semibold text-white">最近告警</h2>
+              <A href="/llm/alerts" class="text-sm text-primary-400 hover:text-primary-300">查看全部 →</A>
+            </div>
+            <Show
+              when={recentAlerts().length > 0}
+              fallback={<div class="text-sm text-emerald-300">近期没有告警事件。</div>}
+            >
+              <div class="space-y-2">
+                <For each={recentAlerts()}>
+                  {(a) => (
+                    <div class="flex items-center gap-3 p-3 rounded-xl bg-dark-700/40 border border-dark-600/50">
+                      <span class={`status-dot ${getSeverityDot(a.severity)}`} />
+                      <span class={`badge ${getSeverityBadge(a.severity)}`}>{getSeverityLabel(a.severity)}</span>
+                      <span class="text-xs font-mono text-dark-400 hidden sm:inline">{a.alert_type}</span>
+                      <span class="text-sm text-dark-200 flex-1 truncate" title={a.message}>{a.message}</span>
+                      <span class="text-xs text-dark-500 hidden md:inline">{a.channel_name}</span>
+                      <span class="text-xs text-dark-500 whitespace-nowrap">{formatDateShort(a.created_at)}</span>
+                    </div>
+                  )}
+                </For>
+              </div>
+            </Show>
+          </div>
+
+          {/* Health summary + resource overview */}
           <div class="grid grid-cols-1 xl:grid-cols-[1.3fr_1fr] gap-6">
             {/* Global Health Summary */}
             <div class="card">
@@ -129,15 +235,15 @@ const LLMOverview: Component = () => {
               </div>
               <p class="text-dark-300 mb-4">{overviewStatus().description}</p>
               <Show
-                when={alerts().length > 0}
-                fallback={<div class="text-sm text-emerald-300">当前没有需要处理的告警项。</div>}
+                when={healthIssues().length > 0}
+                fallback={<div class="text-sm text-emerald-300">当前没有需要处理的健康问题。</div>}
               >
                 <div class="space-y-2">
-                  <For each={alerts()}>
-                    {(alert) => (
+                  <For each={healthIssues()}>
+                    {(issue) => (
                       <div class="flex items-start gap-2 p-3 rounded-xl bg-dark-700/50 border border-dark-600/50 text-sm text-dark-200">
                         <span class="status-dot status-dot-warning mt-1" />
-                        <span>{alert}</span>
+                        <span>{issue}</span>
                       </div>
                     )}
                   </For>

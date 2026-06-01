@@ -1,5 +1,5 @@
 import { Component, For, Show, createSignal, createResource } from 'solid-js'
-import type { LLMChannelConfig, LLMModelGroupConfig, LLMModelGroupMemberConfig } from '@/types'
+import type { LLMChannelConfig, LLMModelGroupConfig, LLMModelGroupMemberConfig, LLMChannelCredentialView } from '@/types'
 import { llmProxyApi } from '@/api'
 import { useToast } from '@/components/Toast'
 import Modal from '@/components/Modal'
@@ -22,9 +22,18 @@ const LLMConfig: Component = () => {
   // Modal state
   const [showChannelModal, setShowChannelModal] = createSignal(false)
   const [showGroupModal, setShowGroupModal] = createSignal(false)
+  const [showCredentialModal, setShowCredentialModal] = createSignal(false)
   const [editingChannel, setEditingChannel] = createSignal<LLMChannelConfig | null>(null)
   const [editingGroup, setEditingGroup] = createSignal<LLMModelGroupConfig | null>(null)
+  const [editingCredChannelId, setEditingCredChannelId] = createSignal<number | null>(null)
   const [saving, setSaving] = createSignal(false)
+
+  // Credentials
+  const [credentialsData, { refetch: refetchCredentials }] = createResource(
+    () => editingCredChannelId() ? llmProxyApi.listChannelCredentials(editingCredChannelId()!) : null
+  )
+  const credentials = () => credentialsData()?.data || []
+  const [credForm, setCredForm] = createSignal({ provider_type: '', credential: '' })
 
   // Channel form
   const [chForm, setChForm] = createSignal({
@@ -48,6 +57,44 @@ const LLMConfig: Component = () => {
     sticky_ttl_seconds: 600,
     members: [] as LLMModelGroupMemberConfig[],
   })
+
+  const openCredentialModal = (ch: LLMChannelConfig) => {
+    setEditingCredChannelId(ch.id)
+    setShowCredentialModal(true)
+  }
+
+  const saveCredential = async () => {
+    setSaving(true)
+    try {
+      const chId = editingCredChannelId()
+      if (!chId) return
+      const form = credForm()
+      if (!form.provider_type || !form.credential) {
+        toast.error('供应商类型和凭证不能为空')
+        setSaving(false)
+        return
+      }
+      await llmProxyApi.createChannelCredential(chId, { provider_type: form.provider_type, credential: form.credential })
+      toast.success('凭证已添加')
+      setCredForm({ provider_type: '', credential: '' })
+      await refetchCredentials()
+    } catch (err) {
+      toast.error('保存失败: ' + (err as Error).message)
+    } finally {
+      setSaving(false)
+    }
+  }
+
+  const deleteCredential = async (credId: number) => {
+    if (!confirm('确定删除此凭证？')) return
+    try {
+      await llmProxyApi.deleteChannelCredential(credId)
+      toast.success('凭证已删除')
+      await refetchCredentials()
+    } catch (err) {
+      toast.error('删除失败: ' + (err as Error).message)
+    }
+  }
 
   // Channel CRUD
   const openChannelModal = (ch?: LLMChannelConfig) => {
@@ -202,6 +249,7 @@ const LLMConfig: Component = () => {
                           <td><span class={`badge ${ch.is_enabled ? 'badge-success' : 'badge-danger'}`}>{ch.is_enabled ? '启用' : '禁用'}</span></td>
                           <td>
                             <div class="flex items-center gap-2">
+                              <button class="btn btn-ghost btn-sm" onClick={() => openCredentialModal(ch)}>凭证</button>
                               <button class="btn btn-ghost btn-sm" onClick={() => openChannelModal(ch)}>编辑</button>
                               <button class="btn btn-ghost btn-sm text-red-400" onClick={() => deleteChannel(ch.id)}>删除</button>
                             </div>
@@ -331,6 +379,66 @@ const LLMConfig: Component = () => {
               <div class="flex justify-end gap-3 pt-2">
                 <button class="btn btn-secondary" onClick={() => setShowGroupModal(false)}>取消</button>
                 <button class="btn btn-primary" disabled={saving()} onClick={saveGroup}>{saving() ? '保存中...' : '保存'}</button>
+              </div>
+            </div>
+          </Modal>
+
+          {/* Credential Modal (Tier 6 encrypted credentials) */}
+          <Modal open={showCredentialModal()} onClose={() => setShowCredentialModal(false)} title={`${channelConfigs().find((c) => c.id === editingCredChannelId())?.name || '凭证'} — 加密凭证管理`} size="lg">
+            <div class="space-y-4">
+              <div class="p-3 rounded-lg bg-dark-700/40 border border-dark-600/50 text-xs text-dark-400">
+                <span class="text-dark-200 font-medium">安全说明：</span>凭证在服务端加密存储（AES-256-GCM），API 仅返回已掩盖的预览。可在此管理多个提供商的凭证。
+              </div>
+
+              {/* Existing credentials list */}
+              <div>
+                <label class="label">现有凭证</label>
+                <Show
+                  when={credentials().length > 0}
+                  fallback={<p class="text-sm text-dark-500">暂无凭证。</p>}
+                >
+                  <div class="space-y-2">
+                    <For each={credentials()}>
+                      {(cred: LLMChannelCredentialView) => (
+                        <div class="flex items-center justify-between p-3 rounded-lg bg-dark-700/30 border border-dark-600/50">
+                          <div class="flex-1">
+                            <div class="flex items-center gap-2 mb-1">
+                              <span class="text-sm font-medium text-white">{cred.provider_type}</span>
+                              <span class={`badge ${cred.status === 'active' ? 'badge-success' : cred.status === 'error' ? 'badge-danger' : 'badge-warning'}`}>{cred.status}</span>
+                            </div>
+                            <div class="text-xs text-dark-400">
+                              <span>预览: {cred.credential_preview}</span>
+                              <span class="mx-2">•</span>
+                              <span>更新: {new Date(cred.last_refreshed_at || cred.created_at).toLocaleString('zh-CN')}</span>
+                            </div>
+                            <Show when={cred.error_message}><div class="text-xs text-red-400 mt-1">{cred.error_message}</div></Show>
+                          </div>
+                          <button class="btn btn-ghost btn-sm text-red-400" onClick={() => deleteCredential(cred.id)}>删除</button>
+                        </div>
+                      )}
+                    </For>
+                  </div>
+                </Show>
+              </div>
+
+              {/* Add credential form */}
+              <div class="border-t border-dark-600/30 pt-4">
+                <label class="label mb-3">添加新凭证</label>
+                <div class="space-y-3">
+                  <div>
+                    <label class="label text-sm">供应商类型</label>
+                    <input class="input" value={credForm().provider_type} onInput={(e) => setCredForm((p) => ({ ...p, provider_type: e.currentTarget.value }))} placeholder="如 deepseek、moonshot、siliconflow" />
+                  </div>
+                  <div>
+                    <label class="label text-sm">凭证 (将被加密)</label>
+                    <textarea class="input min-h-[60px]" value={credForm().credential} onInput={(e) => setCredForm((p) => ({ ...p, credential: e.currentTarget.value }))} placeholder="API Key 或凭证 JSON" />
+                  </div>
+                </div>
+              </div>
+
+              <div class="flex justify-end gap-3 pt-2">
+                <button class="btn btn-secondary" onClick={() => setShowCredentialModal(false)}>关闭</button>
+                <button class="btn btn-primary" disabled={saving()} onClick={saveCredential}>{saving() ? '保存中...' : '添加凭证'}</button>
               </div>
             </div>
           </Modal>
