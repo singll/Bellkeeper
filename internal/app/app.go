@@ -288,7 +288,9 @@ func (a *App) startBackgroundTasks() {
 
 // SetupHTTP configures the Gin router and HTTP server.
 func (a *App) SetupHTTP() {
-	if a.cfg.Server.Mode == "release" {
+	// Only "debug" keeps Gin's verbose debug mode; "release" and "noauth" both run
+	// Gin in release mode (auth is controlled by AutheliaAuth, independent of Gin mode).
+	if a.cfg.Server.Mode != "debug" {
 		gin.SetMode(gin.ReleaseMode)
 	}
 

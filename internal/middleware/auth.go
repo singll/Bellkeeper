@@ -32,9 +32,23 @@ func AutheliaAuth(mode string, apiKey string) gin.HandlerFunc {
 			return
 		}
 
+		// 2. No-auth mode: authentication is intentionally disabled (e.g. trusted
+		// intranet / VPN-only deployment, after removing Authelia forward_auth).
+		// Inject a default admin user so handlers relying on user context still work.
+		if mode == "noauth" {
+			c.Set("user", UserInfo{
+				Username: "anonymous",
+				Email:    "anonymous@localhost",
+				Name:     "Anonymous",
+				Groups:   []string{"admins"},
+			})
+			c.Next()
+			return
+		}
+
 		user := c.GetHeader("Remote-User")
 
-		// 2. In debug mode, allow requests without auth
+		// 3. In debug mode, allow requests without auth
 		if mode == "debug" && user == "" {
 			user = "dev-user"
 			c.Set("user", UserInfo{

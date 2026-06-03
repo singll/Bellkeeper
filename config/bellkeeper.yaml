@@ -1,7 +1,7 @@
 server:
   host: 0.0.0.0
   port: 8080
-  mode: release  # debug, release
+  mode: noauth  # debug, release, noauth (noauth 关闭 /api 认证，仅限内网/VPN 可信网络)
   api_key: ${BELLKEEPER_SERVER_API_KEY}
   # shutdown_timeout: 10  # 优雅关机超时（秒）
 
