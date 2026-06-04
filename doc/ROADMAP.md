@@ -12,10 +12,11 @@
 
 | 优先级 | 类别 | 摘要 | 工期估算 |
 |--------|------|------|---------|
+| **P0 ⭐** | 个人知识库 | 知识库成熟化（核心闭环）：分层存储 `raw/archive/vault` + AI 三维加权打分分流 + 领域/标签可配置 + n8n 工作流目录纳管 → 见 §10 | 5.5 天 |
 | **P0** | 代码清理 | Bellkeeper 删除 9 个 RAGFlow Go 文件 + 路由 + 前端调用 + 配置块 | 2 天 |
 | **P0** | n8n 清理 | M03 / K06 / K07 / K08 中的 RAGFlow 调用迁移或下线 | 2 天 |
 | **P0** | 配置清理 | `bundles/knowledge/` 整体下线；`bellkeeper-init.sh` 与 `.env` 移除 RAGFLOW_* 变量 | 0.5 天 |
-| P1 | LLM Proxy | 对标 new-api：Token + 定价 + **真实余额** + **任务感知池子分层（Coding 三策略）** + **会话粘性** + **自适应限流学习** + 错误码熔断 + 告警聚合 + Kimi Code 接入 + Dashboard 重做，停 new-api | 26.5 天 |
+| P1 ✅🔶 | LLM Proxy | **[开发完成·运行时待验证]** 对标 new-api：Token + 定价 + **真实余额** + **任务感知池子分层（Coding 三策略）** + **会话粘性** + **自适应限流学习** + 错误码熔断 + 告警聚合 + Kimi Code 接入 + Dashboard 重做（停 new-api **暂缓**，仍在使用） | 26.5 天 |
 | P1 | n8n 编排 | K02 RSS 解析下沉到 Bellkeeper，移除 K02→K01 间接调用 | 2 天 |
 | P1 | 日志中心 | Meilisearch 索引日志全文 + 仪表盘 + 告警规则 | 4 天 |
 | P1 | 前端 | 爬取队列可视化页 + Worker 健康详情 + Vault 内联预览 | 3 天 |
@@ -105,6 +106,10 @@
 ---
 
 ## 2. LLM 代理优化 (P1) — 对标 new-api 合并方案
+
+> **实施状态（2026-06-03 核验）**：9-tier 审计修复（Tier 0–9）全部 commit 落地于分支 `fix/llm-proxy-p1-audit`；`go build ./...` / `go vet ./internal/...` / 前端 `pnpm build`（70 模块）全绿；关键能力均有真实调用方（Token 鉴权挂 proxy 组、micro-cent 计费、429→限流学习 `Record429`、错误码 `Classify`、`proxyRerank`、会话粘性 `Upsert`、告警聚合接 Matrix `alerts`、Gemini 转换）；7 张新表 `AutoMigrate` + 默认 token auto-seed；前端 10 页注册 + 导航四分组；单测断言真实行为（如「1000 deepseek tokens=14 微分而非 0」「classify 永不路由到 coding-only 成员」）。
+>
+> 🔶 **待运行时验证（用户后续自验，对应 §2.8 验收标准）**：prompt cache 命中率 >80%、自适应限流学习曲线（30min/24h）、Kimi Code 403→5h 探测自恢复、各 provider 真实余额拉取、调用方 base_url 迁移。**停掉 new-api 容器暂缓**（用户仍在使用 new-api）。
 
 ### 2.0 背景与目标
 
@@ -1184,6 +1189,8 @@ created_at, updated_at
 - LLM 评估文档「值得沉淀到 PKB 吗？」→ 高分文档列表推送到 Matrix `digest` 频道
 - 用户在 Bellkeeper Web 一键归档（移动到 `pkb-staging/`，再人工整理进 Obsidian）
 
+> **交叉引用（事实源 §10）**：归档判定复用 §10.2「三维加权打分」，落盘目录统一到 §10.1「raw / archive / vault」分层（本节正文 `working/`·`pkb-staging/` 为旧表述，实现以 §10.1 为准）。本节差异化定位 = §10 实时入库闭环之外的**存量定期回扫**补充场景（P3），不另立打分标准。
+
 ### 9.3 文件级权限标签
 
 **实施**：
@@ -1198,14 +1205,200 @@ created_at, updated_at
 - 导入工具：`lib/tools/bulk_import.py` 接受 URL 列表或 sitemap
 - 入库后建立专门 Collection，问答时可指定范围
 
+> **交叉引用（事实源 §10）**：批量导入走 §10.3 入库管线（经 §10.2 打分分流）+ §10.5「领域 / 标签可配置」（§10.5 已反向引用本节——批量导入时指定领域、走同一打分/落盘管线）；专门 Collection 即 §10.5 领域的 `default_collection`。本节差异化定位 = 安全文档**一次性初始灌入工具**（`bulk_import.py`，P3）。
+
 ---
 
-## 10. 收敛与里程碑
+## 10. 个人知识库成熟化 (P0 ⭐)
+
+> **核心闭环**：把「n8n 无脑爬取 → 信息垃圾场」改造成「**漏斗筛选 + 深度重构 + 体系化合成**」三段式管线，复用已落地的 LLM Proxy（`pool-summary` 虚拟组）+ CrawlQueue + Meilisearch，产出**可检索、可整体取用、知识互联**的成熟 Obsidian Vault。当前最高优先级（P0 ⭐），§0 总览工期 5.5 天。
+
+### 10.0 背景与目标
+
+**现状**：n8n 工作流定时爬取文章 → 落到 TrueNAS 某目录 → 本地脚本拉进 Obsidian Vault。问题是「**无脑收集 = 信息垃圾场**」：低质内容淹没高价值卡片，越攒越不敢看。用户**已主动停掉本地拉取脚本**，等待改造后再恢复。
+
+**痛点**：
+- 无筛选：所有爬到的都进库，信噪比低
+- 无重构：原始正文直接堆叠，没提炼成可复用的知识卡片
+- 无互联：卡片之间没有 `[[wikilink]]`，无法形成知识网络
+- 无体系：碎片永远是碎片，没有定期缝合成专题
+
+**目标**：建立「漏斗 → 重构 → 合成」闭环——
+1. **漏斗**：AI 三维打分，高分进 Vault、中分归档、低分丢弃（§10.2）
+2. **重构**：高分内容二次 LLM 转换为结构化 Obsidian 笔记 + 自动 wikilink 互联（§10.4）
+3. **合成**：定期聚合某领域高分卡片生成专题笔记，碎片缝合成体系（§10.7，P1 延伸）
+
+**领域/标签可配置**：领域（如「网络安全」「LLM 工程」）作为一等配置项，新增领域时可把存量与增量批量聚合、并入已有结构（§10.5）。
+
+**不做范围**：
+- ❌ 不重写爬虫：继续用 n8n 爬取，只在**入库环节**加漏斗（复用 §10.6 纳管的工作流）
+- ❌ 不引入向量库：检索仍走 Meilisearch 全文（Rerank 另见 §7.1）
+- ❌ 不做多用户：单租户自用
+
+### 10.1 分层存储 raw / archive / vault
+
+把单一目录拆成**三层**，按价值分流，只让最高价值层进本地 Obsidian：
+
+| 层 | 路径 | 内容 | 同步本地 Obsidian | 进 Meili 索引 |
+|----|------|------|:----:|:----:|
+| **raw** | `pkb/raw/` | 爬虫原始落盘（正文+元数据），仅作溯源/重跑 | ❌ **绝不同步** | ❌ |
+| **archive** | `pkb/archive/` | 中分内容，留档可搜但不占本地空间 | ❌ | ✅ |
+| **vault** | `pkb/vault/` | 高分 + 原子化重构后的成熟卡片 | ✅ LiveSync | ✅ |
+
+**要点**：
+- `raw/` 永不进 Obsidian——这是「信息垃圾场」的根治（直接对应用户痛点）
+- `archive/` 进 Meili，全局检索能搜到，但不下行到本地，避免 Vault 膨胀
+- `vault/` 才是 Obsidian 同步范围，且只放重构后的结构化笔记
+- 整库可整体取用：`vault/` 本身就是合法 Obsidian Vault，可 git/rsync 整体导出（见 §10.9 验收）
+
+### 10.2 AI 三维加权打分分流
+
+入库内容经 `pool-summary` 虚拟组（LLM Proxy 已落地）跑**打分 Prompt**，输出标准 JSON：
+
+**三维度 + 权重**：
+
+| 维度 | 权重 | 含义 |
+|------|:----:|------|
+| 相关度 relevance | 40% | 与已配置领域关键词的匹配程度 |
+| 深度 depth | 30% | 是否有原理/实现/数据，而非泛泛而谈 |
+| 可执行性 actionability | 30% | 是否含可复用代码/配置/方法论 |
+
+`final_score = 0.4*relevance + 0.3*depth + 0.3*actionability`（各维 0–10）
+
+**分流阈值**：
+- `final_score >= 7.0` → 进 §10.4 深度重构 → `vault/`
+- `4.0 <= final_score < 7.0` → 直接进 `archive/`（不重构）
+- `final_score < 4.0` → **丢弃**（仅 `raw/` 留底，可溯源）
+
+**打分输出契约**（Evaluator 解析）：
+```json
+{
+  "relevance": 8, "depth": 7, "actionability": 6,
+  "final_score": 7.1,
+  "matched_domains": ["security"],
+  "reason": "讲清了 JWT 攻击面 + 可复用 PoC",
+  "decision": "vault"
+}
+```
+
+### 10.3 入库管线（n8n → ingest → Evaluator → 分流落盘 → Meili）
+
+```
+n8n 爬取
+  └─→ POST /api/files/ingest/url        [已存在] 接收 URL/正文，落 raw/
+        └─→ Evaluator.Score()           [拟新增 service] 调 pool-summary 打分(§10.2)
+              ├─ >=7.0 → Reconstruct()   [拟新增] 原子化重构(§10.4) → vault/
+              ├─ 4–7   → 落 archive/
+              └─ <4.0  → 丢弃(留 raw/)
+        └─→ POST /api/files/rebuild       [已存在] archive+vault 都进 Meili，全局可搜
+```
+
+**现有能力**（已核实 router，不重复造）：
+- `POST /api/files/ingest/url` — 入库入口，n8n 直接打这个端点
+- `POST /api/files/rebuild` — Meili 重建索引
+- `POST /api/files/search` / `POST /api/files/ask` — 检索 / RAG 问答
+- `pool-summary` 虚拟组 — 打分/重构的 LLM 后端
+
+**拟新增**：
+- `Evaluator` service：封装打分 Prompt + JSON 解析 + 分流决策（遵循 model→repo→service→handler 分层）
+- 分流落盘逻辑：按 `decision` 写 `raw/archive/vault`
+- 领域配置表（§10.5）
+- ⚠ 若需直传文件/原始内容，**拟新增 `POST /api/files/ingest/file`** 或扩展 `ingest/url` 支持 raw body（当前**仅** `ingest/url` 存在、无 file 变体——已核实 router）
+- 入库幂等：对齐 §6.2「文件入库幂等性」，同 URL 重爬不产生重复卡片
+
+### 10.4 高分内容原子化重构
+
+`final_score >= 7.0` 的内容经**第二道 LLM 转换**（`pool-summary`），从「一篇文章」重构为「一张成熟知识卡片」：
+
+**Obsidian 笔记模板**：
+```markdown
+---
+title: <提炼的标题>
+source: <原始 URL>
+ingest_date: <YYYY-MM-DD>
+score: <final_score>
+domains: [security]
+tags: [jwt, auth, poc]
+---
+
+## 核心洞察
+<1–3 句结论先行>
+
+## 关键技术要点 / 可复用资产
+- <要点 / 代码片段 / 配置>
+
+## 深度摘要
+<结构化正文，去水分>
+
+## 关联
+- [[已有卡片A]]   ← AI 生成的 wikilink
+```
+
+**wikilink 自动互联**：重构时把候选标题/标签喂给 LLM，让它在「关联」区生成指向**已有卡片**的 `[[wikilink]]`，使新卡片接入知识网络（前端可点跳转见 §5.2 Vault 预览增强）。
+
+### 10.5 领域 / 标签可配置
+
+领域是**一等配置项**，不是硬编码：
+
+**领域模型**（拟新增表）：
+- `name`（如 `security`）、`keywords`（关键词集，喂 §10.2 relevance 打分）、`weight`（领域权重）、`default_collection`（默认 Collection）、`vault_subpath`（落盘子目录，如 `vault/security/`）
+
+**能力**：
+- 新增领域 → 可对存量 `archive/` 批量重打分、批量聚合并入新领域结构
+- 与 §5.4「Tag/Dataset → Collection 改造」对齐：领域的 `default_collection` 即 Meili 索引分区 + 默认存储路径
+- 与 §9.4「存量知识导入」对齐：OWASP/MITRE 等批量导入时指定领域，走同一打分/落盘管线
+
+### 10.6 n8n 工作流纳管
+
+**现状**：n8n 工作流散落在 SilkSpool 管的主机上，定义没有版本化、没有单一治理入口。用户多次强调「**n8n 工作流文件应该放在 Bellkeeper 中**」。
+
+**方案**——职责对齐：
+- **Bellkeeper = 业务工作流治理**：承载工作流定义（`internal/n8n_workflows/` 目录托管 JSON，或 DB 持久化）+ 现有 `/api/workflows/*` 接口管理（增删查、启停、查看），是工作流的**单一事实源**
+- **SilkSpool = IaC 生命周期 + 冷备**：`spool n8n export` 定时把线上 n8n 工作流导出为 JSON，落 `out/backups/n8n/` 并纳入 **git 版本控制**，作为冷备份与漂移检测
+
+**收益**：工作流定义可 review、可回滚、可在 Bellkeeper Web 可见可管，不再散落。
+
+### 10.7 体系化输出（P1 延伸）
+
+让碎片在**周/月维度被缝合成体系**，是漏斗+重构之上的合成层：
+
+- **主动问答**：Matrix `!问 <领域>` → `POST /api/files/ask`[已存在] 走 RAG，跨 vault+archive 检索回答（多源检索见 §7.4）
+- **定时聚合简报**：n8n 周/月定时 → Bellkeeper 取「某领域本周 `score>=7` 的新卡片」→ `pool-summary` 聚合 → 生成**专题笔记**写入 `vault/<领域>/digest/`，自动 wikilink 到本周各卡片
+- 效果：例如「网络安全」领域每周自动产出一篇「本周要点综述」，把分散卡片缝成专题
+
+> 此层依赖 §10.1–§10.5 闭环先跑通，故列为 **P1 延伸**（单列 2–3 天），不计入 P0 的 5.5 天。
+
+### 10.8 实施阶段与工期
+
+| 阶段 | 内容 | 工期 |
+|------|------|:----:|
+| A 目录隔离 + 存量清理 | 建 `raw/archive/vault` 三层；停掉旧的全量本地同步；存量分流 | 0.5 天 |
+| B 拦截器 + 打分管线 | Evaluator service + 三维打分 Prompt + 分流落盘 + 接 `ingest/url` | 2.5 天 |
+| C 原子化重构 | 高分二次转换 + Obsidian 模板 + wikilink 生成 | 1.5 天 |
+| D n8n 纳管 | 工作流入 Bellkeeper + `spool n8n export` 冷备 + git | 1.0 天 |
+| **P0 闭环小计** | | **5.5 天** |
+| E 体系化输出（P1） | RAG 主动问答 + 定时聚合简报 | 2–3 天 |
+
+（P0 闭环 5.5 天与 §0 总览一致；E 为 P1 延伸，单列、不计入 P0。）
+
+### 10.9 验收标准
+
+- [ ] `raw/` 目录的任何内容**不会**出现在本地 Obsidian（同步范围仅 `vault/`）
+- [ ] 低质文章（`final_score < 4.0`）被丢弃，不进 `archive/`/`vault/`，仅 `raw/` 可溯源
+- [ ] 高分文章（`>=7.0`）在 `vault/` 生成**结构化笔记**（frontmatter + 核心洞察 + 关键要点 + 深度摘要 + wikilink）
+- [ ] 新增一个领域（如 `security`）后，存量 `archive/` 可批量重打分并聚合并入该领域
+- [ ] 整个 `vault/` 可被 Meili 全局检索（`/api/files/search`），也可 git/rsync **整体导出**为独立 Obsidian Vault
+- [ ] n8n 工作流定义在 Bellkeeper 可见可管，且 `spool n8n export` 冷备进 git
+
+---
+
+## 11. 收敛与里程碑
 
 ### 一个月内（2026-06）
+- [ ] §10 个人知识库成熟化闭环（漏斗筛选 → 原子化重构 → n8n 纳管，**P0 ⭐ 5.5 天**；体系化输出 §10.7 属 P1 延伸）
 - [ ] §1 RAGFlow 全部退役（代码 + 工作流 + 配置）
-- [ ] §2.2–§2.7 LLM Proxy 对标 new-api（Token + 定价 + Gemini + Rerank + Dashboard）
-- [ ] §2.8 停掉 new-api 容器
+- [x] §2.2–§2.7 LLM Proxy 对标 new-api（Token + 定价 + Gemini + Rerank + Dashboard）— **开发完成 · 🔶 待运行时验证**（详见 §2 顶部清单）
+- [ ] §2.8 停掉 new-api 容器 — **暂缓**（用户仍在使用，待调用方迁移并观察稳定后再停）
 - [ ] §3.1 §3.4 n8n 链路压缩 + 死代码回收
 - [ ] §5.1 §5.3 爬取队列前端 + 问答多轮 + 流式
 
