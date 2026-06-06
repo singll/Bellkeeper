@@ -152,7 +152,7 @@ const Dashboard: Component = () => {
             <div class="text-sm text-dark-400">知识库</div>
             <Show when={!isLoading()} fallback={<Skeleton width={60} height={28} />}>
               <div class="text-2xl font-bold text-blue-400 mt-1">
-                {knowledgeStats()?.indexed_count ?? '--'}
+                {knowledgeStats()?.total_files ?? '--'}
               </div>
             </Show>
             <div class="text-xs text-dark-500 mt-1">已索引文件</div>

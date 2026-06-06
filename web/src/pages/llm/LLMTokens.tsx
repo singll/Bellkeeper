@@ -166,7 +166,7 @@ const LLMTokens: Component = () => {
 
       {/* Create/Edit Modal */}
       <Show when={showModal()}>
-        <Modal onClose={() => setShowModal(false)} title={editingToken() ? 'Edit Token' : 'Create Token'}>
+        <Modal open={true} onClose={() => setShowModal(false)} title={editingToken() ? 'Edit Token' : 'Create Token'}>
           <div class="space-y-4 p-4">
             <div>
               <label class="block text-sm font-medium mb-1">Name</label>
@@ -216,7 +216,7 @@ const LLMTokens: Component = () => {
 
       {/* Show Key Modal */}
       <Show when={showKeyModal()}>
-        <Modal onClose={() => setShowKeyModal(false)} title="API Key Generated">
+        <Modal open={true} onClose={() => setShowKeyModal(false)} title="API Key Generated">
           <div class="p-4 space-y-4">
             <p class="text-sm text-gray-600 dark:text-gray-300">
               This is the only time you will see the full key. Copy it now.

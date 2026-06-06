@@ -57,7 +57,7 @@ export function useAutoRefresh<T>(
     setError(undefined)
     try {
       const result = await fetchFn()
-      setData(result)
+      setData(() => result)
       setLastUpdated(new Date())
       setCountdown(Math.ceil(interval / 1000))
       onRefresh?.()

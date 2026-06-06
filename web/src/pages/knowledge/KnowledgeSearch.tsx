@@ -51,7 +51,7 @@ const KnowledgeSearch: Component = () => {
   const handleSearch = (e: Event) => {
     e.preventDefault()
     if (query().length < 2) {
-      toast.warn('请输入至少 2 个字符')
+      toast.warning('请输入至少 2 个字符')
       return
     }
     // SolidJS resource will auto-refetch

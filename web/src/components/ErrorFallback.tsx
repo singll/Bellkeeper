@@ -1,11 +1,14 @@
 import { Component, Show } from 'solid-js'
-import type { ErrorBoundaryProps } from 'solid-js'
+
+interface ErrorFallbackProps {
+  error: unknown
+}
 
 /**
  * Fallback UI shown when an uncaught error bubbles up to the ErrorBoundary.
  * Prevents a single page exception from white-screening the entire app.
  */
-const ErrorFallback: Component<ErrorBoundaryProps> = (props) => {
+const ErrorFallback: Component<ErrorFallbackProps> = (props) => {
   const error = () => {
     const e = props.error
     return e instanceof Error ? e.message : String(e)

@@ -96,7 +96,7 @@ const MatrixDashboard: Component = () => {
         </div>
         <div class="divide-y divide-dark-700">
           <Show
-            when={!events.loading && events()?.data?.data?.length > 0}
+            when={!events.loading && (events()?.data?.data?.length ?? 0) > 0}
             fallback={
               <div class="px-6 py-8 text-center">
                 <p class="text-dark-500">暂无事件记录</p>

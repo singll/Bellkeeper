@@ -8,13 +8,13 @@ const MatrixCommands: Component = () => {
   const [testing, setTesting] = createSignal<MatrixCommand | null>(null)
   const [testResult, setTestResult] = createSignal<string | null>(null)
 
-  const [commands] = createResource(() => matrixApi.listCommands())
+  const [commands, { refetch }] = createResource(() => matrixApi.listCommands())
 
   const handleToggle = async (cmd: MatrixCommand) => {
     try {
-      await matrixApi.updateCommand(cmd.name as unknown as number, { is_active: !cmd.is_active })
+      await matrixApi.updateCommand(cmd.name, { is_active: !cmd.is_active })
       toast.success('状态已更新')
-      commands.refetch()
+      refetch()
     } catch (err) {
       toast.error('更新失败: ' + (err as Error).message)
     }
@@ -25,7 +25,7 @@ const MatrixCommands: Component = () => {
     if (!cmd) return
     try {
       setTestResult('正在执行...')
-      const res = await matrixApi.testCommand(cmd.name as unknown as number, {
+      const res = await matrixApi.testCommand(cmd.name, {
         room_id: '',
         user_id: '',
         args: '',

@@ -19,6 +19,9 @@ import type {
   LLMChannelBalanceSnapshot,
   LLMChannelCredentialView,
   LLMCodingStrategy,
+  LLMToken,
+  LLMTokenUsageDaily,
+  LLMModelPricing,
   ActivityLogsPage,
   ModuleStat,
   MatrixRoom,
@@ -380,8 +383,8 @@ export const matrixApi = {
       body: JSON.stringify(data),
     }),
 
-  deleteRoom: (id: number) =>
-    request<{ message: string }>(`/matrix/admin/rooms/${id}`, { method: 'DELETE' }),
+  deleteRoom: (roomId: string) =>
+    request<{ message: string }>(`/matrix/admin/rooms/${roomId}`, { method: 'DELETE' }),
 
   // Channels
   listChannels: () =>
@@ -393,8 +396,8 @@ export const matrixApi = {
       body: JSON.stringify(data),
     }),
 
-  updateChannel: (id: number, data: Partial<MatrixChannel>) =>
-    request<{ data: MatrixChannel }>(`/matrix/admin/channels/${id}`, {
+  updateChannel: (name: string, data: Partial<MatrixChannel>) =>
+    request<{ data: MatrixChannel }>(`/matrix/admin/channels/${name}`, {
       method: 'PUT',
       body: JSON.stringify(data),
     }),
@@ -412,8 +415,8 @@ export const matrixApi = {
       body: JSON.stringify(data),
     }),
 
-  updateCommand: (id: number, data: Partial<MatrixCommand>) =>
-    request<{ data: MatrixCommand }>(`/matrix/admin/commands/${id}`, {
+  updateCommand: (name: string, data: Partial<MatrixCommand>) =>
+    request<{ data: MatrixCommand }>(`/matrix/admin/commands/${name}`, {
       method: 'PUT',
       body: JSON.stringify(data),
     }),
@@ -421,9 +424,9 @@ export const matrixApi = {
   deleteCommand: (id: number) =>
     request<{ message: string }>(`/matrix/admin/commands/${id}`, { method: 'DELETE' }),
 
-  testCommand: (id: number, data: { room_id: string; user_id: string; args: string }) =>
+  testCommand: (name: string, data: { room_id: string; user_id: string; args: string }) =>
     request<{ message: string; response?: string; duration_ms?: number }>(
-      `/matrix/admin/commands/${id}/test`,
+      `/matrix/admin/commands/${name}/test`,
       { method: 'POST', body: JSON.stringify(data) }
     ),
 

@@ -123,7 +123,7 @@ const LLMPricing: Component = () => {
       </div>
 
       <Show when={showModal()}>
-        <Modal onClose={() => setShowModal(false)} title={editingItem() ? '编辑定价' : '新增定价'}>
+        <Modal open={true} onClose={() => setShowModal(false)} title={editingItem() ? '编辑定价' : '新增定价'}>
           <div class="space-y-4 p-4">
             <div class="grid grid-cols-2 gap-3">
               <div>
