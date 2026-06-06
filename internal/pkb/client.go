@@ -50,6 +50,9 @@ func (c *Client) newReq(method, url string, body io.Reader) (*http.Request, erro
 	}
 	req.Header.Set("Content-Type", "application/json")
 	if c.apiKey != "" {
+		// /api/llm/v1 经 LLMTokenAuth 校验：用 Authorization: Bearer <server api key>
+		// （server.api_key 在该中间件内被识别为有效 token）。/api/files/* 在 noauth 下不校验，带上无害。
+		req.Header.Set("Authorization", "Bearer "+c.apiKey)
 		req.Header.Set("X-API-Key", c.apiKey)
 	}
 	return req, nil
