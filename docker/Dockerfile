@@ -29,6 +29,8 @@ FROM golang:1.25-alpine AS backend-builder
 WORKDIR /app
 
 ENV GOTOOLCHAIN=auto
+# 国内 Go 模块代理：默认 proxy.golang.org 经本网络不可达(EOF)，goproxy.cn 直连稳定
+ENV GOPROXY=https://goproxy.cn,direct
 
 # Copy go mod files first for layer cache
 COPY go.mod go.sum ./
