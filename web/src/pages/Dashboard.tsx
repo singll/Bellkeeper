@@ -139,7 +139,7 @@ const Dashboard: Component = () => {
       {/* Hero System Cards */}
       <div class="grid grid-cols-1 sm:grid-cols-2 xl:grid-cols-4 gap-4 mb-6">
         {/* Knowledge System Card */}
-        <A href="/knowledge/files" class="card card-hover relative overflow-hidden border-l-4 border-l-blue-500 bg-gradient-to-br from-blue-500/10 to-blue-500/5 group">
+        <A href="/knowledge/search" class="card card-hover relative overflow-hidden border-l-4 border-l-blue-500 bg-gradient-to-br from-blue-500/10 to-blue-500/5 group">
           <div class="flex items-start justify-between">
             <div class="w-12 h-12 rounded-xl bg-blue-500/20 flex items-center justify-center">
               <svg class="w-6 h-6 text-blue-400" fill="none" stroke="currentColor" viewBox="0 0 24 24">

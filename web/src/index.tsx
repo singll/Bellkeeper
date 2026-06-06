@@ -18,7 +18,7 @@ import MatrixNotifications from './pages/MatrixNotifications'
 import MatrixEvents from './pages/MatrixEvents'
 import MatrixCommandLogs from './pages/MatrixCommandLogs'
 // Knowledge pages
-import { KnowledgeFiles, KnowledgeSearch, KnowledgeAsk } from './pages/knowledge'
+import { KnowledgeSearch, KnowledgeAsk } from './pages/knowledge'
 // LLM pages (split from old LLMProxy)
 import { LLMOverview, LLMChannels, LLMGroups, LLMConfig, LLMLogs, LLMTokens, LLMPricing, LLMBilling, LLMPools, LLMAlerts } from './pages/llm'
 // Log pages (split from old LogCenter)
@@ -38,7 +38,6 @@ render(() => (
       <Router root={Layout}>
         <Route path="/" component={Dashboard} />
         {/* Knowledge (core system) */}
-        <Route path="/knowledge/files" component={KnowledgeFiles} />
         <Route path="/knowledge/search" component={KnowledgeSearch} />
         <Route path="/knowledge/ask" component={KnowledgeAsk} />
         <Route path="/rss" component={RSSFeeds} />
