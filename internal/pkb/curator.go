@@ -49,10 +49,8 @@ func NewCurator(cfg *config.Config, opts Options) (*Curator, error) {
 	if llmBase == "" {
 		return nil, fmt.Errorf("classify.llm_proxy_url is empty; pkb-curate needs it as the LLM backend")
 	}
-	timeout := time.Duration(cfg.Classify.Timeout) * time.Second
-	if timeout <= 0 {
-		timeout = 60 * time.Second
-	}
+	// 重构生成长卡片、rebuild 全量索引可能远超 classify.timeout(10s)；用独立较长超时（打分快，不受上限影响）
+	timeout := 300 * time.Second
 	client := NewClient(llmBase, cfg.Server.APIKey, timeout)
 
 	perRun := opts.PerRun
