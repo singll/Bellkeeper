@@ -9,28 +9,32 @@ import (
 	"time"
 
 	"github.com/singll/bellkeeper/internal/config"
+	"github.com/singll/bellkeeper/internal/repository"
 )
 
 // Options pkb-curate 运行选项
 type Options struct {
 	ConfigDir string // config/pkb（含 domains.yaml + prompts/）
 	DryRun    bool
-	PerRun    int // 0 = 用 domains.yaml defaults.per_run
+	Rescan    bool // 全量重扫：包含已处理条目（默认 false=只取未处理，幂等）
+	PerRun    int  // 0 = 用 domains.yaml defaults.per_run
 }
 
 // Curator 知识库维护编排器（一次性 CLI，跑完即退，无后台 goroutine）。
 type Curator struct {
 	client            *Client
+	articleRepo       *repository.ArticleTagRepository
 	domains           *DomainsConfig
 	basePath          string // /mnt/knowledge
 	scorePrompt       string
 	reconstructPrompt string
 	dryRun            bool
+	rescan            bool
 	perRun            int
 }
 
-// NewCurator 装配 Curator：加载 config/pkb + 构造 HTTP 客户端。
-func NewCurator(cfg *config.Config, opts Options) (*Curator, error) {
+// NewCurator 装配 Curator：加载 config/pkb + 构造 HTTP 客户端 + 注入 ArticleTag 仓库（幂等账本）。
+func NewCurator(cfg *config.Config, opts Options, articleRepo *repository.ArticleTagRepository) (*Curator, error) {
 	domains, err := LoadDomains(filepath.Join(opts.ConfigDir, "domains.yaml"))
 	if err != nil {
 		return nil, err
@@ -60,11 +64,13 @@ func NewCurator(cfg *config.Config, opts Options) (*Curator, error) {
 
 	return &Curator{
 		client:            client,
+		articleRepo:       articleRepo,
 		domains:           domains,
 		basePath:          cfg.Knowledge.BasePath,
 		scorePrompt:       string(scorePrompt),
 		reconstructPrompt: string(reconstructPrompt),
 		dryRun:            opts.DryRun,
+		rescan:            opts.Rescan,
 		perRun:            perRun,
 	}, nil
 }
@@ -89,11 +95,11 @@ func (c *Curator) Run() error {
 		c.domains.Defaults.ScoreModel, c.domains.Defaults.ReconstructModel,
 		c.domains.Defaults.VaultThreshold, c.domains.Defaults.ArchiveThreshold)
 
-	articles, err := c.client.ListRaw(c.perRun)
+	articles, err := c.client.ListRaw(c.perRun, !c.rescan)
 	if err != nil {
 		return fmt.Errorf("list raw articles: %w", err)
 	}
-	fmt.Printf("[pkb-curate] 取到 %d 篇 raw 待处理\n", len(articles))
+	fmt.Printf("[pkb-curate] 取到 %d 篇 raw 待处理（rescan=%v）\n", len(articles), c.rescan)
 
 	var sum runSummary
 	for i, art := range articles {
@@ -123,9 +129,22 @@ func (c *Curator) processOne(art ArticleMeta, sum *runSummary) error {
 	}
 	bodyBytes, err := os.ReadFile(art.FilePath)
 	if err != nil {
+		// 自愈①：raw 文件已不在（上轮分流移走但 DB 账本未对齐）→ 回填账本并跳过，不计失败
+		if os.IsNotExist(err) {
+			fmt.Printf("    ↪ raw 文件已不存在（疑似上轮已分流），回填账本并跳过\n")
+			c.markProcessedDB(art.ID, "moved", 0, "", "")
+			return nil
+		}
 		return fmt.Errorf("read body %s: %w", art.FilePath, err)
 	}
 	body := string(bodyBytes)
+
+	// 自愈②：frontmatter 已有 pkb_decision（上轮处理过、仅 DB 账本未对齐）→ 回填并跳过，不重打分
+	if dec := frontmatterValue(body, "pkb_decision"); dec != "" {
+		fmt.Printf("    ↪ 已有 pkb_decision=%s，回填账本并跳过\n", dec)
+		c.markProcessedDB(art.ID, dec, 0, "", "")
+		return nil
+	}
 
 	score, err := c.scoreArticle(art, body)
 	if err != nil {
@@ -170,7 +189,11 @@ func (c *Curator) markDiscard(art ArticleMeta, score *ScoreResult, final float64
 		return err
 	}
 	updated := upsertFrontmatter(string(body), c.scoreFields(score, final, domain, "discard"))
-	return os.WriteFile(art.FilePath, []byte(updated), 0644)
+	if err := os.WriteFile(art.FilePath, []byte(updated), 0644); err != nil {
+		return err
+	}
+	c.markProcessedDB(art.ID, "discard", final, "", "")
+	return nil
 }
 
 // moveToArchive 中分：os.Rename raw→archive/，并在 frontmatter 写入打分/决策。
@@ -191,6 +214,7 @@ func (c *Curator) moveToArchive(art ArticleMeta, body string, score *ScoreResult
 		return fmt.Errorf("write archive frontmatter: %w", err)
 	}
 	fmt.Printf("    → %s\n", dst)
+	c.markProcessedDB(art.ID, "archive", final, "archive", dst)
 	return nil
 }
 
@@ -222,7 +246,44 @@ func (c *Curator) reconstructToVault(art ArticleMeta, body string, score *ScoreR
 		return fmt.Errorf("write vault card: %w", err)
 	}
 	fmt.Printf("    → %s\n", dst)
+	// raw 原文留底：补写 pkb_decision=vault，使其下次被自愈跳过（DB + frontmatter 双保险）
+	if rawBody, rerr := os.ReadFile(art.FilePath); rerr == nil {
+		updated := upsertFrontmatter(string(rawBody), c.scoreFields(score, final, domain, "vault"))
+		if werr := os.WriteFile(art.FilePath, []byte(updated), 0644); werr != nil {
+			fmt.Printf("    ⚠ 回写 raw frontmatter 失败（不影响 vault 卡片）: %v\n", werr)
+		}
+	}
+	c.markProcessedDB(art.ID, "vault", final, "", "")
 	return nil
+}
+
+// markProcessedDB 在 DB 账本中标记一篇已被处理（幂等核心）。dry-run 或无 repo 时跳过；
+// 失败仅记录警告、不中断（文件已落位，下次运行靠自愈再对齐）。
+func (c *Curator) markProcessedDB(id uint, decision string, score float64, newLayer, newFilePath string) {
+	if c.dryRun || c.articleRepo == nil {
+		return
+	}
+	if err := c.articleRepo.MarkPkbProcessed(id, decision, score, newLayer, newFilePath); err != nil {
+		fmt.Printf("    ⚠ 标记 DB 处理状态失败（文件已落位，下次自愈）: %v\n", err)
+	}
+}
+
+// frontmatterValue 从 markdown 顶部 YAML frontmatter 提取指定 key 的原始值（简单解析，仅供自愈判断）。
+func frontmatterValue(content, key string) string {
+	lines := strings.Split(content, "\n")
+	if len(lines) == 0 || strings.TrimSpace(lines[0]) != "---" {
+		return ""
+	}
+	for i := 1; i < len(lines); i++ {
+		line := strings.TrimSpace(lines[i])
+		if line == "---" {
+			break
+		}
+		if strings.HasPrefix(line, key+":") {
+			return strings.TrimSpace(strings.TrimPrefix(line, key+":"))
+		}
+	}
+	return ""
 }
 
 // scoreFields 生成要写入 frontmatter 的打分字段（pkb_ 前缀，避免与既有字段冲突）。

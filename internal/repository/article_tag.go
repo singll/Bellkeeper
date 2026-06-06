@@ -136,11 +136,12 @@ func (r *ArticleTagRepository) Update(article *model.ArticleTag) error {
 
 // ListArticleTagOpts contains filter options for listing article tags
 type ListArticleTagOpts struct {
-	Layer   string
-	Status  string
-	Keyword string
-	Page    int
-	PerPage int
+	Layer            string
+	Status           string
+	Keyword          string
+	ExcludeProcessed bool // 排除 pkb-curate 已处理（pkb_status='processed'）的条目
+	Page             int
+	PerPage          int
 }
 
 // ListWithFilter retrieves article tags with filtering and pagination
@@ -161,6 +162,9 @@ func (r *ArticleTagRepository) ListWithFilter(opts ListArticleTagOpts) ([]model.
 		keyword := "%" + opts.Keyword + "%"
 		query = query.Where("article_title LIKE ? OR article_url LIKE ? OR source_domain LIKE ?",
 			keyword, keyword, keyword)
+	}
+	if opts.ExcludeProcessed {
+		query = query.Where("pkb_status IS NULL OR pkb_status = ?", "")
 	}
 
 	// Get total count
@@ -185,6 +189,24 @@ func (r *ArticleTagRepository) ListWithFilter(opts ListArticleTagOpts) ([]model.
 		Find(&articles).Error
 
 	return articles, total, err
+}
+
+// MarkPkbProcessed 标记一篇文章已被 pkb-curate 处理（幂等：下次 ListRaw 默认将其排除）。
+// archive 决策可同时更新 layer/file_path，使 DB 账本随文件移动而对齐；
+// vault/discard 文件留原处时传空 newLayer/newFilePath 即不改动其位置。
+func (r *ArticleTagRepository) MarkPkbProcessed(id uint, decision string, score float64, newLayer, newFilePath string) error {
+	updates := map[string]interface{}{
+		"pkb_status":   "processed",
+		"pkb_decision": decision,
+		"pkb_score":    score,
+	}
+	if newLayer != "" {
+		updates["layer"] = newLayer
+	}
+	if newFilePath != "" {
+		updates["file_path"] = newFilePath
+	}
+	return r.db.Model(&model.ArticleTag{}).Where("id = ?", id).Updates(updates).Error
 }
 
 // GetByIDWithPreload retrieves an article tag by ID with preloaded associations

@@ -9,6 +9,7 @@ import (
 	"github.com/singll/bellkeeper/internal/middleware"
 	"github.com/singll/bellkeeper/internal/model"
 	"github.com/singll/bellkeeper/internal/pkb"
+	"github.com/singll/bellkeeper/internal/repository"
 	"github.com/spf13/cobra"
 )
 
@@ -18,6 +19,7 @@ var (
 
 	// pkb-curate flags
 	pkbDryRun bool
+	pkbRescan bool
 	pkbPerRun int
 	pkbCfgDir string
 )
@@ -61,6 +63,7 @@ Steer behavior by editing config/pkb/ (domains, prompts, thresholds) — no rebu
 		Run: runPkbCurate,
 	}
 	pkbCurateCmd.Flags().BoolVar(&pkbDryRun, "dry-run", false, "score and print decisions without moving/writing files or reindexing")
+	pkbCurateCmd.Flags().BoolVar(&pkbRescan, "rescan", false, "rescan ALL raw articles incl. already-processed (default: skip processed for idempotency)")
 	pkbCurateCmd.Flags().IntVar(&pkbPerRun, "per-run", 0, "max articles to process this run (0 = use domains.yaml defaults.per_run)")
 	pkbCurateCmd.Flags().StringVar(&pkbCfgDir, "pkb-config", "config/pkb", "directory holding domains.yaml + prompts/")
 
@@ -128,11 +131,19 @@ func runPkbCurate(cmd *cobra.Command, args []string) {
 		os.Exit(1)
 	}
 
+	db, err := model.InitDB(cfg.Database)
+	if err != nil {
+		fmt.Fprintf(os.Stderr, "Failed to connect to database: %v\n", err)
+		os.Exit(1)
+	}
+	articleRepo := repository.NewArticleTagRepository(db)
+
 	curator, err := pkb.NewCurator(cfg, pkb.Options{
 		ConfigDir: pkbCfgDir,
 		DryRun:    pkbDryRun,
+		Rescan:    pkbRescan,
 		PerRun:    pkbPerRun,
-	})
+	}, articleRepo)
 	if err != nil {
 		fmt.Fprintf(os.Stderr, "Failed to init pkb curator: %v\n", err)
 		os.Exit(1)

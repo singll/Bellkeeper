@@ -13,6 +13,7 @@ import (
 // ArticleMeta 是 GET /api/files/list 返回的 ArticleTag 子集（pkb-curate 只需这些字段）。
 // 字段 tag 对齐 model.ArticleTag 的 json tag。
 type ArticleMeta struct {
+	ID         uint   `json:"id"`
 	DocumentID string `json:"document_id"`
 	Title      string `json:"article_title"`
 	URL        string `json:"article_url"`
@@ -59,8 +60,12 @@ func (c *Client) newReq(method, url string, body io.Reader) (*http.Request, erro
 }
 
 // ListRaw 列出 raw 层待处理文章（GET /api/files/list?layer=raw&per_page=N）。
-func (c *Client) ListRaw(perPage int) ([]ArticleMeta, error) {
+// excludeProcessed=true 时附加 exclude_processed=true，跳过已被 pkb-curate 处理过的条目（幂等）。
+func (c *Client) ListRaw(perPage int, excludeProcessed bool) ([]ArticleMeta, error) {
 	url := fmt.Sprintf("%s/api/files/list?layer=raw&page=1&per_page=%d", c.apiBase, perPage)
+	if excludeProcessed {
+		url += "&exclude_processed=true"
+	}
 	req, err := c.newReq(http.MethodGet, url, nil)
 	if err != nil {
 		return nil, err

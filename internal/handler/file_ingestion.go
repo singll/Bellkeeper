@@ -61,6 +61,7 @@ func (h *FileIngestionHandler) List(c *gin.Context) {
 	layer := c.DefaultQuery("layer", "")
 	status := c.DefaultQuery("status", "")
 	keyword := c.DefaultQuery("keyword", "")
+	excludeProcessed, _ := strconv.ParseBool(c.DefaultQuery("exclude_processed", "false"))
 	pageStr := c.DefaultQuery("page", "1")
 	perPageStr := c.DefaultQuery("per_page", "20")
 
@@ -74,11 +75,12 @@ func (h *FileIngestionHandler) List(c *gin.Context) {
 	}
 
 	opts := repository.ListArticleTagOpts{
-		Layer:   layer,
-		Status:  status,
-		Keyword: keyword,
-		Page:    page,
-		PerPage: perPage,
+		Layer:            layer,
+		Status:           status,
+		Keyword:          keyword,
+		ExcludeProcessed: excludeProcessed,
+		Page:             page,
+		PerPage:          perPage,
 	}
 
 	articles, total, err := h.svc.ListFiles(opts)
