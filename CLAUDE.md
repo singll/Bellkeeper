@@ -107,6 +107,58 @@
 - **禁止 `docker compose down`**（会停全部服务）；只重启指定服务。
 - 本地依赖容器（Postgres 等）可用 `make docker-up/down`——这是本机开发环境，不是生产。
 
+### 4.1 spool 命令优先级（禁止滥用 exec）
+
+**核心原则：专用命令优先，`exec` 仅作为最后手段。** `spool exec` 等同于裸 SSH，绕过了 spool 的日志、错误处理、安全审计。以下场景**必须**使用专用命令，**禁止**用 `exec` 替代：
+
+| 场景 | 正确命令 | 禁止 |
+|------|---------|------|
+| 部署/更新整个 bundle | `spool bundle <name> up <host>` | ~~`spool exec <host> "docker compose up -d"`~~ |
+| 查看 bundle 状态 | `spool bundle <name> status <host>` | ~~`spool exec <host> "docker compose ps"`~~ |
+| 重启单个服务 | `spool restart <host> <alias>` 或 `spool service <host> restart <alias>` | ~~`spool exec <host> "docker restart sp-xxx"`~~ |
+| 查看服务状态 | `spool service <host> status [alias]` | ~~`spool exec <host> "docker ps"`~~ |
+| 查看服务日志 | `spool logs <host> <alias> [lines]` | ~~`spool exec <host> "docker logs sp-xxx"`~~ |
+| 同步配置到远程 | `spool sync push <host>` 或 `spool push <host>` | ~~`spool exec <host> "rsync ..."`~~ |
+| 拉取远程配置 | `spool sync pull <host>` 或 `spool pull <host>` | ~~`spool exec <host> "cat /path/config"`~~ |
+| 备份主机数据 | `spool backup <host>` | ~~`spool exec <host> "tar ..."`~~ |
+
+`spool exec` 仅在**专用命令无法覆盖**的场景使用（如检查磁盘空间 `df -h`、查看进程 `ps aux` 等）。
+
+### 4.2 Bellkeeper 部署标准流程
+
+Bellkeeper 部署在 **keeper** 主机（`192.168.7.230`），bundle 名为 `keeper`，服务别名 `bellkeeper`。
+
+**完整部署（代码更新 + 构建镜像 + 启动）：**
+```bash
+spool bundle keeper up keeper
+```
+此命令自动完成：git pull → sync push（推送 .env / n8n-workflows / couchdb 配置）→ docker build → docker compose up -d。
+
+**仅重启服务（代码未变，仅改了 .env 或配置）：**
+```bash
+spool sync push keeper          # 先推送配置
+spool restart keeper bellkeeper # 再重启 bellkeeper 容器
+```
+
+**仅重启 bellkeeper（不改配置）：**
+```bash
+spool restart keeper bellkeeper
+```
+
+**查看状态 / 日志：**
+```bash
+spool service keeper status bellkeeper   # 查看运行状态
+spool logs keeper bellkeeper 100         # 查看最近 100 行日志
+```
+
+**keeper 主机上的其他服务别名**（来自 silkspool.yaml）：
+`redis` / `n8n` / `bellkeeper` / `bellkeeper-db` / `memos` / `rsshub` / `couchdb` / `nats` / `meilisearch`
+
+**注意事项：**
+- `spool bundle keeper up keeper` 会重建所有服务镜像，耗时较长（~5 分钟），仅在代码变更时使用。
+- 仅修改 `.env` 时不需要 `bundle up`，`sync push` + `restart bellkeeper` 即可（init 脚本会从挂载的 .env 重新加载变量）。
+- **禁止** `spool bundle keeper down keeper`——会停止 keeper 上所有服务。
+
 ---
 
 ## 5. 会话体量与检查点（防上下文溢出）
