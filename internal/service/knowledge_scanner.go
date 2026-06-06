@@ -37,52 +37,58 @@ type FileInfo struct {
 	Title       string
 }
 
-// ScanDirectory 扫描目录，返回所有文件
+// ScanDirectory 递归扫描各 scan_dir（含子目录），返回所有 .md/.txt 文件。
+// 改用 filepath.WalkDir 递归，使 vault/<领域>/x.md 等深层文件也能被索引到
+// （原 os.ReadDir 仅扫顶层、遇子目录直接 continue）。
 func (s *FileScanner) ScanDirectory() ([]FileInfo, error) {
 	var files []FileInfo
 
 	for _, dir := range s.scanDirs {
 		dirPath := filepath.Join(s.basePath, dir.Path)
+		layer := dir.Layer
 
-		entries, err := os.ReadDir(dirPath)
-		if err != nil {
-			if os.IsNotExist(err) {
-				continue
-			}
-			return nil, fmt.Errorf("read directory %s: %w", dir.Path, err)
-		}
-
-		for _, entry := range entries {
-			if entry.IsDir() {
-				continue
-			}
-
-			ext := strings.ToLower(filepath.Ext(entry.Name()))
-			if ext != ".md" && ext != ".txt" {
-				continue
-			}
-
-			filePath := filepath.Join(dirPath, entry.Name())
-			content, err := os.ReadFile(filePath)
+		walkErr := filepath.WalkDir(dirPath, func(path string, d os.DirEntry, err error) error {
 			if err != nil {
-				continue
+				// 顶层目录不存在或单条目访问出错：跳过，不中断整体扫描
+				return nil
+			}
+			if d.IsDir() {
+				return nil
+			}
+
+			ext := strings.ToLower(filepath.Ext(d.Name()))
+			if ext != ".md" && ext != ".txt" {
+				return nil
+			}
+
+			content, err := os.ReadFile(path)
+			if err != nil {
+				return nil
 			}
 
 			hash := sha256.Sum256(content)
 
-			relPath := filepath.Join(dir.Path, entry.Name())
+			// RelPath 取相对 basePath 的完整路径，保留子目录层级（如 vault/security/x.md）
+			relPath, relErr := filepath.Rel(s.basePath, path)
+			if relErr != nil {
+				relPath = filepath.Join(dir.Path, d.Name())
+			}
 
 			// 从文件名提取标题（去掉扩展名）
-			title := strings.TrimSuffix(entry.Name(), filepath.Ext(entry.Name()))
+			title := strings.TrimSuffix(d.Name(), filepath.Ext(d.Name()))
 
 			files = append(files, FileInfo{
-				AbsPath:     filePath,
+				AbsPath:     path,
 				RelPath:     relPath,
-				Layer:       dir.Layer,
+				Layer:       layer,
 				Content:     content,
 				ContentHash: hex.EncodeToString(hash[:]),
 				Title:       title,
 			})
+			return nil
+		})
+		if walkErr != nil {
+			return nil, fmt.Errorf("walk directory %s: %w", dir.Path, walkErr)
 		}
 	}
 

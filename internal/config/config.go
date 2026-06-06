@@ -420,10 +420,12 @@ func setDefaults(v *viper.Viper) {
 	v.SetDefault("knowledge.scan_interval", 300)
 	v.SetDefault("knowledge.chunk_min_size", 100)
 	v.SetDefault("knowledge.chunk_max_size", 600)
+	// 三层知识库：raw 绝不进 Meili（仅 ingest 落盘 + pkb-curate 待处理源）；
+	// archive 中等价值归档、vault 高价值卡片均进 Meili（vault 另经 Obsidian LiveSync 下行本地）。
+	// working/ 不在此列——它是 ReportService 的渠道消息存档区，不应进知识检索。
 	v.SetDefault("knowledge.scan_dirs", []map[string]string{
-		{"path": "raw", "layer": "raw"},
-		{"path": "working", "layer": "working"},
-		{"path": "KNOWLEDGE", "layer": "knowledge"},
+		{"path": "archive", "layer": "archive"},
+		{"path": "vault", "layer": "vault"},
 	})
 
 	// RSS Fetcher

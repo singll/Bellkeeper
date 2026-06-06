@@ -228,13 +228,13 @@ rss_fetcher:
 knowledge:
   enabled: true
   base_path: /mnt/knowledge
+  # 三层知识库：raw 绝不进 Meili；archive(中等价值)/vault(高价值卡片) 进 Meili。
+  # working/ 不在此列——它是 ReportService 的渠道消息存档区，不进知识检索。
   scan_dirs:
-    - path: raw
-      layer: raw
-    - path: working
-      layer: working
-    - path: KNOWLEDGE
-      layer: knowledge
+    - path: archive
+      layer: archive
+    - path: vault
+      layer: vault
   scan_interval: 300
   chunk_min_size: 100
   chunk_max_size: 600
