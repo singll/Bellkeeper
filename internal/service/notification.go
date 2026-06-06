@@ -129,13 +129,14 @@ func (s *NotificationService) Send(ctx context.Context, req *NotificationRequest
 
 	// Create notification record
 	metadataJSON, _ := json.Marshal(req.Metadata)
+	metadataStr := string(metadataJSON)
 	notification := &model.MatrixNotification{
 		NotificationID: req.ID,
 		ChannelName:    req.Channel,
 		RoomID:         roomID,
 		MessageType:    req.MessageType,
 		MessageContent: req.Message,
-		Metadata:       string(metadataJSON),
+		Metadata:       &metadataStr,
 		Status:         "pending",
 	}
 

@@ -15,7 +15,7 @@ type MatrixRoom struct {
 	RoomName  string    `gorm:"size:255" json:"room_name,omitempty"`
 	RoomType  string    `gorm:"size:50;notNull;index" json:"room_type"` // command, notification, admin
 	IsActive  bool      `gorm:"default:true;index" json:"is_active"`
-	Config    string    `gorm:"type:jsonb" json:"config,omitempty"` // room-level config as JSON
+	Config    *string   `gorm:"type:jsonb" json:"config,omitempty"`
 	CreatedAt time.Time `json:"created_at"`
 	UpdatedAt time.Time `json:"updated_at"`
 }
@@ -31,7 +31,7 @@ type MatrixChannel struct {
 	RoomID     string    `gorm:"size:255;notNull;index" json:"room_id"`
 	IsActive   bool      `gorm:"default:true;index" json:"is_active"`
 	Priority   int       `gorm:"default:0" json:"priority"`
-	Config     string    `gorm:"type:jsonb" json:"config,omitempty"` // channel-level config
+	Config     *string   `gorm:"type:jsonb" json:"config,omitempty"`
 	CreatedAt  time.Time `json:"created_at"`
 	UpdatedAt  time.Time `json:"updated_at"`
 }
@@ -45,7 +45,7 @@ type MatrixCommand struct {
 	ID              uint      `gorm:"primaryKey" json:"id"`
 	CommandName     string    `gorm:"size:100;uniqueIndex;notNull" json:"command_name"` // 列表, list, 新增, etc.
 	HandlerType     string    `gorm:"size:100;notNull;index" json:"handler_type"` // memos_todo, knowledge_qa, n8n_workflow
-	HandlerConfig   string    `gorm:"type:jsonb" json:"handler_config,omitempty"`
+	HandlerConfig   *string   `gorm:"type:jsonb" json:"handler_config,omitempty"`
 	PermissionLevel string    `gorm:"size:50;default:user" json:"permission_level"` // admin, user, guest
 	RoomScope       string    `gorm:"size:50;default:any" json:"room_scope"` // any, specific, admin_only
 	IsActive        bool      `gorm:"default:true;index" json:"is_active"`
@@ -66,7 +66,7 @@ type MatrixEvent struct {
 	RoomID           string    `gorm:"size:255;notNull;index" json:"room_id"`
 	Sender           string    `gorm:"size:255;notNull" json:"sender"`
 	EventType        string    `gorm:"size:100;notNull" json:"event_type"` // m.room.message, m.room.member
-	Content          string    `gorm:"type:jsonb" json:"content,omitempty"`
+	Content          *string   `gorm:"type:jsonb" json:"content,omitempty"`
 	ProcessingStatus string    `gorm:"size:50;default:pending;index" json:"processing_status"` // pending, processed, failed, ignored
 	ErrorMessage     string    `gorm:"type:text" json:"error_message,omitempty"`
 	ProcessedAt      time.Time `json:"processed_at,omitempty"`
@@ -85,7 +85,7 @@ type MatrixNotification struct {
 	RoomID         string    `gorm:"size:255" json:"room_id,omitempty"`
 	MessageType    string    `gorm:"size:50;default:text" json:"message_type"` // text, html, markdown
 	MessageContent string    `gorm:"type:text;notNull" json:"message_content"`
-	Metadata       string    `gorm:"type:jsonb" json:"metadata,omitempty"`
+	Metadata       *string   `gorm:"type:jsonb" json:"metadata,omitempty"`
 	Status         string    `gorm:"size:50;default:pending;index" json:"status"` // pending, sent, failed, retrying
 	RetryCount     int       `gorm:"default:0" json:"retry_count"`
 	LastError      string    `gorm:"type:text" json:"last_error,omitempty"`
@@ -172,12 +172,12 @@ func SeedMatrixPlatform(db *gorm.DB) error {
 	// will happen when the Matrix gateway starts.
 
 	// Seed default channels (logical channels mapped to rooms via env vars)
-	// Note: Config uses "{}" instead of "" because PostgreSQL jsonb rejects empty strings
+	emptyJSON := func(s string) *string { return &s }
 	channels := []MatrixChannel{
-		{ChannelName: "alerts", RoomID: os.Getenv("BELLKEEPER_MATRIX_ROOM_ALERTS"), IsActive: true, Priority: 100, Config: "{}"},
-		{ChannelName: "daily", RoomID: os.Getenv("BELLKEEPER_MATRIX_ROOM_DAILY"), IsActive: true, Priority: 50, Config: "{}"},
-		{ChannelName: "todo", RoomID: os.Getenv("BELLKEEPER_MATRIX_ROOM_TODO"), IsActive: true, Priority: 30, Config: "{}"},
-		{ChannelName: "qa", RoomID: os.Getenv("BELLKEEPER_MATRIX_ROOM_QA"), IsActive: true, Priority: 30, Config: "{}"},
+		{ChannelName: "alerts", RoomID: os.Getenv("BELLKEEPER_MATRIX_ROOM_ALERTS"), IsActive: true, Priority: 100, Config: emptyJSON("{}")},
+		{ChannelName: "daily", RoomID: os.Getenv("BELLKEEPER_MATRIX_ROOM_DAILY"), IsActive: true, Priority: 50, Config: emptyJSON("{}")},
+		{ChannelName: "todo", RoomID: os.Getenv("BELLKEEPER_MATRIX_ROOM_TODO"), IsActive: true, Priority: 30, Config: emptyJSON("{}")},
+		{ChannelName: "qa", RoomID: os.Getenv("BELLKEEPER_MATRIX_ROOM_QA"), IsActive: true, Priority: 30, Config: emptyJSON("{}")},
 	}
 
 	for _, ch := range channels {
@@ -201,7 +201,6 @@ func SeedMatrixPlatform(db *gorm.DB) error {
 	}
 
 	// Seed default commands
-	// Note: HandlerConfig uses "{}" instead of "" because PostgreSQL jsonb rejects empty strings
 	commands := []MatrixCommand{
 		{
 			CommandName:     "help",
@@ -209,7 +208,7 @@ func SeedMatrixPlatform(db *gorm.DB) error {
 			PermissionLevel: "user",
 			RoomScope:       "any",
 			IsActive:        true,
-			HandlerConfig:   "{}",
+			HandlerConfig:   emptyJSON("{}"),
 			Description:     "显示可用命令列表",
 			UsageExample:    "!help",
 		},
@@ -219,7 +218,7 @@ func SeedMatrixPlatform(db *gorm.DB) error {
 			PermissionLevel: "user",
 			RoomScope:       "any",
 			IsActive:        true,
-			HandlerConfig:   "{}",
+			HandlerConfig:   emptyJSON("{}"),
 			Description:     "显示系统状态",
 			UsageExample:    "!status",
 		},
@@ -229,7 +228,7 @@ func SeedMatrixPlatform(db *gorm.DB) error {
 			PermissionLevel: "user",
 			RoomScope:       "any",
 			IsActive:        true,
-			HandlerConfig:   "{}",
+			HandlerConfig:   emptyJSON("{}"),
 			Description:     "查看 Memos 待办列表",
 			UsageExample:    "!列表",
 		},
@@ -239,7 +238,7 @@ func SeedMatrixPlatform(db *gorm.DB) error {
 			PermissionLevel: "user",
 			RoomScope:       "any",
 			IsActive:        true,
-			HandlerConfig:   "{}",
+			HandlerConfig:   emptyJSON("{}"),
 			Description:     "创建 Memos 待办事项",
 			UsageExample:    "!新增 完成项目文档",
 		},
@@ -249,7 +248,7 @@ func SeedMatrixPlatform(db *gorm.DB) error {
 			PermissionLevel: "user",
 			RoomScope:       "any",
 			IsActive:        true,
-			HandlerConfig:   "{}",
+			HandlerConfig:   emptyJSON("{}"),
 			Description:     "向知识库提问",
 			UsageExample:    "!问 什么是 GORM？",
 		},
@@ -259,7 +258,7 @@ func SeedMatrixPlatform(db *gorm.DB) error {
 			PermissionLevel: "user",
 			RoomScope:       "any",
 			IsActive:        true,
-			HandlerConfig:   "{}",
+			HandlerConfig:   emptyJSON("{}"),
 			Description:     "在知识库中搜索",
 			UsageExample:    "!搜 Docker 部署",
 		},
@@ -269,7 +268,7 @@ func SeedMatrixPlatform(db *gorm.DB) error {
 			PermissionLevel: "user",
 			RoomScope:       "any",
 			IsActive:        true,
-			HandlerConfig:   "{}",
+			HandlerConfig:   emptyJSON("{}"),
 			Description:     "Memos 待办管理",
 			UsageExample:    "!待办 列表",
 		},
@@ -279,7 +278,7 @@ func SeedMatrixPlatform(db *gorm.DB) error {
 			PermissionLevel: "user",
 			RoomScope:       "any",
 			IsActive:        true,
-			HandlerConfig:   "{}",
+			HandlerConfig:   emptyJSON("{}"),
 			Description:     "标记待办完成",
 			UsageExample:    "!完成 123",
 		},
@@ -289,7 +288,7 @@ func SeedMatrixPlatform(db *gorm.DB) error {
 			PermissionLevel: "user",
 			RoomScope:       "any",
 			IsActive:        true,
-			HandlerConfig:   "{}",
+			HandlerConfig:   emptyJSON("{}"),
 			Description:     "Search the knowledge base",
 			UsageExample:    "!search Docker",
 		},
@@ -299,7 +298,7 @@ func SeedMatrixPlatform(db *gorm.DB) error {
 			PermissionLevel: "user",
 			RoomScope:       "any",
 			IsActive:        true,
-			HandlerConfig:   "{}",
+			HandlerConfig:   emptyJSON("{}"),
 			Description:     "测试机器人响应",
 			UsageExample:    "!ping",
 		},
@@ -309,7 +308,7 @@ func SeedMatrixPlatform(db *gorm.DB) error {
 			PermissionLevel: "user",
 			RoomScope:       "any",
 			IsActive:        true,
-			HandlerConfig:   "{}",
+			HandlerConfig:   emptyJSON("{}"),
 			Description:     "列出所有可用命令",
 			UsageExample:    "!commands",
 		},
@@ -319,7 +318,7 @@ func SeedMatrixPlatform(db *gorm.DB) error {
 			PermissionLevel: "admin",
 			RoomScope:       "any",
 			IsActive:        true,
-			HandlerConfig:   "{}",
+			HandlerConfig:   emptyJSON("{}"),
 			Description:     "显示系统健康状态",
 			UsageExample:    "!health",
 		},
@@ -329,7 +328,7 @@ func SeedMatrixPlatform(db *gorm.DB) error {
 			PermissionLevel: "admin",
 			RoomScope:       "any",
 			IsActive:        true,
-			HandlerConfig:   "{}",
+			HandlerConfig:   emptyJSON("{}"),
 			Description:     "列出 Matrix 房间",
 			UsageExample:    "!rooms",
 		},

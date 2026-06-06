@@ -181,8 +181,8 @@ func (l *RateLimitLearner) adjust(rl *model.LLMModelRateLimit, newValue int, rea
 
 	// Append to adjustment log (keep last 50)
 	var logs []map[string]interface{}
-	if rl.AdjustmentLog != "" {
-		_ = json.Unmarshal([]byte(rl.AdjustmentLog), &logs)
+	if rl.AdjustmentLog != nil && *rl.AdjustmentLog != "" {
+		_ = json.Unmarshal([]byte(*rl.AdjustmentLog), &logs)
 	}
 	logs = append(logs, map[string]interface{}{
 		"ts":     now.Format(time.RFC3339),
@@ -194,7 +194,8 @@ func (l *RateLimitLearner) adjust(rl *model.LLMModelRateLimit, newValue int, rea
 		logs = logs[len(logs)-50:]
 	}
 	logJSON, _ := json.Marshal(logs)
-	rl.AdjustmentLog = string(logJSON)
+	s := string(logJSON)
+	rl.AdjustmentLog = &s
 
 	if err := l.repo.Update(rl); err != nil {
 		middleware.GetLogger().Warn("failed to persist rate limit adjustment",

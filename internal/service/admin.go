@@ -102,7 +102,9 @@ func (s *AdminService) ListChannels(ctx context.Context) ([]*ChannelResponse, er
 	result := make([]*ChannelResponse, len(channels))
 	for i, c := range channels {
 		var config map[string]interface{}
-		json.Unmarshal([]byte(c.Config), &config)
+		if c.Config != nil {
+			json.Unmarshal([]byte(*c.Config), &config)
+		}
 
 		result[i] = &ChannelResponse{
 			Name:     c.ChannelName,

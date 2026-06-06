@@ -34,9 +34,9 @@ func (r *MatrixCommandRepository) GetByName(name string) (*model.MatrixCommand, 
 }
 
 func (r *MatrixCommandRepository) Create(cmd *model.MatrixCommand) error {
-	// Ensure HandlerConfig is valid JSON (empty string causes PostgreSQL jsonb error)
-	if cmd.HandlerConfig == "" {
-		cmd.HandlerConfig = "{}"
+	if cmd.HandlerConfig == nil {
+		s := "{}"
+		cmd.HandlerConfig = &s
 	}
 	return r.db.Create(cmd).Error
 }

@@ -34,9 +34,9 @@ func (r *MatrixRoomRepository) GetByRoomID(roomID string) (*model.MatrixRoom, er
 }
 
 func (r *MatrixRoomRepository) Create(room *model.MatrixRoom) error {
-	// Ensure Config is valid JSON (empty string causes PostgreSQL jsonb error)
-	if room.Config == "" {
-		room.Config = "{}"
+	if room.Config == nil {
+		s := "{}"
+		room.Config = &s
 	}
 	return r.db.Create(room).Error
 }

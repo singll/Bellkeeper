@@ -1,4 +1,5 @@
 import { Component, For, Show, createSignal, createResource } from 'solid-js'
+import { createStore, produce } from 'solid-js/store'
 import type { LLMChannelConfig, LLMModelGroupConfig, LLMModelGroupMemberConfig, LLMChannelCredentialView } from '@/types'
 import { llmProxyApi } from '@/api'
 import { useToast } from '@/components/Toast'
@@ -55,7 +56,7 @@ const LLMConfig: Component = () => {
   })
 
   // Group form
-  const [grpForm, setGrpForm] = createSignal({
+  const [grpForm, setGrpForm] = createStore({
     name: '',
     description: '',
     strategy: 'priority-health',
@@ -152,8 +153,7 @@ const LLMConfig: Component = () => {
   const saveGroup = async () => {
     setSaving(true)
     try {
-      const form = grpForm()
-      const data = { name: form.name, description: form.description, strategy: form.strategy, sticky_ttl_seconds: form.sticky_ttl_seconds, members: form.members }
+      const data = { name: grpForm.name, description: grpForm.description, strategy: grpForm.strategy, sticky_ttl_seconds: grpForm.sticky_ttl_seconds, members: [...grpForm.members] }
       const editing = editingGroup()
       if (editing) { await llmProxyApi.updateGroup(editing.id, data); toast.success('模型组已更新') }
       else { await llmProxyApi.createGroup(data); toast.success('模型组已创建') }
@@ -169,10 +169,10 @@ const LLMConfig: Component = () => {
     catch (err) { toast.error('删除失败: ' + (err as Error).message) }
   }
 
-  const addGroupMember = () => setGrpForm((prev) => ({ ...prev, members: [...prev.members, { channel_name: '', model: '', weight: 1 }] }))
-  const removeGroupMember = (index: number) => setGrpForm((prev) => ({ ...prev, members: prev.members.filter((_, i) => i !== index) }))
+  const addGroupMember = () => setGrpForm('members', produce((m) => { m.push({ channel_name: '', model: '', weight: 1 }) }))
+  const removeGroupMember = (index: number) => setGrpForm('members', produce((m) => { m.splice(index, 1) }))
   const updateGroupMember = (index: number, field: keyof LLMModelGroupMemberConfig, value: string | number) => {
-    setGrpForm((prev) => ({ ...prev, members: prev.members.map((m, i) => (i === index ? { ...m, [field]: value } : m)) }))
+    setGrpForm('members', index, field, value)
   }
 
   const baseUrlPlaceholder = () => {
@@ -349,12 +349,12 @@ const LLMConfig: Component = () => {
           <Modal open={showGroupModal()} onClose={() => setShowGroupModal(false)} title={editingGroup() ? '编辑模型组' : '新增模型组'} size="lg">
             <div class="space-y-4">
               <div class="grid grid-cols-1 sm:grid-cols-2 gap-4">
-                <div><label class="label">名称</label><input class="input" value={grpForm().name} onInput={(e) => setGrpForm((p) => ({ ...p, name: e.currentTarget.value }))} placeholder="如 pool-chat-free" /></div>
-                <div><label class="label">策略</label><select class="input" value={grpForm().strategy} onChange={(e) => setGrpForm((p) => ({ ...p, strategy: e.currentTarget.value }))}><option value="priority-health">priority-health</option><option value="round-robin">round-robin</option></select></div>
+                <div><label class="label">名称</label><input class="input" value={grpForm.name} onInput={(e) => setGrpForm('name', e.currentTarget.value)} placeholder="如 pool-chat-free" /></div>
+                <div><label class="label">策略</label><select class="input" value={grpForm.strategy} onChange={(e) => setGrpForm('strategy', e.currentTarget.value)}><option value="priority-health">priority-health</option><option value="round-robin">round-robin</option></select></div>
               </div>
               <div class="grid grid-cols-1 sm:grid-cols-2 gap-4">
-                <div><label class="label">描述</label><input class="input" value={grpForm().description} onInput={(e) => setGrpForm((p) => ({ ...p, description: e.currentTarget.value }))} placeholder="可选描述" /></div>
-                <div><label class="label">Sticky TTL (秒)</label><input class="input" type="number" value={grpForm().sticky_ttl_seconds} onInput={(e) => setGrpForm((p) => ({ ...p, sticky_ttl_seconds: parseInt(e.currentTarget.value) || 0 }))} /></div>
+                <div><label class="label">描述</label><input class="input" value={grpForm.description} onInput={(e) => setGrpForm('description', e.currentTarget.value)} placeholder="可选描述" /></div>
+                <div><label class="label">Sticky TTL (秒)</label><input class="input" type="number" value={grpForm.sticky_ttl_seconds} onInput={(e) => setGrpForm('sticky_ttl_seconds', parseInt(e.currentTarget.value) || 0)} /></div>
               </div>
               <div>
                 <div class="flex items-center justify-between mb-2">
@@ -364,9 +364,9 @@ const LLMConfig: Component = () => {
                     添加成员
                   </button>
                 </div>
-                <Show when={grpForm().members.length > 0} fallback={<p class="text-sm text-dark-400">暂无成员，点击上方按钮添加。</p>}>
+                <Show when={grpForm.members.length > 0} fallback={<p class="text-sm text-dark-400">暂无成员，点击上方按钮添加。</p>}>
                   <div class="space-y-2">
-                    <For each={grpForm().members}>
+                    <For each={grpForm.members}>
                       {(member, index) => (
                         <div class="grid grid-cols-[1fr_1fr_80px_40px] gap-2 items-end">
                           <input class="input" value={member.channel_name} onInput={(e) => updateGroupMember(index(), 'channel_name', e.currentTarget.value)} placeholder="渠道名" />

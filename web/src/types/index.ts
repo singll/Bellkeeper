@@ -501,7 +501,7 @@ export interface LLMModelRateLimit {
   last_429_observed_rpm: number
   last_adjust_at: string | null
   locked: boolean
-  adjustment_log: string  // JSON array
+  adjustment_log: string | null
   created_at: string
   updated_at: string
 }

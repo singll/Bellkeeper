@@ -20,7 +20,7 @@ type LLMModelRateLimit struct {
 	Last429ObservedRPM     int       `gorm:"default:0" json:"last_429_observed_rpm"`
 	LastAdjustAt           *time.Time `json:"last_adjust_at"`
 	Locked                 bool      `gorm:"default:false" json:"locked"`
-	AdjustmentLog          string    `gorm:"type:jsonb" json:"adjustment_log"` // JSON array of recent adjustments
+	AdjustmentLog          *string   `gorm:"type:jsonb" json:"adjustment_log,omitempty"`
 	CreatedAt              time.Time `json:"created_at"`
 	UpdatedAt              time.Time `json:"updated_at"`
 }

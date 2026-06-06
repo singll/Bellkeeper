@@ -214,8 +214,8 @@ func (r *Router) loadCommandsFromDB() {
 // createHandlerFromDB creates a handler instance from DB command config
 func (r *Router) createHandlerFromDB(cmd *model.MatrixCommand) Handler {
 	var config map[string]interface{}
-	if cmd.HandlerConfig != "" {
-		json.Unmarshal([]byte(cmd.HandlerConfig), &config)
+	if cmd.HandlerConfig != nil && *cmd.HandlerConfig != "" {
+		json.Unmarshal([]byte(*cmd.HandlerConfig), &config)
 	}
 
 	switch cmd.HandlerType {

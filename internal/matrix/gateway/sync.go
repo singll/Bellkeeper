@@ -183,12 +183,13 @@ func (s *SyncLoop) handleRoomMessage(ctx context.Context, evt *event.Event) erro
 
 	// Store event in audit log
 	contentJSON, _ := json.Marshal(evt.Content.Raw)
+	contentStr := string(contentJSON)
 	matrixEvent := &model.MatrixEvent{
 		EventID:          evt.ID.String(),
 		RoomID:           evt.RoomID.String(),
 		Sender:           evt.Sender.String(),
 		EventType:        evt.Type.String(),
-		Content:          string(contentJSON),
+		Content:          &contentStr,
 		ProcessingStatus: "pending",
 	}
 

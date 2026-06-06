@@ -1920,7 +1920,7 @@ func (s *LLMProxyService) ResetRateLimit(channelID uint, model string) error {
 	rl.LastAdjustAt = nil
 	rl.Last429At = nil
 	rl.Last429ObservedRPM = 0
-	rl.AdjustmentLog = ""
+	rl.AdjustmentLog = nil
 	return s.rateLimitLearner.repo.Update(rl)
 }
 
