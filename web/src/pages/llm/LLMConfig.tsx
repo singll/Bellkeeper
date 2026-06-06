@@ -199,6 +199,7 @@ const LLMConfig: Component = () => {
             <p class="text-primary-300 font-medium">配置说明</p>
             <ul class="text-dark-400 mt-1 space-y-0.5">
               <li>渠道 API Key 通过环境变量名引用（如 LLM_SILICONFLOW_API_KEY），需先在 .env 中配置。</li>
+              <li>表格中显示 Key 的解析状态：<span class="text-green-400">✓</span> 已配置 / <span class="text-red-400">✗</span> 未配置 / <span class="text-yellow-400">⚠</span> 直接值（建议改用环境变量）。</li>
               <li>支持 OpenAI 兼容和 Anthropic (Claude) 两种协议，Anthropic 渠道会自动转换请求/响应格式。</li>
               <li>保存后配置自动生效，运行态将在下次请求时更新。</li>
             </ul>
@@ -238,7 +239,7 @@ const LLMConfig: Component = () => {
               <div class="overflow-x-auto rounded-xl border border-dark-600/50">
                 <table class="table">
                   <thead>
-                    <tr><th>名称</th><th>Base URL</th><th>协议</th><th>API Key 变量</th><th>RPM / RPD</th><th>优先级</th><th>类型</th><th>状态</th><th>操作</th></tr>
+                    <tr><th>名称</th><th>Base URL</th><th>协议</th><th>API Key</th><th>RPM / RPD</th><th>优先级</th><th>类型</th><th>状态</th><th>操作</th></tr>
                   </thead>
                   <tbody>
                     <For each={channelConfigs()}>
@@ -247,7 +248,20 @@ const LLMConfig: Component = () => {
                           <td class="font-medium text-white">{ch.name}</td>
                           <td class="text-xs text-dark-300 max-w-[200px] truncate">{ch.base_url}</td>
                           <td><span class={`badge ${ch.provider_type === 'anthropic' ? 'badge-warning' : 'badge-gray'}`}>{ch.provider_type === 'anthropic' ? 'Anthropic' : 'OpenAI'}</span></td>
-                          <td class="font-mono text-xs text-dark-300">{ch.api_key_env || '--'}</td>
+                          <td>
+                            <div class="flex flex-col gap-0.5">
+                              <span class="font-mono text-xs text-dark-300">{ch.api_key_env || '--'}</span>
+                              <Show when={ch.api_key_status === 'configured'}>
+                                <span class="text-xs text-green-400">✓ {ch.api_key_preview}</span>
+                              </Show>
+                              <Show when={ch.api_key_status === 'missing'}>
+                                <span class="text-xs text-red-400">✗ 未配置</span>
+                              </Show>
+                              <Show when={ch.api_key_status === 'direct'}>
+                                <span class="text-xs text-yellow-400">⚠ 直接值 {ch.api_key_preview}</span>
+                              </Show>
+                            </div>
+                          </td>
                           <td>{ch.rpm} / {ch.rpd}</td>
                           <td>{ch.priority}</td>
                           <td><span class={`badge ${ch.is_free ? 'badge-primary' : 'badge-gray'}`}>{ch.is_free ? '免费' : '付费'}</span></td>

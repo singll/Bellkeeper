@@ -9,8 +9,8 @@ defaults:
     relevance: 0.4
     depth: 0.3
     actionability: 0.3
-  score_model: pool-summary        # 打分用的 LLM Proxy 虚拟组（换模型=改这里）
-  reconstruct_model: pool-summary  # 重构用的虚拟组（想用更强模型改这里即可）
+  score_model: pool-pkb        # 打分用的 LLM Proxy 虚拟组（Kimi K2.6 主力）
+  reconstruct_model: pool-pkb  # 重构用的 LLM Proxy 虚拟组（Kimi K2.6 主力）
   per_run: 5                       # 单轮处理量上限（护栏，可被 --per-run 覆盖）
   content_truncate: 8000           # 喂给 LLM 的正文截断长度（字符）
 

@@ -11,6 +11,7 @@ import (
 	"net/http"
 	"os"
 	"path/filepath"
+	"regexp"
 	"sort"
 	"strconv"
 	"strings"
@@ -763,10 +764,21 @@ func (s *LLMProxyService) Reload() error {
 }
 
 func dbChannelToConfig(ch model.LLMChannel) config.ChannelConfig {
-	// Resolve API key: try as env var name first, fallback to direct value
-	apiKey := os.Getenv(ch.APIKeyEnv)
-	if apiKey == "" {
-		apiKey = ch.APIKeyEnv
+	apiKey := ""
+	if ch.APIKeyEnv != "" {
+		apiKey = os.Getenv(ch.APIKeyEnv)
+		if apiKey == "" {
+			if looksLikeEnvVar(ch.APIKeyEnv) {
+				middleware.GetLogger().Warn("channel API key env var not set",
+					zap.String("channel", ch.Name),
+					zap.String("env_var", ch.APIKeyEnv))
+			} else {
+				middleware.GetLogger().Warn("channel api_key_env is not a valid env var name, treating as direct key",
+					zap.String("channel", ch.Name),
+					zap.String("api_key_env", maskAPIKey(ch.APIKeyEnv)))
+				apiKey = ch.APIKeyEnv
+			}
+		}
 	}
 	providerType := ch.ProviderType
 	if providerType == "" {
@@ -841,10 +853,65 @@ func dbGroupToConfig(g model.LLMModelGroup) config.ModelGroupConfig {
 	}
 }
 
+// ChannelConfigView extends model.LLMChannel with API key status information
+// for the frontend, without exposing the actual key value.
+type ChannelConfigView struct {
+	model.LLMChannel
+	APIKeyStatus  string `json:"api_key_status"`  // "configured" | "missing" | "direct"
+	APIKeyPreview string `json:"api_key_preview"` // masked preview, e.g. "sk-o...Lvr"
+}
+
+// maskAPIKey renders a preview of the API key: first 4 + "..." + last 4 chars.
+func maskAPIKey(s string) string {
+	n := len(s)
+	if n == 0 {
+		return ""
+	}
+	if n <= 8 {
+		return "****"
+	}
+	return s[:4] + "..." + s[n-4:]
+}
+
+func channelToView(ch *model.LLMChannel) ChannelConfigView {
+	v := ChannelConfigView{LLMChannel: *ch}
+	if ch.APIKeyEnv == "" {
+		v.APIKeyStatus = "missing"
+		v.APIKeyPreview = ""
+		return v
+	}
+	resolved := os.Getenv(ch.APIKeyEnv)
+	if resolved != "" {
+		v.APIKeyStatus = "configured"
+		v.APIKeyPreview = maskAPIKey(resolved)
+	} else if looksLikeEnvVar(ch.APIKeyEnv) {
+		v.APIKeyStatus = "missing"
+		v.APIKeyPreview = ""
+	} else {
+		v.APIKeyStatus = "direct"
+		v.APIKeyPreview = maskAPIKey(ch.APIKeyEnv)
+	}
+	return v
+}
+
+var envVarRe = regexp.MustCompile(`^[A-Z][A-Z0-9_]*$`)
+
+func looksLikeEnvVar(s string) bool {
+	return envVarRe.MatchString(s)
+}
+
 // --- Channel & Group CRUD (delegates to repo, auto-reloads) ---
 
-func (s *LLMProxyService) ListChannelConfigs() ([]model.LLMChannel, error) {
-	return s.channelRepo.List()
+func (s *LLMProxyService) ListChannelConfigs() ([]ChannelConfigView, error) {
+	channels, err := s.channelRepo.List()
+	if err != nil {
+		return nil, err
+	}
+	views := make([]ChannelConfigView, 0, len(channels))
+	for i := range channels {
+		views = append(views, channelToView(&channels[i]))
+	}
+	return views, nil
 }
 
 func (s *LLMProxyService) GetChannelConfig(id uint) (*model.LLMChannel, error) {

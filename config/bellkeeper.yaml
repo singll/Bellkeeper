@@ -101,6 +101,18 @@ llm_proxy:
           model: "qwen3.5-plus"
           weight: 2
 
+    - name: "pool-pkb"
+      description: "PKB 知识卡片池（Kimi K2.6 主力，长上下文 + 高质量中文输出）"
+      strategy: "priority-health"
+      sticky_ttl_seconds: 900
+      members:
+        - channel: "kimi-direct"
+          model: "kimi-k2.6"
+          weight: 5
+        - channel: "deepseek-direct"
+          model: "deepseek-chat"
+          weight: 2
+
   channels:
     - name: siliconflow-qwen3-8b
       base_url: https://api.siliconflow.cn
@@ -170,6 +182,7 @@ llm_proxy:
       priority: 3
       models:
         - moonshot-v1-128k
+        - kimi-k2.6
       is_enabled: true
 
 file_ingestion:

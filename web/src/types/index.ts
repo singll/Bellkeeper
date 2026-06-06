@@ -143,6 +143,8 @@ export interface LLMChannelConfig {
   name: string
   base_url: string
   api_key_env: string
+  api_key_status: 'configured' | 'missing' | 'direct'  // resolved from env var
+  api_key_preview: string  // masked preview e.g. "sk-o...Lvr"
   provider_type: string  // "openai" | "anthropic"
   rpm: number
   rpd: number
