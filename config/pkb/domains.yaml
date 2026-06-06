@@ -1,0 +1,49 @@
+# PKB 领域配置 —— 用户「调方向」的主战场（改本文件即调策略，下次 pkb-curate 运行即生效，无需重编/重启）
+# 详见 doc/PKB-IMPLEMENTATION.md §4.2 / §4.5
+
+# 全局默认（可被单个领域覆盖）
+defaults:
+  vault_threshold: 7.0       # final_score >= 此值 → 进 vault（原子化重构）
+  archive_threshold: 4.0     # final_score >= 此值且 < vault_threshold → 进 archive；< 此值 → discard
+  weights:                   # 三维加权（和应为 1.0）
+    relevance: 0.4
+    depth: 0.3
+    actionability: 0.3
+  score_model: pool-summary        # 打分用的 LLM Proxy 虚拟组（换模型=改这里）
+  reconstruct_model: pool-summary  # 重构用的虚拟组（想用更强模型改这里即可）
+  per_run: 5                       # 单轮处理量上限（护栏，可被 --per-run 覆盖）
+  content_truncate: 8000           # 喂给 LLM 的正文截断长度（字符）
+
+# 领域清单：新增领域=加一个 - name 块；改关键词/阈值只动对应块
+domains:
+  - name: programming
+    display: 编程
+    vault_subpath: vault/编程
+    keywords: [java, .net, csharp, golang, go, rust, 前端, react, vue, typescript, 后端, 架构, 微服务]
+
+  - name: security
+    display: 网络安全
+    vault_subpath: vault/安全
+    keywords: [渗透测试, 代码审计, 逆向, 安卓, android, 内网渗透, 域渗透, 安全合规, owasp, cve, poc, exp, 漏洞]
+
+  - name: cs-fundamentals
+    display: 计算机基础
+    vault_subpath: vault/基础
+    keywords: [算法, 数据结构, 操作系统, 网络协议, tcp, http, 运维, linux, 容器, k8s, 数据库]
+
+  - name: ai
+    display: 人工智能
+    vault_subpath: vault/AI
+    keywords: [大模型, llm, nlp, 机器学习, 深度学习, 强化学习, rag, agent, transformer, 微调, embedding]
+
+  - name: misc
+    display: 周边杂项
+    vault_subpath: vault/杂项
+    keywords: []                   # 兜底领域（无关键词），matched_domains 都不匹配时归此
+    is_default: true
+
+  - name: news
+    display: 最新资讯
+    vault_subpath: vault/资讯
+    keywords: [发布, release, 新版本, 趋势, 动态, 快讯]
+    vault_threshold: 8.0           # 资讯门槛更高（时效性内容少进 vault）

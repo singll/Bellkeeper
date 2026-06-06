@@ -8,12 +8,18 @@ import (
 	"github.com/singll/bellkeeper/internal/config"
 	"github.com/singll/bellkeeper/internal/middleware"
 	"github.com/singll/bellkeeper/internal/model"
+	"github.com/singll/bellkeeper/internal/pkb"
 	"github.com/spf13/cobra"
 )
 
 var (
 	cfgFile string
 	version = "1.0.0"
+
+	// pkb-curate flags
+	pkbDryRun bool
+	pkbPerRun int
+	pkbCfgDir string
 )
 
 func main() {
@@ -45,7 +51,20 @@ func main() {
 		Run:   runMigrate,
 	}
 
-	rootCmd.AddCommand(serveCmd, versionCmd, migrateCmd)
+	pkbCurateCmd := &cobra.Command{
+		Use:   "pkb-curate",
+		Short: "Run one PKB maintenance pass (score → triage → reconstruct → reindex)",
+		Long: `pkb-curate scores raw articles via the LLM Proxy, triages them into archive/vault
+by the thresholds in config/pkb/domains.yaml, reconstructs high-value ones into
+Obsidian cards, then rebuilds the search index. It runs once and exits.
+Steer behavior by editing config/pkb/ (domains, prompts, thresholds) — no rebuild needed.`,
+		Run: runPkbCurate,
+	}
+	pkbCurateCmd.Flags().BoolVar(&pkbDryRun, "dry-run", false, "score and print decisions without moving/writing files or reindexing")
+	pkbCurateCmd.Flags().IntVar(&pkbPerRun, "per-run", 0, "max articles to process this run (0 = use domains.yaml defaults.per_run)")
+	pkbCurateCmd.Flags().StringVar(&pkbCfgDir, "pkb-config", "config/pkb", "directory holding domains.yaml + prompts/")
+
+	rootCmd.AddCommand(serveCmd, versionCmd, migrateCmd, pkbCurateCmd)
 
 	if err := rootCmd.Execute(); err != nil {
 		fmt.Println(err)
@@ -95,4 +114,32 @@ func runMigrate(cmd *cobra.Command, args []string) {
 	}
 
 	fmt.Println("Database migrations completed successfully")
+}
+
+func runPkbCurate(cmd *cobra.Command, args []string) {
+	cfg, err := config.Load(cfgFile)
+	if err != nil {
+		fmt.Fprintf(os.Stderr, "Failed to load config: %v\n", err)
+		os.Exit(1)
+	}
+
+	if err := middleware.InitLogger(cfg.Logging.Level); err != nil {
+		fmt.Fprintf(os.Stderr, "Failed to initialize logger: %v\n", err)
+		os.Exit(1)
+	}
+
+	curator, err := pkb.NewCurator(cfg, pkb.Options{
+		ConfigDir: pkbCfgDir,
+		DryRun:    pkbDryRun,
+		PerRun:    pkbPerRun,
+	})
+	if err != nil {
+		fmt.Fprintf(os.Stderr, "Failed to init pkb curator: %v\n", err)
+		os.Exit(1)
+	}
+
+	if err := curator.Run(); err != nil {
+		fmt.Fprintf(os.Stderr, "pkb-curate run failed: %v\n", err)
+		os.Exit(1)
+	}
 }
