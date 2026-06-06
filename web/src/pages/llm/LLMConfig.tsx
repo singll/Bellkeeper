@@ -29,8 +29,13 @@ const LLMConfig: Component = () => {
   const [saving, setSaving] = createSignal(false)
 
   // Credentials
+  // NOTE: createResource must be given editingCredChannelId as a reactive SOURCE
+  // (two-arg form). Passing a single fetcher that reads the signal internally does
+  // NOT re-fetch on channel switch — the fetcher runs untracked and only once, so
+  // every channel would show the last-fetched channel's credentials.
   const [credentialsData, { refetch: refetchCredentials }] = createResource(
-    () => editingCredChannelId() ? llmProxyApi.listChannelCredentials(editingCredChannelId()!) : null
+    editingCredChannelId,
+    (channelId) => llmProxyApi.listChannelCredentials(channelId)
   )
   const credentials = () => credentialsData()?.data || []
   const [credForm, setCredForm] = createSignal({ provider_type: '', credential: '' })
