@@ -67,6 +67,18 @@ func toCredentialView(c *model.LLMChannelCredential) ChannelCredentialView {
 	return v
 }
 
+// reloadAfterCredentialChange reloads runtime config so a credential mutation takes
+// effect immediately — a channel's API key is resolved into Channel.Config only at
+// load time, so without this a newly added/edited key would not be used until the
+// next restart or explicit reload. The credential row is already persisted, so a
+// reload failure is logged rather than propagated (Channel/Group CRUD reload alike).
+func (s *LLMProxyService) reloadAfterCredentialChange(op string) {
+	if err := s.Reload(); err != nil {
+		middleware.GetLogger().Warn("reload after credential change failed; change persisted, manual reload may be needed",
+			zap.String("op", op), zap.Error(err))
+	}
+}
+
 // CreateChannelCredential encrypts and stores a new credential for a channel,
 // returning the masked view. The channel must exist.
 func (s *LLMProxyService) CreateChannelCredential(channelID uint, purpose, source, envVarName, providerType, label, plaintext string, priority int) (*ChannelCredentialView, error) {
@@ -113,6 +125,7 @@ func (s *LLMProxyService) CreateChannelCredential(channelID uint, purpose, sourc
 		}
 	}
 	v := toCredentialView(c)
+	s.reloadAfterCredentialChange("create")
 	return &v, nil
 }
 
@@ -181,6 +194,7 @@ func (s *LLMProxyService) UpdateChannelCredential(id uint, providerType, status,
 		return nil, fmt.Errorf("update credential: %w", err)
 	}
 	v := toCredentialView(c)
+	s.reloadAfterCredentialChange("update")
 	return &v, nil
 }
 
@@ -192,6 +206,7 @@ func (s *LLMProxyService) DeleteChannelCredential(id uint) error {
 	if err := s.credentialRepo.Delete(id); err != nil {
 		return fmt.Errorf("delete credential: %w", err)
 	}
+	s.reloadAfterCredentialChange("delete")
 	return nil
 }
 

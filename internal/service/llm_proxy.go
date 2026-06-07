@@ -776,31 +776,42 @@ func (s *LLMProxyService) Reload() error {
 	return nil
 }
 
-func (s *LLMProxyService) dbChannelToConfig(ch model.LLMChannel) config.ChannelConfig {
-	apiKey := ""
+// resolveChannelKey returns the effective API key for a channel and its source:
+// "credential" (DB-stored, purpose=api) | "env" (APIKeyEnv resolved from the
+// environment) | "literal" (APIKeyEnv holds a raw key) | "" (none available). A DB
+// credential always takes precedence over the environment variable. Both
+// dbChannelToConfig (the key actually sent upstream) and channelToView (the status
+// shown in the UI) call this, so the displayed status can never disagree with the
+// key in use.
+func (s *LLMProxyService) resolveChannelKey(ch *model.LLMChannel) (key, source string) {
 	if s.credentialRepo != nil {
-		resolved, err := s.ResolveCredential(ch.ID, "api")
-		if err != nil {
+		if resolved, err := s.ResolveCredential(ch.ID, "api"); err != nil {
 			middleware.GetLogger().Warn("resolve credential failed, falling back to APIKeyEnv",
 				zap.String("channel", ch.Name), zap.Error(err))
 		} else if resolved != "" {
-			apiKey = resolved
+			return resolved, "credential"
 		}
 	}
-	if apiKey == "" && ch.APIKeyEnv != "" {
-		apiKey = os.Getenv(ch.APIKeyEnv)
-		if apiKey == "" {
-			if envutil.LooksLikeEnvVar(ch.APIKeyEnv) {
-				middleware.GetLogger().Warn("channel API key env var not set",
-					zap.String("channel", ch.Name),
-					zap.String("env_var", ch.APIKeyEnv))
-			} else {
-				middleware.GetLogger().Warn("channel api_key_env is not a valid env var name, treating as direct key",
-					zap.String("channel", ch.Name),
-					zap.String("api_key_env", maskAPIKey(ch.APIKeyEnv)))
-				apiKey = ch.APIKeyEnv
-			}
-		}
+	if ch.APIKeyEnv == "" {
+		return "", ""
+	}
+	if v := os.Getenv(ch.APIKeyEnv); v != "" {
+		return v, "env"
+	}
+	if envutil.LooksLikeEnvVar(ch.APIKeyEnv) {
+		return "", "" // looks like an env-var name but unset → no key available
+	}
+	return ch.APIKeyEnv, "literal" // not an env-var name → legacy literal key
+}
+
+func (s *LLMProxyService) dbChannelToConfig(ch model.LLMChannel) config.ChannelConfig {
+	apiKey, source := s.resolveChannelKey(&ch)
+	if apiKey == "" && envutil.LooksLikeEnvVar(ch.APIKeyEnv) {
+		middleware.GetLogger().Warn("channel API key env var not set",
+			zap.String("channel", ch.Name), zap.String("env_var", ch.APIKeyEnv))
+	} else if source == "literal" {
+		middleware.GetLogger().Warn("channel api_key_env is not a valid env var name, treating as direct key",
+			zap.String("channel", ch.Name), zap.String("api_key_env", maskAPIKey(ch.APIKeyEnv)))
 	}
 	providerType := ch.ProviderType
 	if providerType == "" {
@@ -895,23 +906,19 @@ func maskAPIKey(s string) string {
 	return s[:4] + "..." + s[n-4:]
 }
 
-func channelToView(ch *model.LLMChannel) ChannelConfigView {
+func (s *LLMProxyService) channelToView(ch *model.LLMChannel) ChannelConfigView {
 	v := ChannelConfigView{LLMChannel: *ch}
-	if ch.APIKeyEnv == "" {
-		v.APIKeyStatus = "missing"
-		v.APIKeyPreview = ""
-		return v
-	}
-	resolved := os.Getenv(ch.APIKeyEnv)
-	if resolved != "" {
+	key, source := s.resolveChannelKey(ch)
+	switch source {
+	case "credential", "env":
 		v.APIKeyStatus = "configured"
-		v.APIKeyPreview = maskAPIKey(resolved)
-	} else if envutil.LooksLikeEnvVar(ch.APIKeyEnv) {
+		v.APIKeyPreview = maskAPIKey(key)
+	case "literal":
+		v.APIKeyStatus = "direct"
+		v.APIKeyPreview = maskAPIKey(key)
+	default:
 		v.APIKeyStatus = "missing"
 		v.APIKeyPreview = ""
-	} else {
-		v.APIKeyStatus = "direct"
-		v.APIKeyPreview = maskAPIKey(ch.APIKeyEnv)
 	}
 	return v
 }
@@ -925,7 +932,7 @@ func (s *LLMProxyService) ListChannelConfigs() ([]ChannelConfigView, error) {
 	}
 	views := make([]ChannelConfigView, 0, len(channels))
 	for i := range channels {
-		views = append(views, channelToView(&channels[i]))
+		views = append(views, s.channelToView(&channels[i]))
 	}
 	return views, nil
 }
