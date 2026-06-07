@@ -9,10 +9,10 @@ defaults:
     relevance: 0.4
     depth: 0.3
     actionability: 0.3
-  score_model: pool-pkb        # 打分用的 LLM Proxy 虚拟组（moonshot api / kimi-k2.6）
-  reconstruct_model: pool-pkb  # 重构用的 LLM Proxy 虚拟组（moonshot api / kimi-k2.6）
-  score_temperature: 1.0           # kimi-k2.6 是推理模型，仅接受 temperature=1；换非推理模型可调低（如 0.2）求稳定
-  reconstruct_temperature: 1.0     # 同上；换非推理模型可设 0.4
+  score_model: pool-summary    # 打分用快模型组（deepseek/qwen，便宜快，适合批量打分）
+  reconstruct_model: pool-pkb  # 重构用 kimi-k2.6（moonshot，推理强；仅 >=7 高分文章触发，量少）
+  score_temperature: 0.2           # 快模型允许低温，求稳定 JSON
+  reconstruct_temperature: 1.0     # kimi-k2.6 是推理模型，仅接受 temperature=1
   per_run: 5                       # 单轮处理量上限（护栏，可被 --per-run 覆盖）
   content_truncate: 8000           # 喂给 LLM 的正文截断长度（字符）
 
