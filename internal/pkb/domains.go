@@ -20,10 +20,12 @@ type Defaults struct {
 	VaultThreshold   float64 `yaml:"vault_threshold"`
 	ArchiveThreshold float64 `yaml:"archive_threshold"`
 	Weights          Weights `yaml:"weights"`
-	ScoreModel       string  `yaml:"score_model"`
-	ReconstructModel string  `yaml:"reconstruct_model"`
-	PerRun           int     `yaml:"per_run"`
-	ContentTruncate  int     `yaml:"content_truncate"`
+	ScoreModel             string  `yaml:"score_model"`
+	ReconstructModel       string  `yaml:"reconstruct_model"`
+	ScoreTemperature       float64 `yaml:"score_temperature"`       // 0=用默认 0.2；kimi-k2.6 等推理模型须设 1.0
+	ReconstructTemperature float64 `yaml:"reconstruct_temperature"` // 0=用默认 0.4；kimi-k2.6 等推理模型须设 1.0
+	PerRun                 int     `yaml:"per_run"`
+	ContentTruncate        int     `yaml:"content_truncate"`
 }
 
 // Domain 单个领域
@@ -73,6 +75,12 @@ func LoadDomains(path string) (*DomainsConfig, error) {
 	}
 	if d.ReconstructModel == "" {
 		d.ReconstructModel = d.ScoreModel
+	}
+	if d.ScoreTemperature == 0 {
+		d.ScoreTemperature = 0.2
+	}
+	if d.ReconstructTemperature == 0 {
+		d.ReconstructTemperature = 0.4
 	}
 	if d.PerRun <= 0 {
 		d.PerRun = 5
