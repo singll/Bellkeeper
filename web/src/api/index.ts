@@ -327,9 +327,9 @@ export const llmProxyApi = {
   // Channel credentials (Tier 6, encrypted at rest; API returns a masked preview only)
   listChannelCredentials: (channelId: number) =>
     request<{ data: LLMChannelCredentialView[] }>(`/llm/config/channels/${channelId}/credentials`),
-  createChannelCredential: (channelId: number, data: { provider_type: string; credential: string }) =>
+  createChannelCredential: (channelId: number, data: { purpose: string; source: string; env_var_name?: string; provider_type?: string; label?: string; credential?: string; priority?: number }) =>
     request<{ data: LLMChannelCredentialView }>(`/llm/config/channels/${channelId}/credentials`, { method: 'POST', body: JSON.stringify(data) }),
-  updateChannelCredential: (id: number, data: { provider_type?: string; status?: string; credential?: string }) =>
+  updateChannelCredential: (id: number, data: { provider_type?: string; status?: string; credential?: string; purpose?: string; source?: string; env_var_name?: string; label?: string; priority?: number }) =>
     request<{ data: LLMChannelCredentialView }>(`/llm/config/credentials/${id}`, { method: 'PUT', body: JSON.stringify(data) }),
   deleteChannelCredential: (id: number) =>
     request<{ message: string }>(`/llm/config/credentials/${id}`, { method: 'DELETE' }),

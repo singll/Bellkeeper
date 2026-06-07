@@ -2,10 +2,13 @@ package service
 
 import (
 	"fmt"
+	"os"
 	"time"
 
+	"github.com/singll/bellkeeper/internal/middleware"
 	"github.com/singll/bellkeeper/internal/model"
 	"github.com/singll/bellkeeper/internal/pkg/crypto"
+	"go.uber.org/zap"
 )
 
 // ChannelCredentialView is the API-safe projection of a stored credential. The
@@ -14,6 +17,7 @@ import (
 type ChannelCredentialView struct {
 	model.LLMChannelCredential
 	CredentialPreview string `json:"credential_preview"`
+	EnvVarResolved    bool   `json:"env_var_resolved"`
 }
 
 // maskSecret renders a credential preview that reveals only the first and last
@@ -32,28 +36,57 @@ func maskSecret(s string) string {
 // toCredentialView decrypts the stored credential to build a masked preview and
 // strips the ciphertext from the returned copy.
 func toCredentialView(c *model.LLMChannelCredential) ChannelCredentialView {
-	preview := ""
-	if plain, err := crypto.Decrypt(c.CredentialJSON); err == nil {
-		preview = maskSecret(plain)
-	} else {
-		preview = "<undecryptable>"
+	v := ChannelCredentialView{LLMChannelCredential: *c}
+	v.CredentialJSON = ""
+	switch c.Source {
+	case "env":
+		if c.EnvVarName != "" {
+			resolved := os.Getenv(c.EnvVarName)
+			v.EnvVarResolved = resolved != ""
+			if resolved != "" {
+				v.CredentialPreview = "$" + c.EnvVarName
+			} else {
+				v.CredentialPreview = "$" + c.EnvVarName + " (未解析)"
+			}
+		}
+	case "direct":
+		if plain, err := crypto.Decrypt(c.CredentialJSON); err == nil {
+			v.CredentialPreview = maskSecret(plain)
+		} else {
+			v.CredentialPreview = "<undecryptable>"
+		}
+	default:
+		if c.CredentialJSON != "" {
+			if plain, err := crypto.Decrypt(c.CredentialJSON); err == nil {
+				v.CredentialPreview = maskSecret(plain)
+			} else {
+				v.CredentialPreview = "<undecryptable>"
+			}
+		}
 	}
-	v := ChannelCredentialView{LLMChannelCredential: *c, CredentialPreview: preview}
-	v.CredentialJSON = "" // defense-in-depth: never carry ciphertext into the DTO
 	return v
 }
 
 // CreateChannelCredential encrypts and stores a new credential for a channel,
 // returning the masked view. The channel must exist.
-func (s *LLMProxyService) CreateChannelCredential(channelID uint, providerType, plaintext string) (*ChannelCredentialView, error) {
+func (s *LLMProxyService) CreateChannelCredential(channelID uint, purpose, source, envVarName, providerType, label, plaintext string, priority int) (*ChannelCredentialView, error) {
 	if s.credentialRepo == nil {
 		return nil, fmt.Errorf("credential repository not initialized")
 	}
 	if channelID == 0 {
 		return nil, fmt.Errorf("channel_id is required")
 	}
-	if plaintext == "" {
-		return nil, fmt.Errorf("credential is required")
+	if purpose == "" {
+		purpose = "api"
+	}
+	if source == "" {
+		source = "direct"
+	}
+	if source == "env" && envVarName == "" {
+		return nil, fmt.Errorf("env_var_name is required when source=env")
+	}
+	if source == "direct" && plaintext == "" {
+		return nil, fmt.Errorf("credential is required when source=direct")
 	}
 	if _, err := s.channelRepo.Get(channelID); err != nil {
 		return nil, fmt.Errorf("channel %d not found: %w", channelID, err)
@@ -61,12 +94,23 @@ func (s *LLMProxyService) CreateChannelCredential(channelID uint, providerType, 
 	now := time.Now()
 	c := &model.LLMChannelCredential{
 		ChannelID:       channelID,
+		Purpose:         purpose,
+		Source:          source,
+		EnvVarName:      envVarName,
+		Label:           label,
+		Priority:        priority,
 		ProviderType:    providerType,
 		Status:          "active",
 		LastRefreshedAt: &now,
 	}
-	if err := s.credentialRepo.Create(c, plaintext); err != nil {
-		return nil, fmt.Errorf("create credential: %w", err)
+	if source == "direct" {
+		if err := s.credentialRepo.Create(c, plaintext); err != nil {
+			return nil, fmt.Errorf("create credential: %w", err)
+		}
+	} else {
+		if err := s.credentialRepo.Create(c, ""); err != nil {
+			return nil, fmt.Errorf("create credential: %w", err)
+		}
 	}
 	v := toCredentialView(c)
 	return &v, nil
@@ -90,7 +134,7 @@ func (s *LLMProxyService) ListChannelCredentials(channelID uint) ([]ChannelCrede
 
 // UpdateChannelCredential updates a credential's metadata and, when plaintext is
 // non-empty, re-encrypts the secret (refreshing LastRefreshedAt).
-func (s *LLMProxyService) UpdateChannelCredential(id uint, providerType, status, plaintext string) (*ChannelCredentialView, error) {
+func (s *LLMProxyService) UpdateChannelCredential(id uint, providerType, status, plaintext, purpose, source, envVarName, label string, priority *int) (*ChannelCredentialView, error) {
 	if s.credentialRepo == nil {
 		return nil, fmt.Errorf("credential repository not initialized")
 	}
@@ -103,6 +147,29 @@ func (s *LLMProxyService) UpdateChannelCredential(id uint, providerType, status,
 	}
 	if status != "" {
 		c.Status = status
+	}
+	if purpose != "" {
+		c.Purpose = purpose
+	}
+	if source == "direct" && c.Source == "env" {
+		c.EnvVarName = ""
+	} else if source == "env" && c.Source == "direct" {
+		c.CredentialJSON = ""
+	}
+	if source != "" {
+		c.Source = source
+	}
+	if envVarName != "" {
+		c.EnvVarName = envVarName
+	}
+	if label != "" {
+		c.Label = label
+	}
+	if priority != nil {
+		c.Priority = *priority
+	}
+	if source == "env" && envVarName == "" && c.EnvVarName == "" {
+		return nil, fmt.Errorf("env_var_name is required when source=env")
 	}
 	if plaintext != "" {
 		now := time.Now()
@@ -135,6 +202,48 @@ func (s *LLMProxyService) GetDecryptedCredential(id uint) (string, error) {
 		return "", fmt.Errorf("credential repository not initialized")
 	}
 	return s.credentialRepo.GetDecrypted(id)
+}
+
+func (s *LLMProxyService) ResolveCredential(channelID uint, purpose string) (string, error) {
+	if s.credentialRepo == nil {
+		return "", fmt.Errorf("credential repository not initialized")
+	}
+	creds, err := s.credentialRepo.ListByChannel(channelID)
+	if err != nil {
+		return "", fmt.Errorf("list credentials for channel %d: %w", channelID, err)
+	}
+	var active []model.LLMChannelCredential
+	for _, c := range creds {
+		if c.Purpose == purpose && c.Status == "active" {
+			active = append(active, c)
+		}
+	}
+	for _, c := range active {
+		switch c.Source {
+		case "env":
+			if c.EnvVarName == "" {
+				continue
+			}
+			if v := os.Getenv(c.EnvVarName); v != "" {
+				return v, nil
+			}
+		case "direct":
+			plain, err := s.credentialRepo.GetDecrypted(c.ID)
+			if err != nil {
+				middleware.GetLogger().Warn("credential decrypt failed, trying next",
+					zap.Uint("credential_id", c.ID), zap.Uint("channel_id", channelID), zap.Error(err))
+				continue
+			}
+			if plain != "" {
+				return plain, nil
+			}
+		}
+	}
+	if len(active) > 0 {
+		middleware.GetLogger().Warn("no usable credential found despite active records",
+			zap.Uint("channel_id", channelID), zap.String("purpose", purpose), zap.Int("active_count", len(active)))
+	}
+	return "", nil
 }
 
 // ChannelBalanceHistory returns recent balance snapshots for a channel, newest first.

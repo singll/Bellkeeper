@@ -11,7 +11,6 @@ import (
 	"net/http"
 	"os"
 	"path/filepath"
-	"regexp"
 	"sort"
 	"strconv"
 	"strings"
@@ -24,6 +23,7 @@ import (
 	llmerrors "github.com/singll/bellkeeper/internal/llm/errors"
 	"github.com/singll/bellkeeper/internal/middleware"
 	"github.com/singll/bellkeeper/internal/model"
+	"github.com/singll/bellkeeper/internal/pkg/envutil"
 	"github.com/singll/bellkeeper/internal/pkg/httpclient"
 	"github.com/singll/bellkeeper/internal/repository"
 	"go.uber.org/zap"
@@ -290,7 +290,20 @@ func (s *LLMProxyService) registerBalanceProviders() {
 		if ch.Config.BalanceProviderType == "" {
 			continue
 		}
-		apiKey := ch.Config.APIKey
+		apiKey := ""
+		if s.credentialRepo != nil {
+			if resolved, err := s.ResolveCredential(ch.Config.ID, "balance"); err == nil && resolved != "" {
+				apiKey = resolved
+			}
+			if apiKey == "" {
+				if resolved, err := s.ResolveCredential(ch.Config.ID, "api"); err == nil && resolved != "" {
+					apiKey = resolved
+				}
+			}
+		}
+		if apiKey == "" {
+			apiKey = ch.Config.APIKey
+		}
 		if apiKey == "" {
 			continue
 		}
@@ -663,7 +676,7 @@ func (s *LLMProxyService) loadFromDB() error {
 	modelMap := make(map[string][]*Channel)
 
 	for _, dbCh := range dbChannels {
-		chCfg := dbChannelToConfig(dbCh)
+		chCfg := s.dbChannelToConfig(dbCh)
 		ch := &Channel{
 			Config: chCfg,
 			Bucket: NewTokenBucket(s.effectiveBucketRPM(chCfg), chCfg.RPD, s.cfg.DefaultBucketRPM),
@@ -763,12 +776,21 @@ func (s *LLMProxyService) Reload() error {
 	return nil
 }
 
-func dbChannelToConfig(ch model.LLMChannel) config.ChannelConfig {
+func (s *LLMProxyService) dbChannelToConfig(ch model.LLMChannel) config.ChannelConfig {
 	apiKey := ""
-	if ch.APIKeyEnv != "" {
+	if s.credentialRepo != nil {
+		resolved, err := s.ResolveCredential(ch.ID, "api")
+		if err != nil {
+			middleware.GetLogger().Warn("resolve credential failed, falling back to APIKeyEnv",
+				zap.String("channel", ch.Name), zap.Error(err))
+		} else if resolved != "" {
+			apiKey = resolved
+		}
+	}
+	if apiKey == "" && ch.APIKeyEnv != "" {
 		apiKey = os.Getenv(ch.APIKeyEnv)
 		if apiKey == "" {
-			if looksLikeEnvVar(ch.APIKeyEnv) {
+			if envutil.LooksLikeEnvVar(ch.APIKeyEnv) {
 				middleware.GetLogger().Warn("channel API key env var not set",
 					zap.String("channel", ch.Name),
 					zap.String("env_var", ch.APIKeyEnv))
@@ -884,7 +906,7 @@ func channelToView(ch *model.LLMChannel) ChannelConfigView {
 	if resolved != "" {
 		v.APIKeyStatus = "configured"
 		v.APIKeyPreview = maskAPIKey(resolved)
-	} else if looksLikeEnvVar(ch.APIKeyEnv) {
+	} else if envutil.LooksLikeEnvVar(ch.APIKeyEnv) {
 		v.APIKeyStatus = "missing"
 		v.APIKeyPreview = ""
 	} else {
@@ -892,12 +914,6 @@ func channelToView(ch *model.LLMChannel) ChannelConfigView {
 		v.APIKeyPreview = maskAPIKey(ch.APIKeyEnv)
 	}
 	return v
-}
-
-var envVarRe = regexp.MustCompile(`^[A-Z][A-Z0-9_]*$`)
-
-func looksLikeEnvVar(s string) bool {
-	return envVarRe.MatchString(s)
 }
 
 // --- Channel & Group CRUD (delegates to repo, auto-reloads) ---

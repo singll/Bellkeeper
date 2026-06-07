@@ -52,7 +52,7 @@ func (r *LLMChannelCredentialRepository) Get(id uint) (*model.LLMChannelCredenti
 // ListByChannel returns all credential rows for a channel (CredentialJSON encrypted).
 func (r *LLMChannelCredentialRepository) ListByChannel(channelID uint) ([]model.LLMChannelCredential, error) {
 	var creds []model.LLMChannelCredential
-	err := r.db.Where("channel_id = ?", channelID).Order("id DESC").Find(&creds).Error
+	err := r.db.Where("channel_id = ?", channelID).Order("priority ASC, id ASC").Find(&creds).Error
 	return creds, err
 }
 

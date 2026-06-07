@@ -25,7 +25,6 @@ const LLMOverview: Component = () => {
   const circuitBrokenChannels = createMemo(() => channels().filter((item) => item.health.state === 'open').length)
   const halfOpenChannels = createMemo(() => channels().filter((item) => item.health.state === 'half_open').length)
 
-  // Estimated cost (from usage aggregates) vs real balance (from upstream snapshots)
   const estCostCents = createMemo(() => usageRows().reduce((sum, r) => sum + (r.cost_cents || 0), 0))
   const topModels = createMemo(() =>
     [...usageRows()].sort((a, b) => (b.cost_cents || 0) - (a.cost_cents || 0)).slice(0, 5)
@@ -50,7 +49,6 @@ const LLMOverview: Component = () => {
     return { label: '运行正常', badge: 'badge-success', description: '所有已启用渠道均可正常服务' }
   })
 
-  // Health-derived issues (live inference from channel/group state, distinct from persisted alert events)
   const healthIssues = createMemo(() => {
     const items: string[] = []
     const openChs = channels().filter((item) => item.health.state === 'open')
@@ -87,7 +85,6 @@ const LLMOverview: Component = () => {
 
   return (
     <div class="animate-fade-in">
-      {/* Header */}
       <div class="flex flex-col xl:flex-row xl:items-center justify-between gap-4 mb-6">
         <div>
           <h1 class="text-2xl font-bold text-white">LLM Proxy</h1>
@@ -110,7 +107,6 @@ const LLMOverview: Component = () => {
         </div>
       }>
         <div class="space-y-6">
-          {/* Stats Cards */}
           <div class="grid grid-cols-1 sm:grid-cols-2 xl:grid-cols-4 gap-4">
             <div class="stat-card">
               <div class="stat-label">渠道总数</div>
@@ -134,9 +130,7 @@ const LLMOverview: Component = () => {
             </div>
           </div>
 
-          {/* Estimated cost vs real balance */}
           <div class="grid grid-cols-1 xl:grid-cols-2 gap-6">
-            {/* Estimated cost (from usage) */}
             <div class="card">
               <div class="flex items-center justify-between mb-4">
                 <h2 class="text-lg font-semibold text-white">预估成本</h2>
@@ -164,7 +158,6 @@ const LLMOverview: Component = () => {
               </Show>
             </div>
 
-            {/* Real balance (from /llm/balances) */}
             <div class="card">
               <div class="flex items-center justify-between mb-4">
                 <h2 class="text-lg font-semibold text-white">真实余额</h2>
@@ -198,11 +191,10 @@ const LLMOverview: Component = () => {
             </div>
           </div>
 
-          {/* Recent alerts strip */}
           <div class="card">
             <div class="flex items-center justify-between mb-4">
               <h2 class="text-lg font-semibold text-white">最近告警</h2>
-              <A href="/llm/alerts" class="text-sm text-primary-400 hover:text-primary-300">查看全部 →</A>
+              <A href="/llm/logs-alerts" class="text-sm text-primary-400 hover:text-primary-300">查看全部 →</A>
             </div>
             <Show
               when={recentAlerts().length > 0}
@@ -225,9 +217,7 @@ const LLMOverview: Component = () => {
             </Show>
           </div>
 
-          {/* Health summary + resource overview */}
           <div class="grid grid-cols-1 xl:grid-cols-[1.3fr_1fr] gap-6">
-            {/* Global Health Summary */}
             <div class="card">
               <div class="flex items-center justify-between mb-4">
                 <h2 class="text-lg font-semibold text-white">全局健康摘要</h2>
@@ -251,7 +241,6 @@ const LLMOverview: Component = () => {
               </Show>
             </div>
 
-            {/* Resource Overview */}
             <div class="card">
               <h2 class="text-lg font-semibold text-white mb-4">资源概览</h2>
               <div class="space-y-4">
@@ -266,7 +255,6 @@ const LLMOverview: Component = () => {
             </div>
           </div>
 
-          {/* Model Group Summary */}
           <div>
             <div class="flex items-center justify-between mb-4">
               <h2 class="text-lg font-semibold text-white">模型组摘要</h2>
@@ -277,7 +265,7 @@ const LLMOverview: Component = () => {
               fallback={
                 <div class="card empty-state">
                   <p class="empty-state-title">暂无模型组</p>
-                  <p class="empty-state-description">请在<A href="/llm/config" class="text-primary-400 hover:text-primary-300 ml-1">配置</A>页面中创建模型组。</p>
+                  <p class="empty-state-description">请在<A href="/llm/groups-routing" class="text-primary-400 hover:text-primary-300 ml-1">模型组与路由</A>页面中创建模型组。</p>
                 </div>
               }
             >

@@ -355,14 +355,19 @@ func (h *LLMProxyHandler) CreateChannelCredential(c *gin.Context) {
 		return
 	}
 	var req struct {
+		Purpose      string `json:"purpose"`
+		Source       string `json:"source"`
+		EnvVarName   string `json:"env_var_name"`
 		ProviderType string `json:"provider_type"`
+		Label        string `json:"label"`
 		Credential   string `json:"credential"`
+		Priority     int    `json:"priority"`
 	}
 	if err := c.ShouldBindJSON(&req); err != nil {
 		response.BadRequest(c, err.Error())
 		return
 	}
-	view, err := h.svc.CreateChannelCredential(uint(id), req.ProviderType, req.Credential)
+	view, err := h.svc.CreateChannelCredential(uint(id), req.Purpose, req.Source, req.EnvVarName, req.ProviderType, req.Label, req.Credential, req.Priority)
 	if err != nil {
 		response.InternalError(c, err.Error())
 		return
@@ -382,12 +387,17 @@ func (h *LLMProxyHandler) UpdateChannelCredential(c *gin.Context) {
 		ProviderType string `json:"provider_type"`
 		Status       string `json:"status"`
 		Credential   string `json:"credential"`
+		Purpose      string `json:"purpose"`
+		Source       string `json:"source"`
+		EnvVarName   string `json:"env_var_name"`
+		Label        string `json:"label"`
+		Priority     *int   `json:"priority"`
 	}
 	if err := c.ShouldBindJSON(&req); err != nil {
 		response.BadRequest(c, err.Error())
 		return
 	}
-	view, err := h.svc.UpdateChannelCredential(uint(id), req.ProviderType, req.Status, req.Credential)
+	view, err := h.svc.UpdateChannelCredential(uint(id), req.ProviderType, req.Status, req.Credential, req.Purpose, req.Source, req.EnvVarName, req.Label, req.Priority)
 	if err != nil {
 		response.InternalError(c, err.Error())
 		return

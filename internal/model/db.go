@@ -2,11 +2,14 @@ package model
 
 import (
 	"encoding/json"
+	"fmt"
 	"strings"
 	"time"
 
 	"github.com/singll/bellkeeper/internal/config"
 	"github.com/singll/bellkeeper/internal/middleware"
+	"github.com/singll/bellkeeper/internal/pkg/crypto"
+	"github.com/singll/bellkeeper/internal/pkg/envutil"
 	"go.uber.org/zap"
 	"gorm.io/driver/postgres"
 	"gorm.io/gorm"
@@ -87,6 +90,11 @@ func AutoMigrate(db *gorm.DB) error {
 
 	if err := SeedLogSources(db); err != nil {
 		return err
+	}
+
+	if err := MigrateChannelCredentials(db); err != nil {
+		middleware.GetLogger().Warn("credential migration failed (non-fatal)",
+			zap.Error(err))
 	}
 
 	return SeedMatrixPlatform(db)
@@ -344,6 +352,156 @@ func SeedDatasetMappings(db *gorm.DB) error {
 				middleware.GetLogger().Warn("failed to associate tag with dataset",
 					zap.String("tag", s.TagName), zap.String("dataset", s.Name), zap.Error(err))
 			}
+		}
+	}
+
+	return nil
+}
+
+var balanceSecretKeys = []string{"access_secret", "session", "ak_secret", "secret_key"}
+
+func MigrateChannelCredentials(db *gorm.DB) error {
+	if !crypto.Enabled() {
+		middleware.GetLogger().Warn("credential encryption is DISABLED (BELLKEEPER_CREDENTIAL_KEY unset); " +
+			"migrated credentials will be stored as plaintext — set the key and restart before relying on encryption")
+	}
+
+	var channels []LLMChannel
+	if err := db.Find(&channels).Error; err != nil {
+		return fmt.Errorf("fetch channels for credential migration: %w", err)
+	}
+
+	for _, ch := range channels {
+		var apiCredCount int64
+		if err := db.Model(&LLMChannelCredential{}).Where("channel_id = ? AND purpose = ?", ch.ID, "api").Count(&apiCredCount).Error; err != nil {
+			middleware.GetLogger().Warn("count api credentials failed, skipping channel",
+				zap.String("channel", ch.Name), zap.Error(err))
+			continue
+		}
+		if apiCredCount == 0 && ch.APIKeyEnv != "" {
+			cred := LLMChannelCredential{
+				ChannelID: ch.ID,
+				Purpose:   "api",
+				IsPreset:  true,
+				Status:    "active",
+			}
+			now := time.Now()
+			cred.LastRefreshedAt = &now
+			if envutil.LooksLikeEnvVar(ch.APIKeyEnv) {
+				cred.Source = "env"
+				cred.EnvVarName = ch.APIKeyEnv
+				cred.Label = ch.APIKeyEnv
+				if err := db.Create(&cred).Error; err != nil {
+					middleware.GetLogger().Warn("migrate api/env credential failed",
+						zap.String("channel", ch.Name), zap.Error(err))
+					continue
+				}
+			} else {
+				cred.Source = "direct"
+				cred.Label = "migrated-direct-key"
+				enc, err := crypto.Encrypt(ch.APIKeyEnv)
+				if err != nil {
+					middleware.GetLogger().Warn("encrypt migrated direct key failed",
+						zap.String("channel", ch.Name), zap.Error(err))
+					continue
+				}
+				cred.CredentialJSON = enc
+				if err := db.Create(&cred).Error; err != nil {
+					middleware.GetLogger().Warn("migrate api/direct credential failed",
+						zap.String("channel", ch.Name), zap.Error(err))
+					continue
+				}
+			}
+			middleware.GetLogger().Info("migrated api key to credential",
+				zap.String("channel", ch.Name), zap.String("source", cred.Source))
+		}
+
+		if ch.BalanceConfigJSON == "" {
+			continue
+		}
+		var balCredCount int64
+		if err := db.Model(&LLMChannelCredential{}).Where("channel_id = ? AND purpose = ?", ch.ID, "balance").Count(&balCredCount).Error; err != nil {
+			middleware.GetLogger().Warn("count balance credentials failed, skipping channel",
+				zap.String("channel", ch.Name), zap.Error(err))
+			continue
+		}
+		if balCredCount > 0 {
+			continue
+		}
+
+		var raw map[string]interface{}
+		if err := json.Unmarshal([]byte(ch.BalanceConfigJSON), &raw); err != nil {
+			continue
+		}
+
+		secrets := make(map[string]interface{})
+		nonSecrets := make(map[string]interface{})
+		for k, v := range raw {
+			isSecret := false
+			for _, sk := range balanceSecretKeys {
+				if strings.EqualFold(k, sk) {
+					isSecret = true
+					break
+				}
+			}
+			if isSecret {
+				secrets[k] = v
+			} else {
+				nonSecrets[k] = v
+			}
+		}
+
+		if len(secrets) > 0 {
+			secretJSON, err := json.Marshal(secrets)
+			if err != nil {
+				middleware.GetLogger().Warn("marshal balance secrets failed",
+					zap.String("channel", ch.Name), zap.Error(err))
+				continue
+			}
+			enc, err := crypto.Encrypt(string(secretJSON))
+			if err != nil {
+				middleware.GetLogger().Warn("encrypt balance secrets failed",
+					zap.String("channel", ch.Name), zap.Error(err))
+				continue
+			}
+			cred := LLMChannelCredential{
+				ChannelID:      ch.ID,
+				Purpose:        "balance",
+				Source:         "direct",
+				IsPreset:       true,
+				Label:          "balance-secrets",
+				CredentialJSON: enc,
+				Status:         "active",
+			}
+			now := time.Now()
+			cred.LastRefreshedAt = &now
+
+			err = db.Transaction(func(tx *gorm.DB) error {
+				if err := tx.Create(&cred).Error; err != nil {
+					return fmt.Errorf("create balance credential: %w", err)
+				}
+				if len(nonSecrets) > 0 {
+					cleanJSON, err := json.Marshal(nonSecrets)
+					if err != nil {
+						return fmt.Errorf("marshal non-secret balance config: %w", err)
+					}
+					if err := tx.Model(&LLMChannel{}).Where("id = ?", ch.ID).Update("balance_config_json", string(cleanJSON)).Error; err != nil {
+						return fmt.Errorf("update balance_config_json: %w", err)
+					}
+				} else {
+					if err := tx.Model(&LLMChannel{}).Where("id = ?", ch.ID).Update("balance_config_json", "").Error; err != nil {
+						return fmt.Errorf("clear balance_config_json: %w", err)
+					}
+				}
+				return nil
+			})
+			if err != nil {
+				middleware.GetLogger().Warn("migrate balance credential transaction failed",
+					zap.String("channel", ch.Name), zap.Error(err))
+				continue
+			}
+			middleware.GetLogger().Info("migrated balance secrets to credential",
+				zap.String("channel", ch.Name))
 		}
 	}
 

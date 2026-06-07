@@ -460,13 +460,20 @@ export interface LLMChannelBalanceSnapshot {
 export interface LLMChannelCredentialView {
   id: number
   channel_id: number
+  purpose: string
+  source: string
+  env_var_name: string
+  is_preset: boolean
+  label: string
+  priority: number
   provider_type: string
-  status: string  // active | error | expired
+  status: string
   error_message?: string
   last_refreshed_at: string | null
   created_at: string
   updated_at: string
-  credential_preview: string  // masked, e.g. "abcd...wxyz"
+  credential_preview: string
+  env_var_resolved?: boolean
 }
 
 // LLM Proxy — Conversation sticky bindings (Tier 2)

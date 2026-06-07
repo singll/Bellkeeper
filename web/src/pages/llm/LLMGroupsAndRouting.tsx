@@ -1,8 +1,15 @@
 import { Component, For, Show, createSignal, createResource, createMemo, onMount } from 'solid-js'
-import type { LLMChannelConfig, LLMConversationBinding, LLMModelRateLimit, LLMCodingStrategy, LLMGroupStatus } from '@/types'
+import { createStore, produce } from 'solid-js/store'
+import type { LLMGroupStatus, LLMModelGroupConfig, LLMModelGroupMemberConfig, LLMChannelConfig, LLMConversationBinding, LLMModelRateLimit, LLMCodingStrategy } from '@/types'
 import { llmProxyApi } from '@/api'
 import { useToast } from '@/components/Toast'
+import Modal from '@/components/Modal'
 import {
+  formatPercent,
+  getCircuitBadge,
+  getCircuitLabel,
+  getCircuitDot,
+  getSuccessRateColor,
   deriveTier,
   getTierLabel,
   getTierBadge,
@@ -26,19 +33,26 @@ const STRATEGIES: StrategyOption[] = [
   { value: 'complexity_aware', label: '复杂度自适应', desc: '按请求复杂度动态选层：简单→免费，中等→标准，复杂→高级。' },
 ]
 
-const LLMPools: Component = () => {
+const LLMGroupsAndRouting: Component = () => {
   const toast = useToast()
 
-  const [channelsData, { refetch: refetchChannels }] = createResource(() => llmProxyApi.listChannels())
   const [groupsData, { refetch: refetchGroups }] = createResource(() => llmProxyApi.groupsStatus())
+  const [groupConfigsData, { refetch: refetchGroupConfigs }] = createResource(() => llmProxyApi.listGroups())
+  const [channelsData, { refetch: refetchChannels }] = createResource(() => llmProxyApi.listChannels())
+  const [rateLimitsData, { refetch: refetchRateLimits }] = createResource(() => llmProxyApi.listRateLimits())
 
-  const channels = () => channelsData()?.data || []
   const groups = () => groupsData()?.data || []
+  const groupConfigs = () => groupConfigsData()?.data || []
+  const channels = () => channelsData()?.data || []
   const enabledChannels = createMemo(() => channels().filter((c) => c.is_enabled))
 
-  // Coding strategy (loaded once, mutated locally on switch)
+  const [busyGroup, setBusyGroup] = createSignal<string | null>(null)
   const [strategy, setStrategy] = createSignal<LLMCodingStrategy>('free_first')
   const [savingStrategy, setSavingStrategy] = createSignal(false)
+
+  const [conversations, setConversations] = createSignal<LLMConversationBinding[]>([])
+  const [loadingConvs, setLoadingConvs] = createSignal(true)
+  const [deletingConv, setDeletingConv] = createSignal<string | null>(null)
 
   const loadStrategy = async () => {
     try {
@@ -62,14 +76,6 @@ const LLMPools: Component = () => {
       setSavingStrategy(false)
     }
   }
-
-  // Sticky conversation bindings
-  const [conversations, setConversations] = createSignal<LLMConversationBinding[]>([])
-  const [loadingConvs, setLoadingConvs] = createSignal(true)
-  const [deletingConv, setDeletingConv] = createSignal<string | null>(null)
-
-  // Adaptive rate-limit learning (Tier 3)
-  const [rateLimitsData, { refetch: refetchRateLimits }] = createResource(() => llmProxyApi.listRateLimits())
 
   const loadConversations = async () => {
     setLoadingConvs(true)
@@ -96,12 +102,26 @@ const LLMPools: Component = () => {
     }
   }
 
+  const handleClearSticky = async (name: string) => {
+    setBusyGroup(name)
+    try {
+      const result = await llmProxyApi.clearGroupSticky(name)
+      toast.success(`已清理 ${result.data.cleared} 条粘性绑定`)
+      await refetchGroups()
+    } catch (err) {
+      toast.error('清理失败: ' + (err as Error).message)
+    } finally {
+      setBusyGroup(null)
+    }
+  }
+
   onMount(() => {
     loadStrategy()
     loadConversations()
   })
 
-  // Routing matrix derivation (from channel task_types + tier tags)
+  const refetchAll = () => Promise.all([refetchGroups(), refetchGroupConfigs(), refetchChannels(), loadStrategy(), loadConversations(), refetchRateLimits()])
+
   const usingDefaultTaskTypes = createMemo(
     () => !enabledChannels().some((c) => parseJsonArray(c.task_types).length > 0)
   )
@@ -121,37 +141,84 @@ const LLMPools: Component = () => {
 
   const channelTierMap = createMemo(() => {
     const m: Record<string, string> = {}
-    channels().forEach((c) => {
-      m[c.name] = deriveTier(c.tier, c.is_free)
-    })
+    channels().forEach((c) => { m[c.name] = deriveTier(c.tier, c.is_free) })
     return m
   })
 
-  const handleRefresh = async () => {
-    await Promise.all([refetchChannels(), refetchGroups(), loadStrategy(), loadConversations(), refetchRateLimits()])
-    toast.success('池子路由数据已刷新')
+  const [showGroupModal, setShowGroupModal] = createSignal(false)
+  const [editingGroup, setEditingGroup] = createSignal<LLMModelGroupConfig | null>(null)
+  const [saving, setSaving] = createSignal(false)
+
+  const [grpForm, setGrpForm] = createStore({
+    name: '',
+    description: '',
+    strategy: 'priority-health',
+    sticky_ttl_seconds: 600,
+    members: [] as LLMModelGroupMemberConfig[],
+  })
+
+  const openGroupModal = (g?: LLMModelGroupConfig) => {
+    if (g) {
+      setEditingGroup(g)
+      setGrpForm({ name: g.name, description: g.description, strategy: g.strategy, sticky_ttl_seconds: g.sticky_ttl_seconds, members: g.members.map((m) => ({ channel_name: m.channel_name, model: m.model, weight: m.weight })) })
+    } else {
+      setEditingGroup(null)
+      setGrpForm({ name: '', description: '', strategy: 'priority-health', sticky_ttl_seconds: 600, members: [] })
+    }
+    setShowGroupModal(true)
   }
 
-  const loading = () => channelsData.loading || groupsData.loading
+  const saveGroup = async () => {
+    setSaving(true)
+    try {
+      const data = { name: grpForm.name, description: grpForm.description, strategy: grpForm.strategy, sticky_ttl_seconds: grpForm.sticky_ttl_seconds, members: [...grpForm.members] }
+      const editing = editingGroup()
+      if (editing) { await llmProxyApi.updateGroup(editing.id, data); toast.success('模型组已更新') }
+      else { await llmProxyApi.createGroup(data); toast.success('模型组已创建') }
+      setShowGroupModal(false)
+      await refetchAll()
+    } catch (err) { toast.error('保存失败: ' + (err as Error).message) }
+    finally { setSaving(false) }
+  }
+
+  const deleteGroup = async (id: number) => {
+    if (!confirm('确定删除此模型组？')) return
+    try { await llmProxyApi.deleteGroup(id); toast.success('模型组已删除'); await refetchAll() }
+    catch (err) { toast.error('删除失败: ' + (err as Error).message) }
+  }
+
+  const addGroupMember = () => setGrpForm('members', produce((m) => { m.push({ channel_name: '', model: '', weight: 1 }) }))
+  const removeGroupMember = (index: number) => setGrpForm('members', produce((m) => { m.splice(index, 1) }))
+  const updateGroupMember = (index: number, field: keyof LLMModelGroupMemberConfig, value: string | number) => {
+    setGrpForm('members', index, field, value)
+  }
+
+  const loading = () => groupsData.loading || groupConfigsData.loading || channelsData.loading
 
   return (
     <div class="animate-fade-in">
-      {/* Header */}
       <div class="flex flex-col xl:flex-row xl:items-center justify-between gap-4 mb-6">
         <div>
-          <h1 class="text-2xl font-bold text-white">池子路由</h1>
-          <p class="text-sm text-dark-400 mt-1">任务分层路由、编码策略与会话粘性绑定</p>
+          <h1 class="text-2xl font-bold text-white">模型组与路由</h1>
+          <p class="text-sm text-dark-400 mt-1">模型组管理、任务路由矩阵、编码策略与会话粘性</p>
         </div>
-        <button class="btn btn-primary" onClick={handleRefresh} disabled={loading()}>
-          <svg class={`w-4 h-4 ${loading() ? 'animate-spin' : ''}`} fill="none" stroke="currentColor" viewBox="0 0 24 24">
-            <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M4 4v5h.582m15.356 2A8.001 8.001 0 004.582 9m0 0H9m11 11v-5h-.581m0 0a8.003 8.003 0 01-15.357-2m15.357 2H15" />
-          </svg>
-          刷新
-        </button>
+        <div class="flex items-center gap-2">
+          <button class="btn btn-primary btn-sm" onClick={() => openGroupModal()}>
+            <svg class="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+              <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M12 4v16m8-8H4" />
+            </svg>
+            新增模型组
+          </button>
+          <button class="btn btn-secondary btn-sm" onClick={refetchAll} disabled={loading()}>
+            <svg class={`w-4 h-4 ${loading() ? 'animate-spin' : ''}`} fill="none" stroke="currentColor" viewBox="0 0 24 24">
+              <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M4 4v5h.582m15.356 2A8.001 8.001 0 004.582 9m0 0H9m11 11v-5h-.581m0 0a8.003 8.003 0 01-15.357-2m15.357 2H15" />
+            </svg>
+            刷新
+          </button>
+        </div>
       </div>
 
       <div class="space-y-6">
-        {/* Coding strategy switcher */}
         <div class="card">
           <h2 class="text-lg font-semibold text-white mb-1">编码任务路由策略</h2>
           <p class="text-sm text-dark-400 mb-4">控制 coding 类请求在免费 / 标准 / 高级三层渠道间的优先顺序。</p>
@@ -188,7 +255,6 @@ const LLMPools: Component = () => {
           </Show>
         </div>
 
-        {/* Task routing matrix */}
         <div class="card">
           <div class="flex items-center justify-between mb-1">
             <h2 class="text-lg font-semibold text-white">任务路由矩阵</h2>
@@ -207,7 +273,7 @@ const LLMPools: Component = () => {
             fallback={
               <div class="empty-state">
                 <p class="empty-state-title">暂无启用渠道</p>
-                <p class="empty-state-description">请在配置页面启用渠道后再查看路由矩阵。</p>
+                <p class="empty-state-description">请在渠道管理页面启用渠道后再查看路由矩阵。</p>
               </div>
             }
           >
@@ -253,10 +319,9 @@ const LLMPools: Component = () => {
           </Show>
         </div>
 
-        {/* Model group routing */}
         <div class="card">
           <div class="flex items-center justify-between mb-4">
-            <h2 class="text-lg font-semibold text-white">模型组路由</h2>
+            <h2 class="text-lg font-semibold text-white">模型组</h2>
             <span class="text-sm text-dark-400">共 {groups().length} 个模型组</span>
           </div>
           <Show
@@ -264,45 +329,89 @@ const LLMPools: Component = () => {
             fallback={
               <div class="empty-state">
                 <p class="empty-state-title">暂无模型组</p>
-                <p class="empty-state-description">请在配置页面创建模型组。</p>
+                <p class="empty-state-description">点击「新增模型组」创建虚拟模型池。</p>
               </div>
             }
           >
-            <div class="space-y-3">
+            <div class="space-y-4">
               <For each={groups()}>
-                {(group: LLMGroupStatus) => (
-                  <div class="p-4 rounded-xl bg-dark-700/30 border border-dark-600/50">
-                    <div class="flex items-center gap-2 flex-wrap mb-3">
-                      <span class="font-medium text-white">{group.name}</span>
-                      <span class="badge badge-primary">{group.strategy}</span>
-                      <span class="badge badge-gray">{group.members.length} 成员</span>
+                {(group: LLMGroupStatus) => {
+                  const cfg = () => groupConfigs().find((g) => g.name === group.name)
+                  return (
+                    <div class="card card-hover">
+                      <div class="flex flex-col xl:flex-row xl:items-start justify-between gap-4 mb-4">
+                        <div>
+                          <div class="flex items-center gap-2 flex-wrap mb-2">
+                            <h3 class="text-lg font-semibold text-white">{group.name}</h3>
+                            <span class="badge badge-primary">{group.strategy}</span>
+                            <span class="badge badge-gray">Sticky TTL {group.sticky_ttl_seconds}s</span>
+                            <span class="badge badge-gray">绑定 {group.sticky_bindings}</span>
+                          </div>
+                          <p class="text-sm text-dark-400">{group.description || '未填写描述'}</p>
+                        </div>
+                        <div class="flex items-center gap-2 flex-shrink-0">
+                          <button class="btn btn-secondary btn-sm" disabled={busyGroup() === group.name} onClick={() => handleClearSticky(group.name)}>
+                            {busyGroup() === group.name ? '清理中...' : '清理粘性绑定'}
+                          </button>
+                          <Show when={cfg()}>
+                            <button class="btn btn-ghost btn-sm" onClick={() => openGroupModal(cfg())}>编辑</button>
+                            <button class="btn btn-ghost btn-sm text-red-400" onClick={() => deleteGroup(cfg()!.id)}>删除</button>
+                          </Show>
+                        </div>
+                      </div>
+
+                      <div class="overflow-x-auto rounded-xl border border-dark-600/50">
+                        <table class="table">
+                          <thead>
+                            <tr>
+                              <th>渠道</th><th>模型</th><th>权重</th><th>可用</th><th>状态</th><th>成功率</th>
+                            </tr>
+                          </thead>
+                          <tbody>
+                            <For each={group.members}>
+                              {(member) => (
+                                <tr>
+                                  <td>
+                                    <div class="flex items-center gap-2">
+                                      <span class={`status-dot ${member.available ? getCircuitDot(member.health.state) : 'status-dot-gray'}`} />
+                                      <span>{member.channel}</span>
+                                    </div>
+                                  </td>
+                                  <td class="font-mono text-xs text-dark-300">{member.model}</td>
+                                  <td>{member.weight}</td>
+                                  <td>
+                                    <span class={`badge ${member.available ? 'badge-success' : 'badge-danger'}`}>
+                                      {member.available ? '可用' : '不可用'}
+                                    </span>
+                                  </td>
+                                  <td>
+                                    <span class={`badge ${getCircuitBadge(member.health.state)}`}>
+                                      {getCircuitLabel(member.health.state)}
+                                    </span>
+                                  </td>
+                                  <td>
+                                    <span class={getSuccessRateColor(member.health.recent_success_rate)}>
+                                      {formatPercent(member.health.recent_success_rate)}
+                                    </span>
+                                  </td>
+                                </tr>
+                              )}
+                            </For>
+                          </tbody>
+                        </table>
+                      </div>
                     </div>
-                    <div class="flex flex-wrap gap-2">
-                      <For each={group.members}>
-                        {(m) => {
-                          const tier = channelTierMap()[m.channel] || 'standard'
-                          return (
-                            <span class="inline-flex items-center gap-1.5 px-2.5 py-1 rounded-lg bg-dark-800/60 text-xs">
-                              <span class={`badge ${getTierBadge(tier)}`}>{getTierLabel(tier)}</span>
-                              <span class="text-dark-200">{m.channel}</span>
-                              <span class="text-dark-500 font-mono">{m.model}</span>
-                            </span>
-                          )
-                        }}
-                      </For>
-                    </div>
-                  </div>
-                )}
+                  )
+                }}
               </For>
             </div>
           </Show>
         </div>
 
-        {/* Adaptive rate-limit learning state (Tier 3) */}
         <div class="card">
           <h2 class="text-lg font-semibold text-white mb-4">自适应限流学习</h2>
           <p class="text-sm text-dark-400 mb-4">
-            实时展示每渠道×模型的限流配置与学习状态（Tier 3）。通过观察上游 429 响应，系统自动调整安全 RPM 并记录信心分。
+            实时展示每渠道×模型的限流配置与学习状态。通过观察上游 429 响应，系统自动调整安全 RPM 并记录信心分。
           </p>
           <Show
             when={(rateLimitsData()?.data || []).length > 0}
@@ -347,7 +456,6 @@ const LLMPools: Component = () => {
           </Show>
         </div>
 
-        {/* Sticky conversation bindings */}
         <div class="card">
           <div class="flex items-center justify-between mb-4">
             <h2 class="text-lg font-semibold text-white">会话粘性绑定</h2>
@@ -409,8 +517,50 @@ const LLMPools: Component = () => {
           </Show>
         </div>
       </div>
+
+      <Modal open={showGroupModal()} onClose={() => setShowGroupModal(false)} title={editingGroup() ? '编辑模型组' : '新增模型组'} size="lg">
+        <div class="space-y-4">
+          <div class="grid grid-cols-1 sm:grid-cols-2 gap-4">
+            <div><label class="label">名称</label><input class="input" value={grpForm.name} onInput={(e) => setGrpForm('name', e.currentTarget.value)} placeholder="如 pool-chat-free" /></div>
+            <div><label class="label">策略</label><select class="input" value={grpForm.strategy} onChange={(e) => setGrpForm('strategy', e.currentTarget.value)}><option value="priority-health">priority-health</option><option value="round-robin">round-robin</option></select></div>
+          </div>
+          <div class="grid grid-cols-1 sm:grid-cols-2 gap-4">
+            <div><label class="label">描述</label><input class="input" value={grpForm.description} onInput={(e) => setGrpForm('description', e.currentTarget.value)} placeholder="可选描述" /></div>
+            <div><label class="label">Sticky TTL (秒)</label><input class="input" type="number" value={grpForm.sticky_ttl_seconds} onInput={(e) => setGrpForm('sticky_ttl_seconds', parseInt(e.currentTarget.value) || 0)} /></div>
+          </div>
+          <div>
+            <div class="flex items-center justify-between mb-2">
+              <label class="label mb-0">成员</label>
+              <button class="btn btn-ghost btn-sm" onClick={addGroupMember}>
+                <svg class="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M12 4v16m8-8H4" /></svg>
+                添加成员
+              </button>
+            </div>
+            <Show when={grpForm.members.length > 0} fallback={<p class="text-sm text-dark-400">暂无成员，点击上方按钮添加。</p>}>
+              <div class="space-y-2">
+                <For each={grpForm.members}>
+                  {(member, index) => (
+                    <div class="grid grid-cols-[1fr_1fr_80px_40px] gap-2 items-end">
+                      <input class="input" value={member.channel_name} onInput={(e) => updateGroupMember(index(), 'channel_name', e.currentTarget.value)} placeholder="渠道名" />
+                      <input class="input" value={member.model} onInput={(e) => updateGroupMember(index(), 'model', e.currentTarget.value)} placeholder="模型名" />
+                      <input class="input" type="number" value={member.weight} onInput={(e) => updateGroupMember(index(), 'weight', parseInt(e.currentTarget.value) || 1)} placeholder="权重" />
+                      <button class="btn btn-ghost btn-sm text-red-400" onClick={() => removeGroupMember(index())}>
+                        <svg class="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M6 18L18 6M6 6l12 12" /></svg>
+                      </button>
+                    </div>
+                  )}
+                </For>
+              </div>
+            </Show>
+          </div>
+          <div class="flex justify-end gap-3 pt-2">
+            <button class="btn btn-secondary" onClick={() => setShowGroupModal(false)}>取消</button>
+            <button class="btn btn-primary" disabled={saving()} onClick={saveGroup}>{saving() ? '保存中...' : '保存'}</button>
+          </div>
+        </div>
+      </Modal>
     </div>
   )
 }
 
-export default LLMPools
+export default LLMGroupsAndRouting
