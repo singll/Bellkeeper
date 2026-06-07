@@ -1366,6 +1366,13 @@ func (s *LLMProxyService) tryChannel(
 				req.Header.Add(k, v)
 			}
 		}
+		// Strip client headers that must not leak upstream:
+		//   X-API-Key       — internal Bellkeeper auth; some upstreams (e.g. kimi-code) reject it
+		//   Accept-Encoding — forwarding the client's value disables Go's transparent gzip
+		//                     decompression, leaking compressed bytes to the caller
+		//                     (moonshot gzips large responses → JSON decode '\x1f' failures).
+		req.Header.Del("X-API-Key")
+		req.Header.Del("Accept-Encoding")
 		if isAnthropic {
 			req.Header.Set("x-api-key", ch.Config.APIKey)
 			req.Header.Set("anthropic-version", anthropicVersion)
@@ -1798,6 +1805,9 @@ func (s *LLMProxyService) tryChannelStream(
 			req.Header.Add(k, v)
 		}
 	}
+	// Strip client headers that must not leak upstream (see tryChannel).
+	req.Header.Del("X-API-Key")
+	req.Header.Del("Accept-Encoding")
 	if isAnthropic {
 		req.Header.Set("x-api-key", ch.Config.APIKey)
 		req.Header.Set("anthropic-version", anthropicVersion)
