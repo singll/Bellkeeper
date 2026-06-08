@@ -43,6 +43,7 @@ type Curator struct {
 	scoreCalls        int
 	reconstructCalls  int
 	digestCalls       int
+	lastSummary       runSummary
 	llmJobs           *service.LLMJobQueueService
 }
 
@@ -178,6 +179,7 @@ func (c *Curator) Run() error {
 		}
 	}
 
+	c.lastSummary = sum
 	fmt.Printf("\n[pkb-curate] 本轮完成：处理 %d / vault %d / archive %d / discard %d / 失败 %d / 延期 %d\n",
 		sum.processed, sum.vault, sum.archive, sum.discard, sum.failed, sum.deferred)
 	return nil

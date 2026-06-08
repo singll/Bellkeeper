@@ -121,7 +121,7 @@ func (s *Scheduler) loop(ctx context.Context) {
 		}
 
 		start := time.Now()
-		err := s.runOnce(ctx)
+		sum, err := s.runOnce(ctx)
 		durationMs := int(time.Since(start).Milliseconds())
 		if err != nil {
 			log.Printf("[PKBScheduler] run failed: %v", err)
@@ -130,17 +130,17 @@ func (s *Scheduler) loop(ctx context.Context) {
 			continue
 		}
 
-		s.logActivity("success", "PKB 自动维护完成", durationMs)
+		s.logActivity("success", formatRunSummary("PKB 自动维护完成", sum), durationMs)
 		nextRun = time.Now().Add(s.interval())
 		log.Printf("[PKBScheduler] next run at %s", nextRun.Format(time.RFC3339))
 	}
 }
 
-func (s *Scheduler) runOnce(ctx context.Context) error {
+func (s *Scheduler) runOnce(ctx context.Context) (runSummary, error) {
 	s.mu.Lock()
 	if s.running {
 		s.mu.Unlock()
-		return nil
+		return runSummary{}, nil
 	}
 	s.running = true
 	s.mu.Unlock()
@@ -152,7 +152,7 @@ func (s *Scheduler) runOnce(ctx context.Context) error {
 
 	select {
 	case <-ctx.Done():
-		return ctx.Err()
+		return runSummary{}, ctx.Err()
 	default:
 	}
 
@@ -162,9 +162,10 @@ func (s *Scheduler) runOnce(ctx context.Context) error {
 		Context:   ctx,
 	}, s.articleRepo)
 	if err != nil {
-		return err
+		return runSummary{}, err
 	}
-	return curator.Run()
+	err = curator.Run()
+	return curator.lastSummary, err
 }
 
 func (s *Scheduler) autoEnabled() bool {
@@ -206,6 +207,11 @@ func (s *Scheduler) logActivity(status, summary string, durationMs int) {
 		Summary:    summary,
 		DurationMs: durationMs,
 	})
+}
+
+func formatRunSummary(prefix string, sum runSummary) string {
+	return fmt.Sprintf("%s：处理 %d / vault %d / archive %d / discard %d / 失败 %d / 延期 %d",
+		prefix, sum.processed, sum.vault, sum.archive, sum.discard, sum.failed, sum.deferred)
 }
 
 func parseBoolSetting(raw string, fallback bool) bool {
