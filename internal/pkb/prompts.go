@@ -17,12 +17,14 @@ type PromptRegistry struct {
 type PromptRegistryActive struct {
 	Score       string `yaml:"score"`
 	Reconstruct string `yaml:"reconstruct"`
+	Digest      string `yaml:"digest"`
 }
 
 func LoadPromptRegistry(configDir string) (*PromptRegistry, error) {
 	reg := &PromptRegistry{}
 	reg.Active.Score = "score.md"
 	reg.Active.Reconstruct = "reconstruct.md"
+	reg.Active.Digest = "digest.md"
 
 	path := filepath.Join(configDir, "prompts", "registry.yaml")
 	data, err := os.ReadFile(path)
@@ -40,6 +42,9 @@ func LoadPromptRegistry(configDir string) (*PromptRegistry, error) {
 	}
 	if reg.Active.Reconstruct == "" {
 		reg.Active.Reconstruct = "reconstruct.md"
+	}
+	if reg.Active.Digest == "" {
+		reg.Active.Digest = "digest.md"
 	}
 	return reg, nil
 }

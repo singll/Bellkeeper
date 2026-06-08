@@ -28,13 +28,16 @@ type Curator struct {
 	basePath          string // /mnt/knowledge
 	scorePrompt       string
 	reconstructPrompt string
+	digestPrompt      string
 	scorePromptName   string
 	reconstructName   string
+	digestPromptName  string
 	dryRun            bool
 	rescan            bool
 	perRun            int
 	scoreCalls        int
 	reconstructCalls  int
+	digestCalls       int
 }
 
 // NewCurator 装配 Curator：加载 config/pkb + 构造 HTTP 客户端 + 注入 ArticleTag 仓库（幂等账本）。
@@ -53,6 +56,10 @@ func NewCurator(cfg *config.Config, opts Options, articleRepo *repository.Articl
 		return nil, err
 	}
 	reconstructPrompt, err := loadPromptFile(opts.ConfigDir, registry.Active.Reconstruct)
+	if err != nil {
+		return nil, err
+	}
+	digestPrompt, err := loadPromptFile(opts.ConfigDir, registry.Active.Digest)
 	if err != nil {
 		return nil, err
 	}
@@ -83,8 +90,10 @@ func NewCurator(cfg *config.Config, opts Options, articleRepo *repository.Articl
 		basePath:          cfg.Knowledge.BasePath,
 		scorePrompt:       scorePrompt,
 		reconstructPrompt: reconstructPrompt,
+		digestPrompt:      digestPrompt,
 		scorePromptName:   registry.Active.Score,
 		reconstructName:   registry.Active.Reconstruct,
+		digestPromptName:  registry.Active.Digest,
 		dryRun:            opts.DryRun,
 		rescan:            opts.Rescan,
 		perRun:            perRun,

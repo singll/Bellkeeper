@@ -22,6 +22,12 @@ var (
 	pkbRescan bool
 	pkbPerRun int
 	pkbCfgDir string
+
+	// pkb-curate digest flags
+	pkbDigestDomain   string
+	pkbDigestPeriod   string
+	pkbDigestSince    string
+	pkbDigestMaxCards int
 )
 
 func main() {
@@ -67,10 +73,66 @@ Steer behavior by editing config/pkb/ (domains, prompts, thresholds) — no rebu
 	pkbCurateCmd.Flags().IntVar(&pkbPerRun, "per-run", 0, "max articles to process this run (0 = use domains.yaml defaults.per_run)")
 	pkbCurateCmd.Flags().StringVar(&pkbCfgDir, "pkb-config", "config/pkb", "directory holding domains.yaml + prompts/")
 
+	pkbDigestCmd := &cobra.Command{
+		Use:   "digest",
+		Short: "Synthesize domain-level PKB digest notes from high-score vault cards",
+		Long: `digest reads high-score vault cards by domain, asks the LLM to synthesize
+a low-frequency Obsidian digest note, writes it under vault/<domain>/digest/,
+then rebuilds the search index. Use --dry-run first to inspect candidates.`,
+		Run: runPkbDigest,
+	}
+	pkbDigestCmd.Flags().BoolVar(&pkbDryRun, "dry-run", false, "print candidate cards without calling the digest LLM or writing files")
+	pkbDigestCmd.Flags().StringVar(&pkbDigestDomain, "domain", "", "domain name/display to digest (default: all)")
+	pkbDigestCmd.Flags().StringVar(&pkbDigestPeriod, "period", "weekly", "digest period: weekly or monthly")
+	pkbDigestCmd.Flags().StringVar(&pkbDigestSince, "since", "", "lower bound date YYYY-MM-DD (default: start of current period)")
+	pkbDigestCmd.Flags().IntVar(&pkbDigestMaxCards, "max-cards", 50, "max high-score cards per domain")
+	pkbDigestCmd.Flags().StringVar(&pkbCfgDir, "pkb-config", "config/pkb", "directory holding domains.yaml + prompts/")
+	pkbCurateCmd.AddCommand(pkbDigestCmd)
+
 	rootCmd.AddCommand(serveCmd, versionCmd, migrateCmd, pkbCurateCmd)
 
 	if err := rootCmd.Execute(); err != nil {
 		fmt.Println(err)
+		os.Exit(1)
+	}
+}
+
+func runPkbDigest(cmd *cobra.Command, args []string) {
+	cfg, err := config.Load(cfgFile)
+	if err != nil {
+		fmt.Fprintf(os.Stderr, "Failed to load config: %v\n", err)
+		os.Exit(1)
+	}
+
+	if err := middleware.InitLogger(cfg.Logging.Level); err != nil {
+		fmt.Fprintf(os.Stderr, "Failed to initialize logger: %v\n", err)
+		os.Exit(1)
+	}
+
+	db, err := model.InitDB(cfg.Database)
+	if err != nil {
+		fmt.Fprintf(os.Stderr, "Failed to connect to database: %v\n", err)
+		os.Exit(1)
+	}
+	articleRepo := repository.NewArticleTagRepository(db)
+
+	curator, err := pkb.NewCurator(cfg, pkb.Options{
+		ConfigDir: pkbCfgDir,
+		DryRun:    pkbDryRun,
+	}, articleRepo)
+	if err != nil {
+		fmt.Fprintf(os.Stderr, "Failed to init pkb curator: %v\n", err)
+		os.Exit(1)
+	}
+
+	if err := curator.RunDigest(pkb.DigestOptions{
+		Domain:   pkbDigestDomain,
+		Period:   pkbDigestPeriod,
+		Since:    pkbDigestSince,
+		MaxCards: pkbDigestMaxCards,
+		DryRun:   pkbDryRun,
+	}); err != nil {
+		fmt.Fprintf(os.Stderr, "pkb-curate digest failed: %v\n", err)
 		os.Exit(1)
 	}
 }

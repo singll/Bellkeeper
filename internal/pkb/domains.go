@@ -24,8 +24,10 @@ type Defaults struct {
 	Weights                Weights `yaml:"weights"`
 	ScoreModel             string  `yaml:"score_model"`
 	ReconstructModel       string  `yaml:"reconstruct_model"`
+	DigestModel            string  `yaml:"digest_model"`
 	ScoreTemperature       float64 `yaml:"score_temperature"`       // 0=用默认 0.2；kimi-k2.6 等推理模型须设 1.0
 	ReconstructTemperature float64 `yaml:"reconstruct_temperature"` // 0=用默认 0.4；kimi-k2.6 等推理模型须设 1.0
+	DigestTemperature      float64 `yaml:"digest_temperature"`
 	PerRun                 int     `yaml:"per_run"`
 	ContentTruncate        int     `yaml:"content_truncate"`
 	LLMTokenEnv            string  `yaml:"llm_token_env"` // 可选：专用 LLM token 环境变量名，便于 PKB 独立配额/成本控制
@@ -36,6 +38,7 @@ type Defaults struct {
 type Budget struct {
 	MaxScoreCallsPerRun       int `yaml:"max_score_calls_per_run"`
 	MaxReconstructCallsPerRun int `yaml:"max_reconstruct_calls_per_run"`
+	MaxDigestCallsPerRun      int `yaml:"max_digest_calls_per_run"`
 }
 
 // Domain 单个领域
@@ -86,11 +89,17 @@ func LoadDomains(path string) (*DomainsConfig, error) {
 	if d.ReconstructModel == "" {
 		d.ReconstructModel = d.ScoreModel
 	}
+	if d.DigestModel == "" {
+		d.DigestModel = d.ReconstructModel
+	}
 	if d.ScoreTemperature == 0 {
 		d.ScoreTemperature = 0.2
 	}
 	if d.ReconstructTemperature == 0 {
 		d.ReconstructTemperature = 0.4
+	}
+	if d.DigestTemperature == 0 {
+		d.DigestTemperature = 0.4
 	}
 	if d.PerRun <= 0 {
 		d.PerRun = 5
@@ -122,6 +131,16 @@ func (dc *DomainsConfig) ResolveDomain(matched []string) Domain {
 		}
 	}
 	return dc.DefaultDomain()
+}
+
+// FindDomain returns a configured domain by name or display label.
+func (dc *DomainsConfig) FindDomain(name string) (Domain, bool) {
+	for _, d := range dc.Domains {
+		if strings.EqualFold(d.Name, name) || d.Display == name {
+			return d, true
+		}
+	}
+	return Domain{}, false
 }
 
 // VaultThresholdOr 领域阈值优先，否则用全局默认

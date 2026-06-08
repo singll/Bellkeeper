@@ -452,7 +452,7 @@ MVP 的结构建设方式是 **Obsidian wikilink 双链**：`pkb-curate` 在高�
 |------|------|---------|----------------|
 | R1 | **增量索引** 替代全量 rebuild | vault 大到 rebuild 明显变慢 | 改 scanner 支持按 mtime/状态增量；纯增强，无新工具 |
 | R2 | **n8n 工作流纳管**（仓库 `n8n_workflows/` git + `spool n8n export` 冷备） | 工作流改动频繁、需 review/回滚 | 仅 git 托管 JSON，**不做** DB/CRUD/UI；用现有 spool |
-| R3 | **体系化合成**（定期聚合某领域高分卡片 → 专题笔记 → vault digest） | vault 卡片够多、需要"周综述"缝合 | 复用 search+pool-summary，写成 `pkb-curate` 的第二个子命令（如 `pkb-digest`，不新增端点） |
+| R3 | **体系化合成**（定期聚合某领域高分卡片 → 综述笔记 → vault digest） | vault 卡片够多、需要"周综述"缝合 | 复用 vault 文件 + LLM Proxy，写成 `pkb-curate digest` 子命令；第一版只生成 `vault/<领域>/digest/YYYY-Wxx_<领域>周综述.md`，不新增端点 |
 | R4 | **领域配置可视化 / Web 调整界面** | `domains.yaml` 手编成为高频痛点 | 先问：Obsidian/编辑器直接改 yaml 是否已够？够则不做（§0.1） |
 | R5 | **ArticleTag 打分账本 / move 端点** | 需要按分数在 Bellkeeper 端排序筛选、或 frontmatter 一致性出问题 | 仅当 frontmatter 方案确实不够才加（DG 兜底） |
 | R6 | **Matrix `!问<领域>`** 主动问答 | 想在 Matrix 里直接查知识库 | 复用现有 `/api/files/ask`，仅接 Matrix 命令 |
