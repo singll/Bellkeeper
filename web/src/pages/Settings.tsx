@@ -10,11 +10,17 @@ const Settings: Component = () => {
   const [editValue, setEditValue] = createSignal('')
   const [saving, setSaving] = createSignal(false)
   const [restarting, setRestarting] = createSignal(false)
+  const [pkbToggling, setPkbToggling] = createSignal(false)
   const [showRestartConfirm, setShowRestartConfirm] = createSignal(false)
 
   const [settings, { refetch }] = createResource(
     () => category(),
     (cat) => settingsApi.list(cat)
+  )
+  const [pkbAutoSetting, { refetch: refetchPkbAuto }] = createResource(
+    () => settingsApi.get('feature_pkb_auto_curate')
+      .then((res) => res.data)
+      .catch(() => null)
   )
 
   const categories = [
@@ -51,6 +57,34 @@ const Settings: Component = () => {
       toast.error('保存失败: ' + (err as Error).message)
     } finally {
       setSaving(false)
+    }
+  }
+
+  const pkbAutoEnabled = () => pkbAutoSetting()?.value === 'true'
+
+  const togglePkbAuto = async () => {
+    const setting = pkbAutoSetting()
+    if (!setting) {
+      toast.error('PKB 开关尚未初始化')
+      return
+    }
+    const nextValue = pkbAutoEnabled() ? 'false' : 'true'
+    setPkbToggling(true)
+    try {
+      await settingsApi.update(setting.key, {
+        value: nextValue,
+        value_type: 'bool',
+        category: setting.category || 'feature',
+        description: setting.description || 'PKB 自动维护',
+        is_secret: false,
+      })
+      toast.success(nextValue === 'true' ? 'PKB 自动维护已开启' : 'PKB 自动维护已关闭')
+      refetchPkbAuto()
+      refetch()
+    } catch (err) {
+      toast.error('切换失败: ' + (err as Error).message)
+    } finally {
+      setPkbToggling(false)
     }
   }
 
@@ -143,6 +177,59 @@ const Settings: Component = () => {
       <div class="mb-6">
         <h1 class="text-2xl font-bold text-white">系统设置</h1>
         <p class="text-sm text-dark-400 mt-1">配置系统运行参数和功能开关</p>
+      </div>
+
+      {/* PKB Auto Maintenance */}
+      <div class="card mb-6">
+        <div class="flex flex-col sm:flex-row sm:items-center sm:justify-between gap-4">
+          <div class="flex items-center gap-3 min-w-0">
+            <div
+              class="w-10 h-10 rounded-lg flex items-center justify-center flex-shrink-0"
+              classList={{
+                'bg-emerald-500/15 text-emerald-300': pkbAutoEnabled(),
+                'bg-dark-700/60 text-dark-300': !pkbAutoEnabled(),
+              }}
+            >
+              <svg class="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M12 6.253v13m0-13C10.832 5.477 9.246 5 7.5 5S4.168 5.477 3 6.253v13C4.168 18.477 5.754 18 7.5 18s3.332.477 4.5 1.253m0-13C13.168 5.477 14.754 5 16.5 5c1.746 0 3.332.477 4.5 1.253v13C19.832 18.477 18.246 18 16.5 18c-1.746 0-3.332.477-4.5 1.253" />
+              </svg>
+            </div>
+            <div class="min-w-0">
+              <div class="flex items-center gap-2 flex-wrap">
+                <h3 class="text-base font-semibold text-white">PKB 自动维护</h3>
+                <span
+                  class="badge"
+                  classList={{
+                    'badge-success': pkbAutoEnabled(),
+                    'badge-gray': !pkbAutoEnabled(),
+                  }}
+                >
+                  {pkbAutoEnabled() ? '开启' : '关闭'}
+                </span>
+              </div>
+              <p class="text-sm text-dark-400 mt-1">定时整理 raw、archive、vault</p>
+            </div>
+          </div>
+          <button
+            class="btn"
+            classList={{
+              'bg-red-500/15 text-red-300 hover:bg-red-500/25 border border-red-500/25': pkbAutoEnabled(),
+              'bg-emerald-500/15 text-emerald-300 hover:bg-emerald-500/25 border border-emerald-500/25': !pkbAutoEnabled(),
+            }}
+            onClick={togglePkbAuto}
+            disabled={pkbToggling() || pkbAutoSetting.loading}
+          >
+            <Show
+              when={!pkbToggling()}
+              fallback={<div class="loading-spinner w-4 h-4 mr-2" />}
+            >
+              <svg class="w-4 h-4 mr-2" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d={pkbAutoEnabled() ? 'M18.364 18.364A9 9 0 015.636 5.636m12.728 12.728A9 9 0 005.636 5.636m12.728 12.728L5.636 5.636' : 'M5 13l4 4L19 7'} />
+              </svg>
+            </Show>
+            {pkbAutoEnabled() ? '关闭' : '开启'}
+          </button>
+        </div>
       </div>
 
       {/* Category Tabs */}

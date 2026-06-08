@@ -67,7 +67,7 @@ func (c *Curator) chatCompletionViaQueue(modelName, systemPrompt, userPrompt str
 		return "", fmt.Errorf("enqueue llm job: %w", err)
 	}
 	fmt.Printf("    ↪ LLM job queued id=%d type=%s model=%s status=%s\n", job.ID, taskType, modelName, job.Status)
-	waitCtx, cancel := context.WithTimeout(context.Background(), pkbQueueWaitTimeout(c.domains.Defaults.Retry))
+	waitCtx, cancel := context.WithTimeout(c.ctx, pkbQueueWaitTimeout(c.domains.Defaults.Retry))
 	defer cancel()
 	done, err := c.llmJobs.Wait(waitCtx, job.ID, 2*time.Second)
 	if err != nil {

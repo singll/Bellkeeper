@@ -18,6 +18,7 @@ import (
 	"github.com/singll/bellkeeper/internal/matrix/worker"
 	"github.com/singll/bellkeeper/internal/middleware"
 	"github.com/singll/bellkeeper/internal/model"
+	"github.com/singll/bellkeeper/internal/pkb"
 	"github.com/singll/bellkeeper/internal/pkg/defaults"
 	"github.com/singll/bellkeeper/internal/pkg/meili"
 	"github.com/singll/bellkeeper/internal/repository"
@@ -52,6 +53,7 @@ type App struct {
 
 	// Knowledge services
 	knowledgeIndexSvc *service.KnowledgeIndexService
+	pkbScheduler      *pkb.Scheduler
 
 	// Knowledge adapters (wired to Matrix command service later)
 	knowledgeAskAdapter    *service.AskServiceAdapter
@@ -276,6 +278,23 @@ func (a *App) startBackgroundTasks() {
 		a.logger.Info("[LLMJobQueue] LLM job queue started")
 	}
 
+	if a.cfg.Knowledge.Enabled {
+		var pkbQueue *service.LLMJobQueueService
+		if a.cfg.LLMJobQueue.Enabled {
+			pkbQueue = a.services.LLMJobQueue
+		}
+		a.pkbScheduler = pkb.NewScheduler(
+			a.cfg,
+			"config/pkb",
+			a.repos.Setting,
+			a.repos.ArticleTag,
+			pkbQueue,
+			a.services.ActivityLog,
+		)
+		a.pkbScheduler.Start(context.Background())
+		a.logger.Info("[PKBScheduler] PKB scheduler started")
+	}
+
 	// Knowledge indexing
 	if a.knowledgeIndexSvc != nil {
 		a.knowledgeIndexSvc.StartFullScan(context.Background())
@@ -379,6 +398,9 @@ func (a *App) Shutdown() error {
 	// Core services
 	if a.services.CrawlQueue != nil {
 		a.services.CrawlQueue.Stop()
+	}
+	if a.pkbScheduler != nil {
+		a.pkbScheduler.Stop()
 	}
 	if a.services.LLMJobQueue != nil {
 		a.services.LLMJobQueue.Stop()

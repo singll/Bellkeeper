@@ -229,6 +229,8 @@ func SeedSettings(db *gorm.DB) error {
 		{Key: "feature_auto_parse", Value: "true", ValueType: "bool", Category: "feature", Description: "自动解析上传的文档"},
 		{Key: "feature_url_dedup", Value: "true", ValueType: "bool", Category: "feature", Description: "URL 去重检查"},
 		{Key: "feature_ai_summary", Value: "false", ValueType: "bool", Category: "feature", Description: "AI 自动摘要"},
+		{Key: "feature_pkb_auto_curate", Value: "true", ValueType: "bool", Category: "feature", Description: "PKB 自动维护"},
+		{Key: "pkb_auto_interval_minutes", Value: "360", ValueType: "int", Category: "feature", Description: "PKB 自动维护间隔（分钟）"},
 		// UI 配置
 		{Key: "ui_page_size", Value: "20", ValueType: "int", Category: "ui", Description: "默认分页大小"},
 		{Key: "ui_theme", Value: "system", ValueType: "string", Category: "ui", Description: "界面主题 (light/dark/system)"},

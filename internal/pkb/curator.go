@@ -1,6 +1,7 @@
 package pkb
 
 import (
+	"context"
 	"fmt"
 	"os"
 	"path/filepath"
@@ -20,6 +21,7 @@ type Options struct {
 	Rescan    bool // 全量重扫：包含已处理条目（默认 false=只取未处理，幂等）
 	PerRun    int  // 0 = 用 domains.yaml defaults.per_run
 	LLMJobs   *service.LLMJobQueueService
+	Context   context.Context
 }
 
 // Curator 知识库维护编排器（一次性 CLI，跑完即退，无后台 goroutine）。
@@ -37,6 +39,7 @@ type Curator struct {
 	dryRun            bool
 	rescan            bool
 	perRun            int
+	ctx               context.Context
 	scoreCalls        int
 	reconstructCalls  int
 	digestCalls       int
@@ -85,6 +88,10 @@ func NewCurator(cfg *config.Config, opts Options, articleRepo *repository.Articl
 	if perRun <= 0 {
 		perRun = domains.Defaults.PerRun
 	}
+	ctx := opts.Context
+	if ctx == nil {
+		ctx = context.Background()
+	}
 
 	return &Curator{
 		client:            client,
@@ -100,6 +107,7 @@ func NewCurator(cfg *config.Config, opts Options, articleRepo *repository.Articl
 		dryRun:            opts.DryRun,
 		rescan:            opts.Rescan,
 		perRun:            perRun,
+		ctx:               ctx,
 		llmJobs:           opts.LLMJobs,
 	}, nil
 }
