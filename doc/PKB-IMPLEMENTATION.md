@@ -375,8 +375,9 @@ active:
 - LLM 调用会带 `X-Caller-ID: pkb-curate`，打分带 `X-Task-Type: summary`，重构带 `X-Task-Type: long_context`，便于 LLM Proxy 日志、路由和计费识别。
 - `defaults.llm_token_env` 可指定专用 LLM token 环境变量（默认建议 `PKB_LLM_TOKEN`）。若环境变量不存在，回退 server api key。
 - `defaults.budget.max_score_calls_per_run` / `max_reconstruct_calls_per_run` 是单轮硬护栏，避免一次运行把付费额度打穿。
-- **免费模型池队列策略**：LLM Proxy 负责短时令牌桶等待、故障转移、熔断和自适应限流学习；它不是持久任务队列。`pkb-curate` 把 `raw + exclude_processed=true` 当作持久待处理池：只有打分/分流/写盘成功后才写 `pkb_decision` 与 DB 处理标记，429/503/上游耗尽不会误标完成。
-- `defaults.retry` 是 PKB 批处理级退避：每次 LLM 调用先按 `max_attempts`、`initial_backoff_seconds`、`max_backoff_seconds` 少量重试；若仍然限流且 `stop_run_on_rate_limit=true`，本轮停止，当前与后续文章留在 raw 队列，下次 cron/手动运行继续处理。大量文件跑批时会变慢，但不会把队列打崩或错漏。
+- **通用 LLM 持久队列优先**：`llm_job_queue.enabled=true` 时，`pkb-curate` 的打分/重构/digest 不再直接撞 LLM Proxy，而是写入 `llm_jobs`，由 server 里的 `LLMJobQueueService` worker 统一调 LLM Proxy。分类与知识问答也复用同一队列/同一 `internal/llmclient` 调用层。队列负责 pending/running/retrying/success/dead、`next_retry_at`、stale running 恢复、幂等 key 去重和长时间退避。
+- **免费模型池职责边界**：LLM Proxy 仍负责短时令牌桶等待、故障转移、熔断、计费和自适应限流学习；`llm_jobs` 负责持久任务队列。`pkb-curate` 仍把 `raw + exclude_processed=true` 当作业务待处理池：只有打分/分流/写盘成功后才写 `pkb_decision` 与 DB 处理标记，429/503/上游耗尽不会误标完成。
+- `defaults.retry` 现在是队列关闭时的 fallback 保护；生产默认走 `llm_job_queue`。大量文件跑批时会变慢，但任务会在 `llm_jobs` 中长期重试，不会把队列打崩或错漏。
 
 ### 4.5 用户「调方向」对照表
 

@@ -41,6 +41,17 @@ classify:
   timeout: 10
   # prompt: ""  # 留空使用内置默认提示词，可自定义 LLM 分类提示词
 
+llm_job_queue:
+  enabled: true
+  workers: 1                    # 免费模型池吞吐低，默认单 worker 慢慢排
+  poll_interval_seconds: 5
+  max_retries: 24               # 持久队列重试次数，支持长时间慢跑
+  initial_backoff_seconds: 30
+  max_backoff_seconds: 900
+  stale_timeout_minutes: 30     # server 重启/崩溃后回收 running 任务
+  recovery_interval_minutes: 5
+  job_timeout_seconds: 600
+
 llm_proxy:
   enabled: true
   default_timeout: 60

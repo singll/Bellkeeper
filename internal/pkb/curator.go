@@ -10,6 +10,7 @@ import (
 
 	"github.com/singll/bellkeeper/internal/config"
 	"github.com/singll/bellkeeper/internal/repository"
+	"github.com/singll/bellkeeper/internal/service"
 )
 
 // Options pkb-curate 运行选项
@@ -18,6 +19,7 @@ type Options struct {
 	DryRun    bool
 	Rescan    bool // 全量重扫：包含已处理条目（默认 false=只取未处理，幂等）
 	PerRun    int  // 0 = 用 domains.yaml defaults.per_run
+	LLMJobs   *service.LLMJobQueueService
 }
 
 // Curator 知识库维护编排器（一次性 CLI，跑完即退，无后台 goroutine）。
@@ -38,6 +40,7 @@ type Curator struct {
 	scoreCalls        int
 	reconstructCalls  int
 	digestCalls       int
+	llmJobs           *service.LLMJobQueueService
 }
 
 // NewCurator 装配 Curator：加载 config/pkb + 构造 HTTP 客户端 + 注入 ArticleTag 仓库（幂等账本）。
@@ -97,6 +100,7 @@ func NewCurator(cfg *config.Config, opts Options, articleRepo *repository.Articl
 		dryRun:            opts.DryRun,
 		rescan:            opts.Rescan,
 		perRun:            perRun,
+		llmJobs:           opts.LLMJobs,
 	}, nil
 }
 
@@ -120,6 +124,11 @@ func (c *Curator) Run() error {
 	fmt.Printf("[pkb-curate] score_model=%s reconstruct_model=%s vault>=%.1f archive>=%.1f\n",
 		c.domains.Defaults.ScoreModel, c.domains.Defaults.ReconstructModel,
 		c.domains.Defaults.VaultThreshold, c.domains.Defaults.ArchiveThreshold)
+	if c.llmJobs != nil {
+		fmt.Printf("[pkb-curate] llm_mode=queued（经 llm_jobs 持久队列，由 server worker 调 LLM）\n")
+	} else {
+		fmt.Printf("[pkb-curate] llm_mode=direct（直接同步调 LLM Proxy）\n")
+	}
 	fmt.Printf("[pkb-curate] prompts score=%s reconstruct=%s budget(score=%d,reconstruct=%d) retry(attempts=%d,backoff=%ds,max=%ds,stop_on_rate_limit=%v)\n",
 		c.scorePromptName, c.reconstructName,
 		c.domains.Defaults.Budget.MaxScoreCallsPerRun,

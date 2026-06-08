@@ -2,13 +2,15 @@ package pkb
 
 import (
 	"bytes"
+	"context"
 	"encoding/json"
 	"fmt"
 	"io"
 	"net/http"
-	"strconv"
 	"strings"
 	"time"
+
+	"github.com/singll/bellkeeper/internal/llmclient"
 )
 
 // ArticleMeta 是 GET /api/files/list 返回的 ArticleTag 子集（pkb-curate 只需这些字段）。
@@ -30,21 +32,7 @@ type Client struct {
 	apiKey     string // Bellkeeper API key for local /api/files/* calls
 	llmKey     string // Dedicated LLM token when configured, else apiKey
 	httpClient *http.Client
-}
-
-// LLMHTTPError preserves proxy status and retry hints so batch jobs can back off
-// instead of treating low-throughput/free pools as ordinary per-item failures.
-type LLMHTTPError struct {
-	StatusCode int
-	Body       string
-	RetryAfter time.Duration
-}
-
-func (e *LLMHTTPError) Error() string {
-	if e.RetryAfter > 0 {
-		return fmt.Sprintf("llm returned %d after retry-after %s: %s", e.StatusCode, e.RetryAfter, e.Body)
-	}
-	return fmt.Sprintf("llm returned %d: %s", e.StatusCode, e.Body)
+	llmClient  *llmclient.Client
 }
 
 // NewClient 构造客户端。llmBase 形如 http://localhost:8080/api/llm/v1（取自 classify.llm_proxy_url）。
@@ -62,6 +50,11 @@ func NewClient(llmBase, apiKey, llmKey string, timeout time.Duration) *Client {
 		apiKey:     apiKey,
 		llmKey:     llmKey,
 		httpClient: &http.Client{Timeout: timeout},
+		llmClient: llmclient.New(llmclient.Options{
+			BaseURL: llmBase,
+			APIKey:  llmKey,
+			Timeout: timeout,
+		}),
 	}
 }
 
@@ -177,62 +170,19 @@ func (c *Client) ChatCompletion(model, systemPrompt, userPrompt string, temperat
 	}
 	messages = append(messages, map[string]string{"role": "user", "content": userPrompt})
 
-	reqBody := map[string]interface{}{
-		"model":       model,
-		"messages":    messages,
-		"temperature": temperature,
+	reqBody := llmclient.ChatRequest{
+		Model:       model,
+		Temperature: temperature,
 	}
-	jsonData, _ := json.Marshal(reqBody)
-	req, err := c.newReq(http.MethodPost, c.llmBase+"/chat/completions", bytes.NewReader(jsonData))
-	if err != nil {
-		return "", err
+	for _, msg := range messages {
+		reqBody.Messages = append(reqBody.Messages, llmclient.ChatMessage{
+			Role:    msg["role"],
+			Content: msg["content"],
+		})
 	}
-	req.Header.Set("X-Caller-ID", "pkb-curate")
-	if taskType != "" {
-		req.Header.Set("X-Task-Type", taskType)
-	}
-	resp, err := c.httpClient.Do(req)
-	if err != nil {
-		return "", fmt.Errorf("llm request: %w", err)
-	}
-	defer resp.Body.Close()
-	raw, _ := io.ReadAll(resp.Body)
-	if resp.StatusCode >= 400 {
-		return "", &LLMHTTPError{
-			StatusCode: resp.StatusCode,
-			Body:       string(raw),
-			RetryAfter: parseRetryAfter(resp.Header.Get("Retry-After")),
-		}
-	}
-	var llmResp struct {
-		Choices []struct {
-			Message struct {
-				Content string `json:"content"`
-			} `json:"message"`
-		} `json:"choices"`
-	}
-	if err := json.Unmarshal(raw, &llmResp); err != nil {
-		return "", fmt.Errorf("decode llm response: %w", err)
-	}
-	if len(llmResp.Choices) == 0 {
-		return "", fmt.Errorf("llm returned no choices")
-	}
-	return llmResp.Choices[0].Message.Content, nil
-}
-
-func parseRetryAfter(raw string) time.Duration {
-	raw = strings.TrimSpace(raw)
-	if raw == "" {
-		return 0
-	}
-	if seconds, err := strconv.Atoi(raw); err == nil && seconds > 0 {
-		return time.Duration(seconds) * time.Second
-	}
-	if t, err := http.ParseTime(raw); err == nil {
-		d := time.Until(t)
-		if d > 0 {
-			return d
-		}
-	}
-	return 0
+	return c.llmClient.ChatCompletion(
+		context.Background(),
+		reqBody,
+		llmclient.ChatOptions{CallerID: "pkb-curate", TaskType: taskType},
+	)
 }

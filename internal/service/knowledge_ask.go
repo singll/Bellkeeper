@@ -3,13 +3,11 @@ package service
 import (
 	"bytes"
 	"context"
-	"encoding/json"
 	"fmt"
-	"io"
-	"net/http"
 	"time"
 
-	"github.com/singll/bellkeeper/internal/pkg/httpclient"
+	"github.com/singll/bellkeeper/internal/llmclient"
+	"github.com/singll/bellkeeper/internal/model"
 )
 
 // AskRequest 问答请求
@@ -38,25 +36,24 @@ type Reference struct {
 // AskService 问答服务
 type AskService struct {
 	searchService *FileSearchService
-	llmProxyURL  string
-	apiKey       string
-	httpClient   *httpclient.Client
+	llmClient     *llmclient.Client
+	llmJobs       *LLMJobQueueService
 }
 
 // NewAskService 创建问答服务
-func NewAskService(search *FileSearchService, llmProxyURL, apiKey string) *AskService {
-	// LLM 代理已内置重试机制，这里禁用 httpclient 的重试以避免双重重试导致超时
-	client := httpclient.NewClient(&httpclient.Config{
-		Timeout:        90 * time.Second,
-		ConnectTimeout: 10 * time.Second,
-		MaxRetries:     0, // 禁用重试，LLM 代理内部已有重试逻辑
-		RetryDelay:     500 * time.Millisecond,
-	})
+func NewAskService(search *FileSearchService, llmProxyURL, apiKey string, queue ...*LLMJobQueueService) *AskService {
+	var llmJobs *LLMJobQueueService
+	if len(queue) > 0 {
+		llmJobs = queue[0]
+	}
 	return &AskService{
 		searchService: search,
-		llmProxyURL:  llmProxyURL,
-		apiKey:       apiKey,
-		httpClient:    client,
+		llmJobs:       llmJobs,
+		llmClient: llmclient.New(llmclient.Options{
+			BaseURL: llmProxyURL,
+			APIKey:  apiKey,
+			Timeout: 90 * time.Second,
+		}),
 	}
 }
 
@@ -150,68 +147,39 @@ func (s *AskService) callLLM(ctx context.Context, question, contextContent strin
 2. 在回答中引用来源文件名
 3. 如果知识库中没有相关信息，明确告知用户`
 
-	payload := map[string]interface{}{
-		"model": "pool-chat-balanced",
-		"messages": []map[string]interface{}{
-			{"role": "system", "content": systemPrompt},
-			{"role": "user", "content": fmt.Sprintf("问题: %s\n\n相关文档:\n%s", question, contextContent)},
+	messages := []llmclient.ChatMessage{
+		{Role: "system", Content: systemPrompt},
+		{Role: "user", Content: fmt.Sprintf("问题: %s\n\n相关文档:\n%s", question, contextContent)},
+	}
+	if s.llmJobs != nil {
+		job, err := s.llmJobs.EnqueueChat(EnqueueLLMChatOptions{
+			TaskType:       "qa",
+			CallerID:       "knowledge-ask",
+			Model:          "pool-chat-balanced",
+			Messages:       messages,
+			Temperature:    0.3,
+			Priority:       50,
+			IdempotencyKey: llmJobIdempotencyKey("qa", "pool-chat-balanced", question, contextContent),
+		})
+		if err != nil {
+			return "", err
+		}
+		done, err := s.llmJobs.Wait(ctx, job.ID, time.Second)
+		if err != nil {
+			return "", err
+		}
+		if done.Status != model.LLMJobSuccess {
+			return "", LLMJobTerminalError(done)
+		}
+		return done.ResponseText, nil
+	}
+	return s.llmClient.ChatCompletion(
+		ctx,
+		llmclient.ChatRequest{
+			Model:       "pool-chat-balanced",
+			Messages:    messages,
+			Temperature: 0.3,
 		},
-		"temperature": 0.3,
-	}
-
-	body, err := json.Marshal(payload)
-	if err != nil {
-		return "", fmt.Errorf("marshal payload: %w", err)
-	}
-
-	url := s.llmProxyURL + "/chat/completions"
-	httpReq, err := http.NewRequestWithContext(ctx, "POST", url, bytes.NewReader(body))
-	if err != nil {
-		return "", fmt.Errorf("create request: %w", err)
-	}
-
-	httpReq.Header.Set("Content-Type", "application/json")
-	httpReq.Header.Set("X-API-Key", s.apiKey)
-
-	resp, err := s.httpClient.Do(httpReq)
-	if err != nil {
-		return "", fmt.Errorf("http request: %w", err)
-	}
-	defer resp.Body.Close()
-
-	respBody, err := io.ReadAll(resp.Body)
-	if err != nil {
-		return "", fmt.Errorf("read response: %w", err)
-	}
-
-	if resp.StatusCode >= 400 {
-		return "", fmt.Errorf("llm returned %d: %s", resp.StatusCode, string(respBody))
-	}
-
-	var result map[string]interface{}
-	if err := json.Unmarshal(respBody, &result); err != nil {
-		return "", fmt.Errorf("parse response: %w", err)
-	}
-
-	choices, ok := result["choices"].([]interface{})
-	if !ok || len(choices) == 0 {
-		return "", fmt.Errorf("invalid response format: missing choices")
-	}
-
-	choice, ok := choices[0].(map[string]interface{})
-	if !ok {
-		return "", fmt.Errorf("invalid response format: invalid choice")
-	}
-
-	msg, ok := choice["message"].(map[string]interface{})
-	if !ok {
-		return "", fmt.Errorf("invalid response format: missing message")
-	}
-
-	content, ok := msg["content"].(string)
-	if !ok {
-		return "", fmt.Errorf("invalid response format: missing content")
-	}
-
-	return content, nil
+		llmclient.ChatOptions{CallerID: "knowledge-ask", TaskType: "qa"},
+	)
 }

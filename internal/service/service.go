@@ -16,6 +16,7 @@ type Services struct {
 	Health        *HealthService
 	Workflow      *WorkflowService
 	LLMProxy      *LLMProxyService
+	LLMJobQueue   *LLMJobQueueService
 	Classify      *ClassifyService
 	ActivityLog   *ActivityLogService
 	LogCenter     *LogCenterService
@@ -45,8 +46,13 @@ func NewServices(repos *repository.Repositories, cfg *config.Config, version str
 	// Create dataset service
 	datasetSvc := NewDatasetService(repos.DatasetMapping, repos.Tag)
 
+	llmJobQueueSvc := NewLLMJobQueueService(cfg.LLMJobQueue, repos.LLMJob, cfg.Classify.LLMProxyURL, cfg.Server.APIKey)
+
 	// Create classify service with activity log
 	classifySvc := NewClassifyService(cfg.Classify, cfg.Server.APIKey, activityLogSvc)
+	if cfg.LLMJobQueue.Enabled {
+		classifySvc.SetLLMJobQueue(llmJobQueueSvc)
+	}
 
 	// Create extractor service with activity log
 	extractorSvc := NewExtractorService(cfg.FileIngestion, activityLogSvc)
@@ -94,22 +100,23 @@ func NewServices(repos *repository.Repositories, cfg *config.Config, version str
 	_ = pricer.SeedDefaultPricing()
 
 	return &Services{
-		Tag:            NewTagService(repos.Tag),
-		RSS:            NewRSSService(repos.RSS, repos.Tag),
-		RSSFetcher:     rssFetcherSvc,
-		Crawler:        crawlSvc,
-		Dataset:        datasetSvc,
-		Setting:        NewSettingService(repos.Setting),
-		Health:         NewHealthService(cfg, version, repos.Tag, repos.RSS, repos.DatasetMapping),
-		Workflow:       NewWorkflowService(cfg.N8N, repos.Setting),
-		LLMProxy:       NewLLMProxyService(cfg.LLMProxy, repos.LLMProxy, repos.LLMChannel, repos.LLMModelGroup, pricer, repos.LLMTokenUsage, repos.LLMRateLimit, repos.LLMConversationBinding, repos.LLMToken, repos.LLMChannelCredential, repos.LLMChannelBalanceSnapshot),
-		Classify:       classifySvc,
-		ActivityLog:    activityLogSvc,
-		LogCenter:      logCenterSvc,
-		FileIngestion:  fileIngestionSvc,
-		Search:          NewSearchService(repos.Tag, repos.ArticleTag, repos.RSS),
-		Report:          NewReportService(cfg.FileIngestion.BasePath),
-		CrawlQueue:     crawlQueueSvc,
+		Tag:           NewTagService(repos.Tag),
+		RSS:           NewRSSService(repos.RSS, repos.Tag),
+		RSSFetcher:    rssFetcherSvc,
+		Crawler:       crawlSvc,
+		Dataset:       datasetSvc,
+		Setting:       NewSettingService(repos.Setting),
+		Health:        NewHealthService(cfg, version, repos.Tag, repos.RSS, repos.DatasetMapping),
+		Workflow:      NewWorkflowService(cfg.N8N, repos.Setting),
+		LLMProxy:      NewLLMProxyService(cfg.LLMProxy, repos.LLMProxy, repos.LLMChannel, repos.LLMModelGroup, pricer, repos.LLMTokenUsage, repos.LLMRateLimit, repos.LLMConversationBinding, repos.LLMToken, repos.LLMChannelCredential, repos.LLMChannelBalanceSnapshot),
+		LLMJobQueue:   llmJobQueueSvc,
+		Classify:      classifySvc,
+		ActivityLog:   activityLogSvc,
+		LogCenter:     logCenterSvc,
+		FileIngestion: fileIngestionSvc,
+		Search:        NewSearchService(repos.Tag, repos.ArticleTag, repos.RSS),
+		Report:        NewReportService(cfg.FileIngestion.BasePath),
+		CrawlQueue:    crawlQueueSvc,
 	}
 }
 

@@ -1,34 +1,40 @@
 package service
 
 import (
-	"bytes"
+	"context"
 	"encoding/json"
 	"fmt"
-	"io"
-	"net/http"
 	"strings"
 	"time"
 
 	"github.com/singll/bellkeeper/internal/config"
-	"github.com/singll/bellkeeper/internal/pkg/httpclient"
+	"github.com/singll/bellkeeper/internal/llmclient"
+	"github.com/singll/bellkeeper/internal/model"
 )
 
 // ClassifyService handles article classification using LLM
 type ClassifyService struct {
 	cfg         config.ClassifyConfig
-	apiKey      string
-	httpClient  *httpclient.Client
+	llmClient   *llmclient.Client
+	llmJobs     *LLMJobQueueService
 	activityLog *ActivityLogService
 }
 
 // NewClassifyService creates a new classify service
 func NewClassifyService(cfg config.ClassifyConfig, apiKey string, activityLog *ActivityLogService) *ClassifyService {
 	return &ClassifyService{
-		cfg:    cfg,
-		apiKey: apiKey,
-		httpClient: httpclient.NewClientWithTimeout(time.Duration(cfg.Timeout) * time.Second),
+		cfg: cfg,
+		llmClient: llmclient.New(llmclient.Options{
+			BaseURL: cfg.LLMProxyURL,
+			APIKey:  apiKey,
+			Timeout: time.Duration(cfg.Timeout) * time.Second,
+		}),
 		activityLog: activityLog,
 	}
+}
+
+func (s *ClassifyService) SetLLMJobQueue(queue *LLMJobQueueService) {
+	s.llmJobs = queue
 }
 
 // ClassifyRequest represents the classification request
@@ -129,53 +135,41 @@ func (s *ClassifyService) ClassifyArticle(req *ClassifyRequest) (*ClassifyRespon
 }
 
 func (s *ClassifyService) callLLM(prompt string) (string, error) {
-	reqBody := map[string]interface{}{
-		"model": s.cfg.Model,
-		"messages": []map[string]string{
-			{"role": "user", "content": prompt},
+	if s.llmJobs != nil {
+		job, err := s.llmJobs.EnqueueChat(EnqueueLLMChatOptions{
+			TaskType:       "classify",
+			CallerID:       "classify",
+			Model:          s.cfg.Model,
+			Messages:       []llmclient.ChatMessage{{Role: "user", Content: prompt}},
+			Temperature:    s.cfg.Temperature,
+			Priority:       30,
+			IdempotencyKey: llmJobIdempotencyKey("classify", s.cfg.Model, prompt),
+		})
+		if err != nil {
+			return "", err
+		}
+		ctx, cancel := context.WithTimeout(context.Background(), 10*time.Minute)
+		defer cancel()
+		done, err := s.llmJobs.Wait(ctx, job.ID, time.Second)
+		if err != nil {
+			return "", err
+		}
+		if done.Status != model.LLMJobSuccess {
+			return "", LLMJobTerminalError(done)
+		}
+		return done.ResponseText, nil
+	}
+	return s.llmClient.ChatCompletion(
+		context.Background(),
+		llmclient.ChatRequest{
+			Model: s.cfg.Model,
+			Messages: []llmclient.ChatMessage{
+				{Role: "user", Content: prompt},
+			},
+			Temperature: s.cfg.Temperature,
 		},
-		"temperature": s.cfg.Temperature,
-	}
-
-	jsonData, _ := json.Marshal(reqBody)
-	req, err := http.NewRequest("POST", s.cfg.LLMProxyURL+"/chat/completions", bytes.NewBuffer(jsonData))
-	if err != nil {
-		return "", err
-	}
-
-	req.Header.Set("Content-Type", "application/json")
-	if s.apiKey != "" {
-		req.Header.Set("X-API-Key", s.apiKey)
-	}
-
-	resp, err := s.httpClient.Do(req)
-	if err != nil {
-		return "", err
-	}
-	defer resp.Body.Close()
-
-	body, err := io.ReadAll(resp.Body)
-	if err != nil {
-		return "", err
-	}
-
-	var llmResp struct {
-		Choices []struct {
-			Message struct {
-				Content string `json:"content"`
-			} `json:"message"`
-		} `json:"choices"`
-	}
-
-	if err := json.Unmarshal(body, &llmResp); err != nil {
-		return "", err
-	}
-
-	if len(llmResp.Choices) == 0 {
-		return "", fmt.Errorf("no response from LLM")
-	}
-
-	return llmResp.Choices[0].Message.Content, nil
+		llmclient.ChatOptions{CallerID: "classify", TaskType: "classify"},
+	)
 }
 
 func (s *ClassifyService) parseClassifyResponse(content string) (*ClassifyResponse, error) {

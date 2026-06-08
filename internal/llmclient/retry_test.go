@@ -1,30 +1,28 @@
-package pkb
+package llmclient
 
 import (
 	"fmt"
 	"testing"
 	"time"
-
-	"github.com/singll/bellkeeper/internal/llmclient"
 )
 
 func TestParseRetryAfterSeconds(t *testing.T) {
-	got := llmclient.ParseRetryAfter("45")
+	got := ParseRetryAfter("45")
 	if got != 45*time.Second {
-		t.Fatalf("parseRetryAfter seconds = %s, want 45s", got)
+		t.Fatalf("ParseRetryAfter seconds = %s, want 45s", got)
 	}
 }
 
-func TestRetryableLLMErrorThroughWrapping(t *testing.T) {
-	err := fmt.Errorf("score llm: %w", &llmclient.HTTPError{
+func TestRetryableHTTPErrorThroughWrapping(t *testing.T) {
+	err := fmt.Errorf("wrapped: %w", &HTTPError{
 		StatusCode: 429,
 		Body:       `{"error":"rate limit"}`,
 		RetryAfter: 30 * time.Second,
 	})
-	if !isRetryableLLMError(err) {
+	if !IsRetryable(err) {
 		t.Fatal("wrapped 429 should be retryable")
 	}
-	wait, retryable := llmclient.RetryDelay(err, 1, 10*time.Second, 5*time.Minute)
+	wait, retryable := RetryDelay(err, 1, 10*time.Second, 5*time.Minute)
 	if !retryable {
 		t.Fatal("wrapped 429 should produce retry delay")
 	}
@@ -34,8 +32,8 @@ func TestRetryableLLMErrorThroughWrapping(t *testing.T) {
 }
 
 func TestRetryDelayCapsExponentialBackoff(t *testing.T) {
-	err := &llmclient.HTTPError{StatusCode: 503, Body: `{"error":"all group members exhausted"}`}
-	wait, retryable := llmclient.RetryDelay(err, 5, 20*time.Second, 60*time.Second)
+	err := &HTTPError{StatusCode: 503, Body: `{"error":"all group members exhausted"}`}
+	wait, retryable := RetryDelay(err, 5, 20*time.Second, 60*time.Second)
 	if !retryable {
 		t.Fatal("503 exhausted should be retryable")
 	}

@@ -6,25 +6,26 @@ import (
 
 // Repositories holds all repository instances
 type Repositories struct {
-	Tag            *TagRepository
-	RSS            *RSSRepository
-	DatasetMapping *DatasetMappingRepository
-	Setting        *SettingRepository
-	LLMProxy       *LLMProxyRepository
-	LLMChannel     *LLMChannelRepository
-	LLMModelGroup  *LLMModelGroupRepository
-	LLMToken       *LLMTokenRepository
-	LLMTokenUsage  *LLMTokenUsageRepository
-	LLMModelPricing *LLMModelPricingRepository
-	LLMRateLimit            *LLMRateLimitRepository
-	LLMConversationBinding  *ConversationBindingRepository
-	LLMChannelCredential       *LLMChannelCredentialRepository
-	LLMChannelBalanceSnapshot  *LLMChannelBalanceSnapshotRepository
-	ActivityLog    *ActivityLogRepository
-	LogSource      *LogSourceRepository
-	LogEntry       *LogEntryRepository
-	LogAlertRule   *LogAlertRuleRepository
-	ArticleTag     *ArticleTagRepository
+	Tag                       *TagRepository
+	RSS                       *RSSRepository
+	DatasetMapping            *DatasetMappingRepository
+	Setting                   *SettingRepository
+	LLMProxy                  *LLMProxyRepository
+	LLMChannel                *LLMChannelRepository
+	LLMModelGroup             *LLMModelGroupRepository
+	LLMToken                  *LLMTokenRepository
+	LLMTokenUsage             *LLMTokenUsageRepository
+	LLMModelPricing           *LLMModelPricingRepository
+	LLMRateLimit              *LLMRateLimitRepository
+	LLMConversationBinding    *ConversationBindingRepository
+	LLMChannelCredential      *LLMChannelCredentialRepository
+	LLMChannelBalanceSnapshot *LLMChannelBalanceSnapshotRepository
+	LLMJob                    *LLMJobRepository
+	ActivityLog               *ActivityLogRepository
+	LogSource                 *LogSourceRepository
+	LogEntry                  *LogEntryRepository
+	LogAlertRule              *LogAlertRuleRepository
+	ArticleTag                *ArticleTagRepository
 	// Matrix Platform
 	MatrixRoom         *MatrixRoomRepository
 	MatrixChannel      *MatrixChannelRepository
@@ -40,25 +41,26 @@ type Repositories struct {
 // NewRepositories creates all repository instances
 func NewRepositories(db *gorm.DB) *Repositories {
 	return &Repositories{
-		Tag:            NewTagRepository(db),
-		RSS:            NewRSSRepository(db),
-		DatasetMapping: NewDatasetMappingRepository(db),
-		Setting:        NewSettingRepository(db),
-		LLMProxy:        NewLLMProxyRepository(db),
-		LLMChannel:      NewLLMChannelRepository(db),
-		LLMModelGroup:   NewLLMModelGroupRepository(db),
-		LLMToken:        NewLLMTokenRepository(db),
-		LLMTokenUsage:   NewLLMTokenUsageRepository(db),
-		LLMModelPricing: NewLLMModelPricingRepository(db),
-		LLMRateLimit:            NewLLMRateLimitRepository(db),
-		LLMConversationBinding:  NewConversationBindingRepository(db),
-		LLMChannelCredential:       NewLLMChannelCredentialRepository(db),
-		LLMChannelBalanceSnapshot:  NewLLMChannelBalanceSnapshotRepository(db),
-		ActivityLog:    NewActivityLogRepository(db),
-		LogSource:      NewLogSourceRepository(db),
-		LogEntry:       NewLogEntryRepository(db),
-		LogAlertRule:   NewLogAlertRuleRepository(db),
-		ArticleTag:     NewArticleTagRepository(db),
+		Tag:                       NewTagRepository(db),
+		RSS:                       NewRSSRepository(db),
+		DatasetMapping:            NewDatasetMappingRepository(db),
+		Setting:                   NewSettingRepository(db),
+		LLMProxy:                  NewLLMProxyRepository(db),
+		LLMChannel:                NewLLMChannelRepository(db),
+		LLMModelGroup:             NewLLMModelGroupRepository(db),
+		LLMToken:                  NewLLMTokenRepository(db),
+		LLMTokenUsage:             NewLLMTokenUsageRepository(db),
+		LLMModelPricing:           NewLLMModelPricingRepository(db),
+		LLMRateLimit:              NewLLMRateLimitRepository(db),
+		LLMConversationBinding:    NewConversationBindingRepository(db),
+		LLMChannelCredential:      NewLLMChannelCredentialRepository(db),
+		LLMChannelBalanceSnapshot: NewLLMChannelBalanceSnapshotRepository(db),
+		LLMJob:                    NewLLMJobRepository(db),
+		ActivityLog:               NewActivityLogRepository(db),
+		LogSource:                 NewLogSourceRepository(db),
+		LogEntry:                  NewLogEntryRepository(db),
+		LogAlertRule:              NewLogAlertRuleRepository(db),
+		ArticleTag:                NewArticleTagRepository(db),
 		// Matrix Platform
 		MatrixRoom:         NewMatrixRoomRepository(db),
 		MatrixChannel:      NewMatrixChannelRepository(db),

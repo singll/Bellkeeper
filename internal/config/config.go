@@ -15,6 +15,7 @@ type Config struct {
 	Logging       LoggingConfig       `mapstructure:"logging"`
 	Features      FeatureConfig       `mapstructure:"features"`
 	LLMProxy      LLMProxyConfig      `mapstructure:"llm_proxy"`
+	LLMJobQueue   LLMJobQueueConfig   `mapstructure:"llm_job_queue"`
 	Classify      ClassifyConfig      `mapstructure:"classify"`
 	FileIngestion FileIngestionConfig `mapstructure:"file_ingestion"`
 	RSSFetcher    RSSFetcherConfig    `mapstructure:"rss_fetcher"`
@@ -42,13 +43,25 @@ type LLMProxyConfig struct {
 	BalanceSyncInterval int `mapstructure:"balance_sync_interval"` // seconds, 0 = disabled
 	LogRetentionDays    int `mapstructure:"log_retention_days"`    // 0 = default 30
 	// Coding routing strategy
-	CodingRoutingStrategy string          `mapstructure:"coding_routing_strategy"` // free_first | quality_first | complexity_aware
+	CodingRoutingStrategy string           `mapstructure:"coding_routing_strategy"` // free_first | quality_first | complexity_aware
 	Complexity            ComplexityConfig `mapstructure:"complexity"`
 }
 
+type LLMJobQueueConfig struct {
+	Enabled                 bool `mapstructure:"enabled"`
+	Workers                 int  `mapstructure:"workers"`
+	PollIntervalSeconds     int  `mapstructure:"poll_interval_seconds"`
+	MaxRetries              int  `mapstructure:"max_retries"`
+	InitialBackoffSeconds   int  `mapstructure:"initial_backoff_seconds"`
+	MaxBackoffSeconds       int  `mapstructure:"max_backoff_seconds"`
+	StaleTimeoutMinutes     int  `mapstructure:"stale_timeout_minutes"`
+	RecoveryIntervalMinutes int  `mapstructure:"recovery_interval_minutes"`
+	JobTimeoutSeconds       int  `mapstructure:"job_timeout_seconds"`
+}
+
 type ComplexityConfig struct {
-	SimpleThresholdTokens int      `mapstructure:"simple_threshold_tokens"`
-	ComplexThresholdTokens int     `mapstructure:"complex_threshold_tokens"`
+	SimpleThresholdTokens  int      `mapstructure:"simple_threshold_tokens"`
+	ComplexThresholdTokens int      `mapstructure:"complex_threshold_tokens"`
 	ComplexKeywords        []string `mapstructure:"complex_keywords"`
 }
 
@@ -74,23 +87,23 @@ type ModelGroupMember struct {
 }
 
 type ChannelConfig struct {
-	ID        uint     `mapstructure:"-"` // DB row id (0 for YAML-only config); used for rate-limit learning + bindings
-	Name      string   `mapstructure:"name"`
-	BaseURL   string   `mapstructure:"base_url"`
-	APIKey       string   `mapstructure:"api_key"`
-	ProviderType string   `mapstructure:"provider_type"`
-	RawAPIKey    string   `mapstructure:"-"` // Pre-expansion value, set by Load()
-	RPM       int      `mapstructure:"rpm"`
-	BalanceProviderType string `mapstructure:"balance_provider_type"`
-	BalanceConfigJSON   string `mapstructure:"balance_config_json"`
-	ModelRPMOverrides   string `mapstructure:"model_rpm_overrides"`
-	RPD       int      `mapstructure:"rpd"`
-	Priority  int      `mapstructure:"priority"`
-	Models    []string `mapstructure:"models"`
-	IsEnabled bool     `mapstructure:"is_enabled"`
-	IsFree    bool     `mapstructure:"is_free"`
-	TaskTypes []string `mapstructure:"task_types"` // empty = eligible for all task types
-	Tier      string   `mapstructure:"tier"`       // free | standard | premium; empty = derived from IsFree
+	ID                  uint     `mapstructure:"-"` // DB row id (0 for YAML-only config); used for rate-limit learning + bindings
+	Name                string   `mapstructure:"name"`
+	BaseURL             string   `mapstructure:"base_url"`
+	APIKey              string   `mapstructure:"api_key"`
+	ProviderType        string   `mapstructure:"provider_type"`
+	RawAPIKey           string   `mapstructure:"-"` // Pre-expansion value, set by Load()
+	RPM                 int      `mapstructure:"rpm"`
+	BalanceProviderType string   `mapstructure:"balance_provider_type"`
+	BalanceConfigJSON   string   `mapstructure:"balance_config_json"`
+	ModelRPMOverrides   string   `mapstructure:"model_rpm_overrides"`
+	RPD                 int      `mapstructure:"rpd"`
+	Priority            int      `mapstructure:"priority"`
+	Models              []string `mapstructure:"models"`
+	IsEnabled           bool     `mapstructure:"is_enabled"`
+	IsFree              bool     `mapstructure:"is_free"`
+	TaskTypes           []string `mapstructure:"task_types"` // empty = eligible for all task types
+	Tier                string   `mapstructure:"tier"`       // free | standard | premium; empty = derived from IsFree
 }
 
 type ServerConfig struct {
@@ -148,13 +161,13 @@ type ClassifyConfig struct {
 }
 
 type FileIngestionConfig struct {
-	Enabled     bool              `mapstructure:"enabled"`
-	BasePath    string            `mapstructure:"base_path"`
-	RawDir      string            `mapstructure:"raw_dir"`
-	WorkingDir  string            `mapstructure:"working_dir"`
-	DefaultLayer string           `mapstructure:"default_layer"`
-	Trafilatura TrafilaturaConfig `mapstructure:"trafilatura"`
-	Firecrawl   FirecrawlConfig   `mapstructure:"firecrawl"`
+	Enabled      bool              `mapstructure:"enabled"`
+	BasePath     string            `mapstructure:"base_path"`
+	RawDir       string            `mapstructure:"raw_dir"`
+	WorkingDir   string            `mapstructure:"working_dir"`
+	DefaultLayer string            `mapstructure:"default_layer"`
+	Trafilatura  TrafilaturaConfig `mapstructure:"trafilatura"`
+	Firecrawl    FirecrawlConfig   `mapstructure:"firecrawl"`
 }
 
 type TrafilaturaConfig struct {
@@ -175,10 +188,10 @@ type MatrixConfig struct {
 	BotUserID      string   `mapstructure:"bot_user_id"`
 	BotAccessToken string   `mapstructure:"bot_access_token"`
 	DeviceID       string   `mapstructure:"device_id"`
-	SyncTimeout    int      `mapstructure:"sync_timeout"`     // milliseconds
-	CommandPrefix  string   `mapstructure:"command_prefix"`   // comma-separated prefixes
+	SyncTimeout    int      `mapstructure:"sync_timeout"`   // milliseconds
+	CommandPrefix  string   `mapstructure:"command_prefix"` // comma-separated prefixes
 	MaxRetry       int      `mapstructure:"max_retry"`
-	AdminUsers     []string `mapstructure:"admin_users"`    // list of admin user IDs
+	AdminUsers     []string `mapstructure:"admin_users"` // list of admin user IDs
 }
 
 type RedisConfig struct {
@@ -189,8 +202,8 @@ type RedisConfig struct {
 }
 
 type NATSConfig struct {
-	URL     string              `mapstructure:"url"`
-	Streams NATSStreamsConfig   `mapstructure:"streams"`
+	URL     string            `mapstructure:"url"`
+	Streams NATSStreamsConfig `mapstructure:"streams"`
 }
 
 type NATSStreamsConfig struct {
@@ -213,38 +226,38 @@ type MeilisearchConfig struct {
 
 // KnowledgeConfig 知识库索引配置
 type KnowledgeConfig struct {
-	Enabled       bool             `mapstructure:"enabled"`
-	BasePath      string           `mapstructure:"base_path"`
-	ScanDirs      []ScanDirConfig `mapstructure:"scan_dirs"`
-	ScanInterval  int              `mapstructure:"scan_interval"`
-	ChunkMinSize  int              `mapstructure:"chunk_min_size"`
-	ChunkMaxSize  int              `mapstructure:"chunk_max_size"`
+	Enabled      bool            `mapstructure:"enabled"`
+	BasePath     string          `mapstructure:"base_path"`
+	ScanDirs     []ScanDirConfig `mapstructure:"scan_dirs"`
+	ScanInterval int             `mapstructure:"scan_interval"`
+	ChunkMinSize int             `mapstructure:"chunk_min_size"`
+	ChunkMaxSize int             `mapstructure:"chunk_max_size"`
 }
 
 // RSSFetcherConfig RSS 抓取器配置
 type RSSFetcherConfig struct {
 	Enabled       bool   `mapstructure:"enabled"`
-	CheckInterval int    `mapstructure:"check_interval"` // 轮询间隔（秒）
-	MaxPerBatch   int    `mapstructure:"max_per_batch"`  // 每批最大处理 feed 数
-	Timeout       int    `mapstructure:"timeout"`        // 单个 feed 超时（秒）
+	CheckInterval int    `mapstructure:"check_interval"`  // 轮询间隔（秒）
+	MaxPerBatch   int    `mapstructure:"max_per_batch"`   // 每批最大处理 feed 数
+	Timeout       int    `mapstructure:"timeout"`         // 单个 feed 超时（秒）
 	RSSHubBaseURL string `mapstructure:"rsshub_base_url"` // RSSHub 实例地址，用于拼接以 / 开头的相对路径
 }
 
 // CrawlQueueConfig 爬取队列配置
 type CrawlQueueConfig struct {
-	Enabled             bool     `mapstructure:"enabled"`
-	FirecrawlWorkers    int      `mapstructure:"firecrawl_workers"`
-	TrafilaturaWorkers  int      `mapstructure:"trafilatura_workers"`
-	AutoWorkers         int      `mapstructure:"auto_workers"`
-	PollInterval        int      `mapstructure:"poll_interval"`        // 秒
-	MaxRetries          int      `mapstructure:"max_retries"`
-	RetryBackoffBase    int      `mapstructure:"retry_backoff_base"`   // 秒
-	RetryBackoffMax     int      `mapstructure:"retry_backoff_max"`    // 秒
-	DeadLetterThreshold int      `mapstructure:"dead_letter_threshold"`
-	PaywallThreshold    int      `mapstructure:"paywall_threshold"`    // 连续空内容次数
-	BlockedDomains           []string `mapstructure:"blocked_domains"`            // 预设付费墙域名
-	StaleTimeoutMinutes      int      `mapstructure:"stale_timeout_minutes"`      // 运行超过此分钟数视为卡死
-	RecoveryIntervalMinutes  int      `mapstructure:"recovery_interval_minutes"`  // 卡死回收检查间隔（分钟）
+	Enabled                 bool     `mapstructure:"enabled"`
+	FirecrawlWorkers        int      `mapstructure:"firecrawl_workers"`
+	TrafilaturaWorkers      int      `mapstructure:"trafilatura_workers"`
+	AutoWorkers             int      `mapstructure:"auto_workers"`
+	PollInterval            int      `mapstructure:"poll_interval"` // 秒
+	MaxRetries              int      `mapstructure:"max_retries"`
+	RetryBackoffBase        int      `mapstructure:"retry_backoff_base"` // 秒
+	RetryBackoffMax         int      `mapstructure:"retry_backoff_max"`  // 秒
+	DeadLetterThreshold     int      `mapstructure:"dead_letter_threshold"`
+	PaywallThreshold        int      `mapstructure:"paywall_threshold"`         // 连续空内容次数
+	BlockedDomains          []string `mapstructure:"blocked_domains"`           // 预设付费墙域名
+	StaleTimeoutMinutes     int      `mapstructure:"stale_timeout_minutes"`     // 运行超过此分钟数视为卡死
+	RecoveryIntervalMinutes int      `mapstructure:"recovery_interval_minutes"` // 卡死回收检查间隔（分钟）
 }
 
 // ScanDirConfig 扫描目录配置
@@ -359,6 +372,17 @@ func setDefaults(v *viper.Viper) {
 	v.SetDefault("llm_proxy.circuit_breaker.cooldown_seconds", 120)
 	v.SetDefault("llm_proxy.circuit_breaker.half_open_max", 1)
 	v.SetDefault("llm_proxy.circuit_breaker.error_window_seconds", 300)
+
+	// LLM Job Queue
+	v.SetDefault("llm_job_queue.enabled", true)
+	v.SetDefault("llm_job_queue.workers", 1)
+	v.SetDefault("llm_job_queue.poll_interval_seconds", 5)
+	v.SetDefault("llm_job_queue.max_retries", 24)
+	v.SetDefault("llm_job_queue.initial_backoff_seconds", 30)
+	v.SetDefault("llm_job_queue.max_backoff_seconds", 900)
+	v.SetDefault("llm_job_queue.stale_timeout_minutes", 30)
+	v.SetDefault("llm_job_queue.recovery_interval_minutes", 5)
+	v.SetDefault("llm_job_queue.job_timeout_seconds", 600)
 
 	// Classify
 	v.SetDefault("classify.enabled", false)

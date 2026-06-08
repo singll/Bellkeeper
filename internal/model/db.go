@@ -58,6 +58,7 @@ func AutoMigrate(db *gorm.DB) error {
 		&LLMAlertEvent{},
 		&LLMChannelCredential{},
 		&LLMChannelBalanceSnapshot{},
+		&LLMJob{},
 		&ActivityLog{},
 		&LogSource{},
 		&LogEntry{},
@@ -70,8 +71,8 @@ func AutoMigrate(db *gorm.DB) error {
 		&MatrixCommandLog{},
 		&MatrixSyncState{},
 		&MatrixUserRole{},
-			&CrawlSource{},
-			&CrawlJob{},
+		&CrawlSource{},
+		&CrawlJob{},
 	); err != nil {
 		return err
 	}

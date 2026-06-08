@@ -147,9 +147,14 @@ func (a *App) setupKnowledge() error {
 
 	knowledgeIndexSvc := service.NewKnowledgeIndexService(a.cfg.Knowledge, meiliClient)
 	knowledgeSearchSvc := service.NewFileSearchService(meiliClient)
+	var askQueue *service.LLMJobQueueService
+	if a.cfg.LLMJobQueue.Enabled {
+		askQueue = a.services.LLMJobQueue
+	}
 	askSvc := service.NewAskService(knowledgeSearchSvc,
 		fmt.Sprintf("http://localhost:%d/api/llm/v1", a.cfg.Server.Port),
-		a.cfg.Server.APIKey)
+		a.cfg.Server.APIKey,
+		askQueue)
 
 	knowledgeSearchAdapter := service.NewSearchServiceAdapter(knowledgeSearchSvc)
 	knowledgeAskAdapter := service.NewAskServiceAdapter(askSvc)
@@ -265,6 +270,12 @@ func (a *App) setupMatrixGateway() error {
 
 // startBackgroundTasks starts all background goroutines.
 func (a *App) startBackgroundTasks() {
+	// LLM job queue must start before producers such as RSS/crawl/classify.
+	if a.services.LLMJobQueue != nil {
+		a.services.LLMJobQueue.Start(context.Background())
+		a.logger.Info("[LLMJobQueue] LLM job queue started")
+	}
+
 	// Knowledge indexing
 	if a.knowledgeIndexSvc != nil {
 		a.knowledgeIndexSvc.StartFullScan(context.Background())
@@ -284,6 +295,7 @@ func (a *App) startBackgroundTasks() {
 		a.services.CrawlQueue.Start(context.Background())
 		a.logger.Info("[CrawlQueue] crawl queue started")
 	}
+
 }
 
 // SetupHTTP configures the Gin router and HTTP server.
@@ -367,6 +379,9 @@ func (a *App) Shutdown() error {
 	// Core services
 	if a.services.CrawlQueue != nil {
 		a.services.CrawlQueue.Stop()
+	}
+	if a.services.LLMJobQueue != nil {
+		a.services.LLMJobQueue.Stop()
 	}
 	if a.services.LLMProxy != nil {
 		a.services.LLMProxy.Stop()

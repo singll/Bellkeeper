@@ -10,6 +10,7 @@ import (
 	"github.com/singll/bellkeeper/internal/model"
 	"github.com/singll/bellkeeper/internal/pkb"
 	"github.com/singll/bellkeeper/internal/repository"
+	"github.com/singll/bellkeeper/internal/service"
 	"github.com/spf13/cobra"
 )
 
@@ -115,10 +116,16 @@ func runPkbDigest(cmd *cobra.Command, args []string) {
 		os.Exit(1)
 	}
 	articleRepo := repository.NewArticleTagRepository(db)
+	var llmJobs *service.LLMJobQueueService
+	if cfg.LLMJobQueue.Enabled {
+		llmJobRepo := repository.NewLLMJobRepository(db)
+		llmJobs = service.NewLLMJobQueueService(cfg.LLMJobQueue, llmJobRepo, cfg.Classify.LLMProxyURL, cfg.Server.APIKey)
+	}
 
 	curator, err := pkb.NewCurator(cfg, pkb.Options{
 		ConfigDir: pkbCfgDir,
 		DryRun:    pkbDryRun,
+		LLMJobs:   llmJobs,
 	}, articleRepo)
 	if err != nil {
 		fmt.Fprintf(os.Stderr, "Failed to init pkb curator: %v\n", err)
@@ -199,12 +206,18 @@ func runPkbCurate(cmd *cobra.Command, args []string) {
 		os.Exit(1)
 	}
 	articleRepo := repository.NewArticleTagRepository(db)
+	var llmJobs *service.LLMJobQueueService
+	if cfg.LLMJobQueue.Enabled {
+		llmJobRepo := repository.NewLLMJobRepository(db)
+		llmJobs = service.NewLLMJobQueueService(cfg.LLMJobQueue, llmJobRepo, cfg.Classify.LLMProxyURL, cfg.Server.APIKey)
+	}
 
 	curator, err := pkb.NewCurator(cfg, pkb.Options{
 		ConfigDir: pkbCfgDir,
 		DryRun:    pkbDryRun,
 		Rescan:    pkbRescan,
 		PerRun:    pkbPerRun,
+		LLMJobs:   llmJobs,
 	}, articleRepo)
 	if err != nil {
 		fmt.Fprintf(os.Stderr, "Failed to init pkb curator: %v\n", err)

@@ -110,6 +110,8 @@
 > **实施状态（2026-06-03 核验）**：9-tier 审计修复（Tier 0–9）全部 commit 落地于分支 `fix/llm-proxy-p1-audit`；`go build ./...` / `go vet ./internal/...` / 前端 `pnpm build`（70 模块）全绿；关键能力均有真实调用方（Token 鉴权挂 proxy 组、micro-cent 计费、429→限流学习 `Record429`、错误码 `Classify`、`proxyRerank`、会话粘性 `Upsert`、告警聚合接 Matrix `alerts`、Gemini 转换）；7 张新表 `AutoMigrate` + 默认 token auto-seed；前端 10 页注册 + 导航四分组；单测断言真实行为（如「1000 deepseek tokens=14 微分而非 0」「classify 永不路由到 coding-only 成员」）。
 >
 > 🔶 **待运行时验证（用户后续自验，对应 §2.8 验收标准）**：prompt cache 命中率 >80%、自适应限流学习曲线（30min/24h）、Kimi Code 403→5h 探测自恢复、各 provider 真实余额拉取、调用方 base_url 迁移。**停掉 new-api 容器暂缓**（用户仍在使用 new-api）。
+>
+> **补充实现（2026-06-08）**：新增通用 `internal/llmclient` + 持久化 `llm_jobs` / `LLMJobQueueService`。同步 OpenAI-compatible 代理仍由 `/api/llm/v1` 负责；内部批处理/可等待调用（PKB score/reconstruct/digest、classify、knowledge ask）统一可进入 `llm_jobs`，由 server worker 复用 LLM Proxy 的路由/计费/熔断能力并承担长时间 retry/backoff/stale recovery。
 
 ### 2.0 背景与目标
 
