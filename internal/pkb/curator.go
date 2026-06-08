@@ -107,6 +107,7 @@ type runSummary struct {
 	archive   int
 	discard   int
 	failed    int
+	deferred  int
 }
 
 // Run 执行一轮维护：列举 → 读 → 打分 → 决策分流 → (高分)重构 → 落盘 → 重索引。
@@ -119,10 +120,14 @@ func (c *Curator) Run() error {
 	fmt.Printf("[pkb-curate] score_model=%s reconstruct_model=%s vault>=%.1f archive>=%.1f\n",
 		c.domains.Defaults.ScoreModel, c.domains.Defaults.ReconstructModel,
 		c.domains.Defaults.VaultThreshold, c.domains.Defaults.ArchiveThreshold)
-	fmt.Printf("[pkb-curate] prompts score=%s reconstruct=%s budget(score=%d,reconstruct=%d)\n",
+	fmt.Printf("[pkb-curate] prompts score=%s reconstruct=%s budget(score=%d,reconstruct=%d) retry(attempts=%d,backoff=%ds,max=%ds,stop_on_rate_limit=%v)\n",
 		c.scorePromptName, c.reconstructName,
 		c.domains.Defaults.Budget.MaxScoreCallsPerRun,
-		c.domains.Defaults.Budget.MaxReconstructCallsPerRun)
+		c.domains.Defaults.Budget.MaxReconstructCallsPerRun,
+		c.domains.Defaults.Retry.MaxAttempts,
+		c.domains.Defaults.Retry.InitialBackoffSeconds,
+		c.domains.Defaults.Retry.MaxBackoffSeconds,
+		c.domains.Defaults.Retry.StopRunOnRateLimit)
 
 	articles, err := c.client.ListRaw(c.perRun, !c.rescan)
 	if err != nil {
@@ -134,6 +139,16 @@ func (c *Curator) Run() error {
 	for i, art := range articles {
 		fmt.Printf("\n[%d/%d] %s\n", i+1, len(articles), art.Title)
 		if err := c.processOne(art, &sum); err != nil {
+			if c.domains.Defaults.Retry.StopRunOnRateLimit && isRetryableLLMError(err) {
+				sum.deferred = len(articles) - i
+				fmt.Printf("    ↷ LLM 免费池/上游仍在限流，本轮停止；当前及后续 %d 篇保留在 raw 队列，下轮继续: %v\n", sum.deferred, err)
+				break
+			}
+			if isBudgetExhausted(err) {
+				sum.deferred = len(articles) - i
+				fmt.Printf("    ↷ 本轮大模型预算已用尽；当前及后续 %d 篇保留在 raw 队列，下轮继续: %v\n", sum.deferred, err)
+				break
+			}
 			sum.failed++
 			fmt.Printf("    ✗ 处理失败（跳过，不中断整批）: %v\n", err)
 		}
@@ -146,8 +161,8 @@ func (c *Curator) Run() error {
 		}
 	}
 
-	fmt.Printf("\n[pkb-curate] 本轮完成：处理 %d / vault %d / archive %d / discard %d / 失败 %d\n",
-		sum.processed, sum.vault, sum.archive, sum.discard, sum.failed)
+	fmt.Printf("\n[pkb-curate] 本轮完成：处理 %d / vault %d / archive %d / discard %d / 失败 %d / 延期 %d\n",
+		sum.processed, sum.vault, sum.archive, sum.discard, sum.failed, sum.deferred)
 	return nil
 }
 

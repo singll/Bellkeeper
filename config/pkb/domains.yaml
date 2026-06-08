@@ -24,6 +24,11 @@ defaults:
     max_score_calls_per_run: 50
     max_reconstruct_calls_per_run: 5
     max_digest_calls_per_run: 3
+  retry:
+    max_attempts: 4                  # 含首次调用；免费池低速时先少量退避重试
+    initial_backoff_seconds: 20      # 429/503 后首次等待
+    max_backoff_seconds: 300         # 单次等待上限，避免进程无限挂死
+    stop_run_on_rate_limit: true     # 仍被限流时停止本轮，未处理 raw 留到下轮继续
 
 # 领域清单：新增领域=加一个 - name 块；改关键词/阈值只动对应块
 domains:

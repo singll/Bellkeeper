@@ -32,6 +32,7 @@ type Defaults struct {
 	ContentTruncate        int     `yaml:"content_truncate"`
 	LLMTokenEnv            string  `yaml:"llm_token_env"` // 可选：专用 LLM token 环境变量名，便于 PKB 独立配额/成本控制
 	Budget                 Budget  `yaml:"budget"`
+	Retry                  Retry   `yaml:"retry"`
 }
 
 // Budget 本轮大模型调用护栏。0 表示不限制。
@@ -39,6 +40,14 @@ type Budget struct {
 	MaxScoreCallsPerRun       int `yaml:"max_score_calls_per_run"`
 	MaxReconstructCallsPerRun int `yaml:"max_reconstruct_calls_per_run"`
 	MaxDigestCallsPerRun      int `yaml:"max_digest_calls_per_run"`
+}
+
+// Retry controls PKB-level backoff for low-throughput/free LLM pools.
+type Retry struct {
+	MaxAttempts           int  `yaml:"max_attempts"`
+	InitialBackoffSeconds int  `yaml:"initial_backoff_seconds"`
+	MaxBackoffSeconds     int  `yaml:"max_backoff_seconds"`
+	StopRunOnRateLimit    bool `yaml:"stop_run_on_rate_limit"`
 }
 
 // Domain 单个领域
@@ -107,6 +116,16 @@ func LoadDomains(path string) (*DomainsConfig, error) {
 	if d.ContentTruncate <= 0 {
 		d.ContentTruncate = 8000
 	}
+	if d.Retry.MaxAttempts <= 0 {
+		d.Retry.MaxAttempts = 4
+	}
+	if d.Retry.InitialBackoffSeconds <= 0 {
+		d.Retry.InitialBackoffSeconds = 20
+	}
+	if d.Retry.MaxBackoffSeconds <= 0 {
+		d.Retry.MaxBackoffSeconds = 300
+	}
+	d.Retry.StopRunOnRateLimit = true
 
 	return &dc, nil
 }

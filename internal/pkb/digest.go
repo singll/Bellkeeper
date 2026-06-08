@@ -81,6 +81,14 @@ func (c *Curator) RunDigest(opts DigestOptions) error {
 			continue
 		}
 		if err := c.writeDigest(domain, period, cards); err != nil {
+			if c.domains.Defaults.Retry.StopRunOnRateLimit && isRetryableLLMError(err) {
+				fmt.Printf("[pkb-digest] ↷ LLM 免费池/上游仍在限流，本轮停止；剩余领域下轮继续: %v\n", err)
+				break
+			}
+			if isBudgetExhausted(err) {
+				fmt.Printf("[pkb-digest] ↷ 本轮 digest 预算已用尽；剩余领域下轮继续: %v\n", err)
+				break
+			}
 			fmt.Printf("[pkb-digest] ⚠ %s 生成失败: %v\n", domain.Name, err)
 			continue
 		}
@@ -218,7 +226,7 @@ func (c *Curator) writeDigest(domain Domain, period string, cards []digestCard) 
 	prompt = strings.ReplaceAll(prompt, "{{card_count}}", strconv.Itoa(len(cards)))
 	prompt = strings.ReplaceAll(prompt, "{{cards}}", renderDigestCards(cards))
 
-	out, err := c.client.ChatCompletion(c.domains.Defaults.DigestModel, "", prompt, c.domains.Defaults.DigestTemperature, "long_context")
+	out, err := c.chatCompletionWithRetry(c.domains.Defaults.DigestModel, "", prompt, c.domains.Defaults.DigestTemperature, "long_context")
 	if err != nil {
 		return fmt.Errorf("digest llm: %w", err)
 	}

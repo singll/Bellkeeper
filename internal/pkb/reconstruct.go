@@ -32,7 +32,7 @@ func (c *Curator) reconstructCard(art ArticleMeta, body string, score *ScoreResu
 	prompt = strings.ReplaceAll(prompt, "{{candidates}}", candBlock)
 	prompt = strings.ReplaceAll(prompt, "{{content}}", content)
 
-	out, err := c.client.ChatCompletion(c.domains.Defaults.ReconstructModel, "", prompt, c.domains.Defaults.ReconstructTemperature, "long_context")
+	out, err := c.chatCompletionWithRetry(c.domains.Defaults.ReconstructModel, "", prompt, c.domains.Defaults.ReconstructTemperature, "long_context")
 	if err != nil {
 		return "", fmt.Errorf("reconstruct llm: %w", err)
 	}

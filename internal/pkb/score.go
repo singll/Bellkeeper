@@ -59,7 +59,7 @@ func (c *Curator) scoreArticle(art ArticleMeta, body string) (*ScoreResult, erro
 	prompt = strings.ReplaceAll(prompt, "{{title}}", art.Title)
 	prompt = strings.ReplaceAll(prompt, "{{content}}", content)
 
-	out, err := c.client.ChatCompletion(c.domains.Defaults.ScoreModel, "", prompt, c.domains.Defaults.ScoreTemperature, "summary")
+	out, err := c.chatCompletionWithRetry(c.domains.Defaults.ScoreModel, "", prompt, c.domains.Defaults.ScoreTemperature, "summary")
 	if err != nil {
 		return nil, fmt.Errorf("score llm: %w", err)
 	}

@@ -6,6 +6,7 @@ import (
 	"fmt"
 	"io"
 	"net/http"
+	"strconv"
 	"strings"
 	"time"
 )
@@ -29,6 +30,21 @@ type Client struct {
 	apiKey     string // Bellkeeper API key for local /api/files/* calls
 	llmKey     string // Dedicated LLM token when configured, else apiKey
 	httpClient *http.Client
+}
+
+// LLMHTTPError preserves proxy status and retry hints so batch jobs can back off
+// instead of treating low-throughput/free pools as ordinary per-item failures.
+type LLMHTTPError struct {
+	StatusCode int
+	Body       string
+	RetryAfter time.Duration
+}
+
+func (e *LLMHTTPError) Error() string {
+	if e.RetryAfter > 0 {
+		return fmt.Sprintf("llm returned %d after retry-after %s: %s", e.StatusCode, e.RetryAfter, e.Body)
+	}
+	return fmt.Sprintf("llm returned %d: %s", e.StatusCode, e.Body)
 }
 
 // NewClient 构造客户端。llmBase 形如 http://localhost:8080/api/llm/v1（取自 classify.llm_proxy_url）。
@@ -182,7 +198,11 @@ func (c *Client) ChatCompletion(model, systemPrompt, userPrompt string, temperat
 	defer resp.Body.Close()
 	raw, _ := io.ReadAll(resp.Body)
 	if resp.StatusCode >= 400 {
-		return "", fmt.Errorf("llm returned %d: %s", resp.StatusCode, string(raw))
+		return "", &LLMHTTPError{
+			StatusCode: resp.StatusCode,
+			Body:       string(raw),
+			RetryAfter: parseRetryAfter(resp.Header.Get("Retry-After")),
+		}
 	}
 	var llmResp struct {
 		Choices []struct {
@@ -198,4 +218,21 @@ func (c *Client) ChatCompletion(model, systemPrompt, userPrompt string, temperat
 		return "", fmt.Errorf("llm returned no choices")
 	}
 	return llmResp.Choices[0].Message.Content, nil
+}
+
+func parseRetryAfter(raw string) time.Duration {
+	raw = strings.TrimSpace(raw)
+	if raw == "" {
+		return 0
+	}
+	if seconds, err := strconv.Atoi(raw); err == nil && seconds > 0 {
+		return time.Duration(seconds) * time.Second
+	}
+	if t, err := http.ParseTime(raw); err == nil {
+		d := time.Until(t)
+		if d > 0 {
+			return d
+		}
+	}
+	return 0
 }
