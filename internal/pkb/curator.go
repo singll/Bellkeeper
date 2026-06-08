@@ -28,9 +28,13 @@ type Curator struct {
 	basePath          string // /mnt/knowledge
 	scorePrompt       string
 	reconstructPrompt string
+	scorePromptName   string
+	reconstructName   string
 	dryRun            bool
 	rescan            bool
 	perRun            int
+	scoreCalls        int
+	reconstructCalls  int
 }
 
 // NewCurator 装配 Curator：加载 config/pkb + 构造 HTTP 客户端 + 注入 ArticleTag 仓库（幂等账本）。
@@ -40,13 +44,17 @@ func NewCurator(cfg *config.Config, opts Options, articleRepo *repository.Articl
 		return nil, err
 	}
 
-	scorePrompt, err := os.ReadFile(filepath.Join(opts.ConfigDir, "prompts", "score.md"))
+	registry, err := LoadPromptRegistry(opts.ConfigDir)
 	if err != nil {
-		return nil, fmt.Errorf("read score prompt: %w", err)
+		return nil, err
 	}
-	reconstructPrompt, err := os.ReadFile(filepath.Join(opts.ConfigDir, "prompts", "reconstruct.md"))
+	scorePrompt, err := loadPromptFile(opts.ConfigDir, registry.Active.Score)
 	if err != nil {
-		return nil, fmt.Errorf("read reconstruct prompt: %w", err)
+		return nil, err
+	}
+	reconstructPrompt, err := loadPromptFile(opts.ConfigDir, registry.Active.Reconstruct)
+	if err != nil {
+		return nil, err
 	}
 
 	llmBase := cfg.Classify.LLMProxyURL
@@ -55,7 +63,13 @@ func NewCurator(cfg *config.Config, opts Options, articleRepo *repository.Articl
 	}
 	// 重构生成长卡片、rebuild 全量索引可能远超 classify.timeout(10s)；用独立较长超时（打分快，不受上限影响）
 	timeout := 300 * time.Second
-	client := NewClient(llmBase, cfg.Server.APIKey, timeout)
+	llmKey := cfg.Server.APIKey
+	if domains.Defaults.LLMTokenEnv != "" {
+		if v := os.Getenv(domains.Defaults.LLMTokenEnv); v != "" {
+			llmKey = v
+		}
+	}
+	client := NewClient(llmBase, cfg.Server.APIKey, llmKey, timeout)
 
 	perRun := opts.PerRun
 	if perRun <= 0 {
@@ -67,8 +81,10 @@ func NewCurator(cfg *config.Config, opts Options, articleRepo *repository.Articl
 		articleRepo:       articleRepo,
 		domains:           domains,
 		basePath:          cfg.Knowledge.BasePath,
-		scorePrompt:       string(scorePrompt),
-		reconstructPrompt: string(reconstructPrompt),
+		scorePrompt:       scorePrompt,
+		reconstructPrompt: reconstructPrompt,
+		scorePromptName:   registry.Active.Score,
+		reconstructName:   registry.Active.Reconstruct,
 		dryRun:            opts.DryRun,
 		rescan:            opts.Rescan,
 		perRun:            perRun,
@@ -94,6 +110,10 @@ func (c *Curator) Run() error {
 	fmt.Printf("[pkb-curate] score_model=%s reconstruct_model=%s vault>=%.1f archive>=%.1f\n",
 		c.domains.Defaults.ScoreModel, c.domains.Defaults.ReconstructModel,
 		c.domains.Defaults.VaultThreshold, c.domains.Defaults.ArchiveThreshold)
+	fmt.Printf("[pkb-curate] prompts score=%s reconstruct=%s budget(score=%d,reconstruct=%d)\n",
+		c.scorePromptName, c.reconstructName,
+		c.domains.Defaults.Budget.MaxScoreCallsPerRun,
+		c.domains.Defaults.Budget.MaxReconstructCallsPerRun)
 
 	articles, err := c.client.ListRaw(c.perRun, !c.rescan)
 	if err != nil {
@@ -154,8 +174,11 @@ func (c *Curator) processOne(art ArticleMeta, sum *runSummary) error {
 	domain := c.domains.ResolveDomain(score.MatchedDomains)
 	sum.processed++
 
-	fmt.Printf("    打分 rel=%d depth=%d action=%d → final=%.1f 领域=%s\n",
-		score.Relevance, score.Depth, score.Actionability, final, domain.Name)
+	fmt.Printf("    打分 rel=%d depth=%d action=%d durable=%d novelty=%d type=%s → final=%.1f 领域=%s\n",
+		score.Relevance, score.Depth, score.Actionability, score.Durability, score.Novelty, score.ContentType, final, domain.Name)
+	if score.Reason != "" {
+		fmt.Printf("    依据=%s\n", score.Reason)
+	}
 
 	switch {
 	case final < domain.ArchiveThresholdOr(c.domains.Defaults):
@@ -226,7 +249,7 @@ func (c *Curator) reconstructToVault(art ArticleMeta, body string, score *ScoreR
 	}
 	date := time.Now().Format("20060102")
 
-	candidates, err := c.client.SearchTitles(domain.Display, []string{"vault"}, 8)
+	candidates, err := c.client.SearchTitles(art.Title+" "+domain.Display, []string{"vault"}, 8)
 	if err != nil {
 		fmt.Printf("    ⚠ 检索 wikilink 候选失败（继续，无候选）: %v\n", err)
 		candidates = nil
@@ -292,6 +315,7 @@ func (c *Curator) scoreFields(score *ScoreResult, final float64, domain Domain, 
 		"pkb_score":     fmt.Sprintf("%.1f", final),
 		"pkb_decision":  decision,
 		"pkb_domain":    domain.Name,
+		"pkb_type":      score.ContentType,
 		"pkb_scored_at": time.Now().Format(time.RFC3339),
 	}
 }

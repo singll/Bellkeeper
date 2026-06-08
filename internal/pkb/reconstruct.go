@@ -10,10 +10,11 @@ var wikilinkRe = regexp.MustCompile(`\[\[([^\]]+)\]\]`)
 
 // reconstructCard 调重构 LLM，产出完整 Obsidian markdown 卡片；写盘前清理死链。
 func (c *Curator) reconstructCard(art ArticleMeta, body string, score *ScoreResult, domain Domain, candidates []string, date string) (string, error) {
-	content := body
-	if c.domains.Defaults.ContentTruncate > 0 && len(content) > c.domains.Defaults.ContentTruncate {
-		content = content[:c.domains.Defaults.ContentTruncate]
+	if max := c.domains.Defaults.Budget.MaxReconstructCallsPerRun; max > 0 && c.reconstructCalls >= max {
+		return "", fmt.Errorf("reconstruct budget exhausted: %d/%d", c.reconstructCalls, max)
 	}
+	c.reconstructCalls++
+	content := truncateRunes(body, c.domains.Defaults.ContentTruncate)
 
 	candBlock := "（暂无候选）"
 	if len(candidates) > 0 {
@@ -31,12 +32,15 @@ func (c *Curator) reconstructCard(art ArticleMeta, body string, score *ScoreResu
 	prompt = strings.ReplaceAll(prompt, "{{candidates}}", candBlock)
 	prompt = strings.ReplaceAll(prompt, "{{content}}", content)
 
-	out, err := c.client.ChatCompletion(c.domains.Defaults.ReconstructModel, "", prompt, c.domains.Defaults.ReconstructTemperature)
+	out, err := c.client.ChatCompletion(c.domains.Defaults.ReconstructModel, "", prompt, c.domains.Defaults.ReconstructTemperature, "long_context")
 	if err != nil {
 		return "", fmt.Errorf("reconstruct llm: %w", err)
 	}
 	card := stripCardFence(out)
 	card = pruneWikilinks(card, candidates) // 防 Obsidian 死链（§4.7）
+	if err := validateCard(card); err != nil {
+		return "", err
+	}
 	return card, nil
 }
 
@@ -70,4 +74,32 @@ func pruneWikilinks(card string, candidates []string) string {
 		}
 		return strings.TrimSpace(inner) // 降级为纯文本，去掉 [[]]
 	})
+}
+
+func validateCard(card string) error {
+	trimmed := strings.TrimSpace(card)
+	if !strings.HasPrefix(trimmed, "---\n") {
+		return fmt.Errorf("generated card missing YAML frontmatter")
+	}
+	requiredKeys := []string{"title:", "source:", "ingest_date:", "score:", "domains:", "tags:"}
+	for _, key := range requiredKeys {
+		if !strings.Contains(trimmed, "\n"+key) {
+			return fmt.Errorf("generated card missing frontmatter key %s", strings.TrimSuffix(key, ":"))
+		}
+	}
+	requiredSections := []string{
+		"## 核心洞察",
+		"## 关键技术要点 / 可复用资产",
+		"## 深度摘要",
+		"## 关联",
+	}
+	for _, section := range requiredSections {
+		if !strings.Contains(trimmed, section) {
+			return fmt.Errorf("generated card missing section %s", section)
+		}
+	}
+	if len([]rune(trimmed)) < 200 {
+		return fmt.Errorf("generated card too short")
+	}
+	return nil
 }

@@ -1,0 +1,5 @@
+# 当前启用的 PKB 提示词版本。
+# 调 prompt 时建议新增 score.v2.md / reconstruct.v2.md，再在这里切换，避免覆盖旧版本。
+active:
+  score: score.md
+  reconstruct: reconstruct.md

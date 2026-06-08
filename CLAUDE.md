@@ -134,6 +134,12 @@ spool bundle keeper up keeper
 ```
 此命令自动完成：git pull → sync push（推送 .env / n8n-workflows / couchdb 配置）→ docker build → docker compose up -d。
 
+**Bellkeeper 单服务代码部署（优先使用，禁止用 exec 手搓 docker compose）：**
+```bash
+spool bundle keeper service keeper bellkeeper up
+```
+此命令用于仅更新 Bellkeeper 服务镜像/容器；有专用 spool 命令可用时，必须优先使用专用命令，`spool exec` 仅用于专用命令覆盖不到的临时诊断。
+
 **仅重启服务（代码未变，仅改了 .env 或配置）：**
 ```bash
 spool sync push keeper          # 先推送配置

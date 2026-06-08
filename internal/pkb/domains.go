@@ -13,19 +13,29 @@ type Weights struct {
 	Relevance     float64 `yaml:"relevance"`
 	Depth         float64 `yaml:"depth"`
 	Actionability float64 `yaml:"actionability"`
+	Durability    float64 `yaml:"durability"`
+	Novelty       float64 `yaml:"novelty"`
 }
 
 // Defaults 全局默认（可被单领域覆盖）
 type Defaults struct {
-	VaultThreshold   float64 `yaml:"vault_threshold"`
-	ArchiveThreshold float64 `yaml:"archive_threshold"`
-	Weights          Weights `yaml:"weights"`
+	VaultThreshold         float64 `yaml:"vault_threshold"`
+	ArchiveThreshold       float64 `yaml:"archive_threshold"`
+	Weights                Weights `yaml:"weights"`
 	ScoreModel             string  `yaml:"score_model"`
 	ReconstructModel       string  `yaml:"reconstruct_model"`
 	ScoreTemperature       float64 `yaml:"score_temperature"`       // 0=用默认 0.2；kimi-k2.6 等推理模型须设 1.0
 	ReconstructTemperature float64 `yaml:"reconstruct_temperature"` // 0=用默认 0.4；kimi-k2.6 等推理模型须设 1.0
 	PerRun                 int     `yaml:"per_run"`
 	ContentTruncate        int     `yaml:"content_truncate"`
+	LLMTokenEnv            string  `yaml:"llm_token_env"` // 可选：专用 LLM token 环境变量名，便于 PKB 独立配额/成本控制
+	Budget                 Budget  `yaml:"budget"`
+}
+
+// Budget 本轮大模型调用护栏。0 表示不限制。
+type Budget struct {
+	MaxScoreCallsPerRun       int `yaml:"max_score_calls_per_run"`
+	MaxReconstructCallsPerRun int `yaml:"max_reconstruct_calls_per_run"`
 }
 
 // Domain 单个领域
@@ -68,7 +78,7 @@ func LoadDomains(path string) (*DomainsConfig, error) {
 		d.ArchiveThreshold = 4.0
 	}
 	if d.Weights == (Weights{}) {
-		d.Weights = Weights{Relevance: 0.4, Depth: 0.3, Actionability: 0.3}
+		d.Weights = Weights{Relevance: 0.35, Depth: 0.25, Actionability: 0.25, Durability: 0.15}
 	}
 	if d.ScoreModel == "" {
 		d.ScoreModel = "pool-summary"

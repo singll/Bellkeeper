@@ -5,16 +5,22 @@
 defaults:
   vault_threshold: 7.0       # final_score >= 此值 → 进 vault（原子化重构）
   archive_threshold: 4.0     # final_score >= 此值且 < vault_threshold → 进 archive；< 此值 → discard
-  weights:                   # 三维加权（和应为 1.0）
-    relevance: 0.4
-    depth: 0.3
-    actionability: 0.3
+  weights:                   # 长期知识价值加权（和建议为 1.0）
+    relevance: 0.35
+    depth: 0.25
+    actionability: 0.25
+    durability: 0.15
+    novelty: 0.0
   score_model: pool-summary    # 打分用快模型组（deepseek/qwen，便宜快，适合批量打分）
   reconstruct_model: pool-pkb  # 重构用 kimi-k2.6（moonshot，推理强；仅 >=7 高分文章触发，量少）
   score_temperature: 0.2           # 快模型允许低温，求稳定 JSON
   reconstruct_temperature: 1.0     # kimi-k2.6 是推理模型，仅接受 temperature=1
   per_run: 5                       # 单轮处理量上限（护栏，可被 --per-run 覆盖）
-  content_truncate: 8000           # 喂给 LLM 的正文截断长度（字符）
+  content_truncate: 8000           # 喂给 LLM 的正文截断长度（rune 字符）
+  llm_token_env: PKB_LLM_TOKEN     # 可选：配置专用 LLM Token 后，PKB 可独立限额/计费；未设置则回退 server.api_key
+  budget:
+    max_score_calls_per_run: 50
+    max_reconstruct_calls_per_run: 5
 
 # 领域清单：新增领域=加一个 - name 块；改关键词/阈值只动对应块
 domains:

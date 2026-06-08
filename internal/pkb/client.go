@@ -26,20 +26,25 @@ type ArticleMeta struct {
 type Client struct {
 	apiBase    string // http://localhost:8080
 	llmBase    string // http://localhost:8080/api/llm/v1
-	apiKey     string // X-API-Key（noauth 模式下亦透传，与 classify/ask 一致）
+	apiKey     string // Bellkeeper API key for local /api/files/* calls
+	llmKey     string // Dedicated LLM token when configured, else apiKey
 	httpClient *http.Client
 }
 
 // NewClient 构造客户端。llmBase 形如 http://localhost:8080/api/llm/v1（取自 classify.llm_proxy_url）。
-func NewClient(llmBase, apiKey string, timeout time.Duration) *Client {
+func NewClient(llmBase, apiKey, llmKey string, timeout time.Duration) *Client {
 	apiBase := strings.TrimSuffix(llmBase, "/api/llm/v1")
 	if apiBase == llmBase { // 容错：未按预期结尾
 		apiBase = "http://localhost:8080"
+	}
+	if llmKey == "" {
+		llmKey = apiKey
 	}
 	return &Client{
 		apiBase:    apiBase,
 		llmBase:    llmBase,
 		apiKey:     apiKey,
+		llmKey:     llmKey,
 		httpClient: &http.Client{Timeout: timeout},
 	}
 }
@@ -50,11 +55,13 @@ func (c *Client) newReq(method, url string, body io.Reader) (*http.Request, erro
 		return nil, err
 	}
 	req.Header.Set("Content-Type", "application/json")
-	if c.apiKey != "" {
-		// /api/llm/v1 经 LLMTokenAuth 校验：用 Authorization: Bearer <server api key>
-		// （server.api_key 在该中间件内被识别为有效 token）。/api/files/* 在 noauth 下不校验，带上无害。
-		req.Header.Set("Authorization", "Bearer "+c.apiKey)
-		req.Header.Set("X-API-Key", c.apiKey)
+	key := c.apiKey
+	if strings.HasPrefix(url, c.llmBase) && c.llmKey != "" {
+		key = c.llmKey
+	}
+	if key != "" {
+		req.Header.Set("Authorization", "Bearer "+key)
+		req.Header.Set("X-API-Key", key)
 	}
 	return req, nil
 }
@@ -147,7 +154,7 @@ func (c *Client) Rebuild() error {
 }
 
 // ChatCompletion 调 LLM Proxy（POST {llmBase}/chat/completions），返回 assistant 文本内容。
-func (c *Client) ChatCompletion(model, systemPrompt, userPrompt string, temperature float64) (string, error) {
+func (c *Client) ChatCompletion(model, systemPrompt, userPrompt string, temperature float64, taskType string) (string, error) {
 	messages := make([]map[string]string, 0, 2)
 	if systemPrompt != "" {
 		messages = append(messages, map[string]string{"role": "system", "content": systemPrompt})
@@ -163,6 +170,10 @@ func (c *Client) ChatCompletion(model, systemPrompt, userPrompt string, temperat
 	req, err := c.newReq(http.MethodPost, c.llmBase+"/chat/completions", bytes.NewReader(jsonData))
 	if err != nil {
 		return "", err
+	}
+	req.Header.Set("X-Caller-ID", "pkb-curate")
+	if taskType != "" {
+		req.Header.Set("X-Task-Type", taskType)
 	}
 	resp, err := c.httpClient.Do(req)
 	if err != nil {
