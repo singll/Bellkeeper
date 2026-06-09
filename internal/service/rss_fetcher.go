@@ -2,10 +2,13 @@ package service
 
 import (
 	"context"
+	"encoding/json"
 	"fmt"
 	"io"
 	"log"
 	"net/http"
+	"net/url"
+	"strconv"
 	"strings"
 	"sync"
 	"time"
@@ -335,6 +338,7 @@ func (s *RSSFetcherService) fetchFeed(ctx context.Context, feed *model.RSSFeed) 
 	feedURL := feed.URL
 	if strings.HasPrefix(feedURL, "/") && s.cfg.RSSHubBaseURL != "" {
 		feedURL = s.cfg.RSSHubBaseURL + feedURL
+		feedURL = s.appendRSSHubParams(feedURL, feed.RSSHubParams)
 		log.Printf("[RSSFetcher] resolved RSSHub URL: %s -> %s", feed.URL, feedURL)
 	}
 
@@ -787,4 +791,116 @@ func (s *RSSFetcherService) GetStatus() map[string]interface{} {
 		"config":      s.cfg,
 		"retry_queue": retryCount,
 	}
+}
+
+func (s *RSSFetcherService) appendRSSHubParams(baseURL string, paramsJSON []byte) string {
+	if len(paramsJSON) == 0 {
+		return baseURL
+	}
+	var params map[string]interface{}
+	if err := json.Unmarshal(paramsJSON, &params); err != nil {
+		return baseURL
+	}
+	if len(params) == 0 {
+		return baseURL
+	}
+
+	u, err := url.Parse(baseURL)
+	if err != nil {
+		return baseURL
+	}
+	q := u.Query()
+	for k, v := range params {
+		switch val := v.(type) {
+		case string:
+			q.Set(k, val)
+		case float64:
+			q.Set(k, strconv.Itoa(int(val)))
+		case bool:
+			q.Set(k, strconv.FormatBool(val))
+		}
+	}
+	u.RawQuery = q.Encode()
+	return u.String()
+}
+
+type FeedValidationResult struct {
+	Parsable    bool              `json:"parsable"`
+	ItemCount   int               `json:"item_count"`
+	Title       string            `json:"title,omitempty"`
+	Description string            `json:"description,omitempty"`
+	SampleItems []FeedSampleItem  `json:"sample_items,omitempty"`
+	Error       string            `json:"error,omitempty"`
+	IsRSSHub    bool              `json:"is_rsshub"`
+}
+
+type FeedSampleItem struct {
+	Title string `json:"title"`
+	URL   string `json:"url"`
+	Date  string `json:"date,omitempty"`
+}
+
+func (s *RSSFetcherService) ValidateFeedURL(ctx context.Context, rawURL string) (*FeedValidationResult, error) {
+	result := &FeedValidationResult{}
+
+	fetchURL := rawURL
+	if strings.HasPrefix(rawURL, "/") && s.cfg.RSSHubBaseURL != "" {
+		fetchURL = strings.TrimRight(s.cfg.RSSHubBaseURL, "/") + rawURL
+		result.IsRSSHub = true
+	}
+
+	req, err := http.NewRequestWithContext(ctx, http.MethodGet, fetchURL, nil)
+	if err != nil {
+		result.Error = fmt.Sprintf("invalid URL: %v", err)
+		return result, nil
+	}
+
+	resp, err := s.httpClient.Do(req)
+	if err != nil {
+		result.Error = fmt.Sprintf("fetch failed: %v", err)
+		return result, nil
+	}
+	defer resp.Body.Close()
+
+	if resp.StatusCode != http.StatusOK {
+		result.Error = fmt.Sprintf("HTTP %d", resp.StatusCode)
+		return result, nil
+	}
+
+	body, err := io.ReadAll(io.LimitReader(resp.Body, 2*1024*1024))
+	if err != nil {
+		result.Error = fmt.Sprintf("read body failed: %v", err)
+		return result, nil
+	}
+
+	feed, err := s.fetcher.ParseString(string(body))
+	if err != nil {
+		result.Error = fmt.Sprintf("parse failed: %v", err)
+		return result, nil
+	}
+
+	result.Parsable = true
+	result.ItemCount = len(feed.Items)
+	result.Title = feed.Title
+	result.Description = feed.Description
+
+	sampleCount := 5
+	if len(feed.Items) < sampleCount {
+		sampleCount = len(feed.Items)
+	}
+	for i := 0; i < sampleCount; i++ {
+		item := feed.Items[i]
+		sample := FeedSampleItem{
+			Title: item.Title,
+			URL:   item.Link,
+		}
+		if item.PublishedParsed != nil {
+			sample.Date = item.PublishedParsed.Format(time.RFC3339)
+		} else if item.Published != "" {
+			sample.Date = item.Published
+		}
+		result.SampleItems = append(result.SampleItems, sample)
+	}
+
+	return result, nil
 }

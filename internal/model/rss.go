@@ -28,9 +28,10 @@ type RSSFeed struct {
 	LastFailureReason     string     `gorm:"size:500" json:"last_failure_reason,omitempty"`         // most recent error message
 	IsPaused              bool       `gorm:"default:false" json:"is_paused"`                       // auto-paused when health_score < threshold
 	PausedAt              *time.Time `json:"paused_at,omitempty"`                                  // when auto-pause occurred
-	MaxConcurrency        int        `gorm:"default:3" json:"max_concurrency"`                     // per-source fetch concurrency limit
-	TotalFetched          int        `gorm:"default:0" json:"total_fetched"`                       // lifetime successful fetches count
-	TotalFailed           int        `gorm:"default:0" json:"total_failed"`                        // lifetime failed fetches count
+	MaxConcurrency        int            `gorm:"default:3" json:"max_concurrency"`                     // per-source fetch concurrency limit
+	TotalFetched          int            `gorm:"default:0" json:"total_fetched"`                       // lifetime successful fetches count
+	TotalFailed           int            `gorm:"default:0" json:"total_failed"`                        // lifetime failed fetches count
+	RSSHubParams          datatypes.JSON `gorm:"type:jsonb" json:"rsshub_params,omitempty"`            // RSSHub query params: {"limit":200,"filter":"AI","mode":"fulltext"}
 
 	// Relations
 	Tags []Tag `gorm:"many2many:rss_tags;" json:"tags,omitempty"`

@@ -97,6 +97,7 @@ func registerRSSRoutes(api *gin.RouterGroup, h *handler.RSSHandler) {
 	api.POST("/rss/fetch/:id", h.Fetch)
 	api.POST("/rss/fetch-all", h.FetchAll)
 	api.GET("/rss/fetch-status", h.FetchStatus)
+	api.POST("/rss/validate", h.ValidateFeed)
 }
 
 func registerDatasetRoutes(api *gin.RouterGroup, h *handler.DatasetHandler) {

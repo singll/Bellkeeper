@@ -8,6 +8,7 @@ import (
 	"github.com/singll/bellkeeper/internal/pkg/defaults"
 	"github.com/singll/bellkeeper/internal/pkg/response"
 	"github.com/singll/bellkeeper/internal/service"
+	"gorm.io/datatypes"
 )
 
 type RSSHandler struct {
@@ -19,15 +20,33 @@ func NewRSSHandler(svc *service.RSSService, fetcher *service.RSSFetcherService) 
 	return &RSSHandler{svc: svc, fetcher: fetcher}
 }
 
+func (h *RSSHandler) ValidateFeed(c *gin.Context) {
+	var req struct {
+		URL string `json:"url" binding:"required"`
+	}
+	if err := c.ShouldBindJSON(&req); err != nil {
+		response.BadRequest(c, err.Error())
+		return
+	}
+
+	result, err := h.fetcher.ValidateFeedURL(c.Request.Context(), req.URL)
+	if err != nil {
+		response.InternalError(c, err.Error())
+		return
+	}
+	response.Success(c, result)
+}
+
 type RSSRequest struct {
-	Name                 string `json:"name" binding:"required"`
-	URL                  string `json:"url" binding:"required"`
-	Category             string `json:"category"`
-	Description          string `json:"description"`
-	IsActive             *bool  `json:"is_active"`
-	FetchIntervalMinutes int    `json:"fetch_interval_minutes"`
-	MaxConcurrency       int    `json:"max_concurrency"`
-	TagIDs               []uint `json:"tag_ids"`
+	Name                 string          `json:"name" binding:"required"`
+	URL                  string          `json:"url" binding:"required"`
+	Category             string          `json:"category"`
+	Description          string          `json:"description"`
+	IsActive             *bool           `json:"is_active"`
+	FetchIntervalMinutes int             `json:"fetch_interval_minutes"`
+	MaxConcurrency       int             `json:"max_concurrency"`
+	TagIDs               []uint          `json:"tag_ids"`
+	RSSHubParams         datatypes.JSON `json:"rsshub_params"`
 }
 
 func (h *RSSHandler) List(c *gin.Context) {
@@ -88,6 +107,7 @@ func (h *RSSHandler) Create(c *gin.Context) {
 		IsActive:             isActive,
 		FetchIntervalMinutes: req.FetchIntervalMinutes,
 		MaxConcurrency:       req.MaxConcurrency,
+		RSSHubParams:         req.RSSHubParams,
 	}
 
 	if feed.FetchIntervalMinutes == 0 {
@@ -132,6 +152,7 @@ func (h *RSSHandler) Update(c *gin.Context) {
 	}
 	feed.FetchIntervalMinutes = req.FetchIntervalMinutes
 	feed.MaxConcurrency = req.MaxConcurrency
+	feed.RSSHubParams = req.RSSHubParams
 
 	if err := h.svc.Update(feed, req.TagIDs); err != nil {
 		response.InternalError(c, err.Error())
