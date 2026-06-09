@@ -1,6 +1,8 @@
 package service
 
 import (
+	"os"
+	"path/filepath"
 	"strings"
 	"testing"
 )
@@ -12,7 +14,7 @@ func TestStripFrontmatter(t *testing.T) {
 		want  string
 	}{
 		{
-			name: "with frontmatter",
+			name:  "with frontmatter",
 			input: "---\ncreated: 2026-05-03\n---\n\nHello",
 			want:  "Hello",
 		},
@@ -22,7 +24,7 @@ func TestStripFrontmatter(t *testing.T) {
 			want:  "Hello world",
 		},
 		{
-			name: "unclosed frontmatter",
+			name:  "unclosed frontmatter",
 			input: "---\ncreated: 2026-05-03\nHello",
 			want:  "---\ncreated: 2026-05-03\nHello",
 		},
@@ -204,5 +206,57 @@ func TestMergeMarkdown_PreservesExistingSections(t *testing.T) {
 	}
 	if !strings.Contains(merged, "| n8n | ✅ |") {
 		t.Error("merged should contain new n8n row")
+	}
+}
+
+func TestReportServiceWritesDailyToVaultDaily(t *testing.T) {
+	base := t.TempDir()
+	svc := NewReportService(base)
+	result, err := svc.WriteMessage(&WriteRequest{
+		Channel: "daily",
+		Content: "#### 服务状态\n\nOK",
+		Source:  "test",
+	})
+	if err != nil {
+		t.Fatalf("WriteMessage returned error: %v", err)
+	}
+	wantDir := filepath.Join(base, "vault", "daily")
+	if filepath.Dir(result.FilePath) != wantDir {
+		t.Fatalf("daily path dir = %q, want %q", filepath.Dir(result.FilePath), wantDir)
+	}
+	if _, err := os.Stat(result.FilePath); err != nil {
+		t.Fatalf("daily report file not written: %v", err)
+	}
+}
+
+func TestReportServiceKeepsOtherChannelsInWorkingMessages(t *testing.T) {
+	base := t.TempDir()
+	svc := NewReportService(base)
+	result, err := svc.WriteMessage(&WriteRequest{
+		Channel: "alerts",
+		Content: "#### Alert\n\nOK",
+	})
+	if err != nil {
+		t.Fatalf("WriteMessage returned error: %v", err)
+	}
+	wantDir := filepath.Join(base, "working", "messages", "alerts")
+	if filepath.Dir(result.FilePath) != wantDir {
+		t.Fatalf("alerts path dir = %q, want %q", filepath.Dir(result.FilePath), wantDir)
+	}
+}
+
+func TestReportServiceUsesRequestDateForBackfill(t *testing.T) {
+	base := t.TempDir()
+	svc := NewReportService(base)
+	result, err := svc.WriteMessage(&WriteRequest{
+		Channel: "daily",
+		Content: "#### Backfill\n\nOK",
+		Date:    "2026-06-03",
+	})
+	if err != nil {
+		t.Fatalf("WriteMessage returned error: %v", err)
+	}
+	if filepath.Base(result.FilePath) != "2026-06-03.md" {
+		t.Fatalf("file name = %q, want 2026-06-03.md", filepath.Base(result.FilePath))
 	}
 }

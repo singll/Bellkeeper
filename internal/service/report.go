@@ -12,14 +12,23 @@ import (
 
 // ReportService writes markdown reports to the knowledge base.
 type ReportService struct {
-	basePath string
-	mu       sync.Mutex // serialize writes to same file
+	basePath        string
+	dailyReportPath string
+	mu              sync.Mutex // serialize writes to same file
 }
 
 // NewReportService creates a new report service.
 func NewReportService(basePath string) *ReportService {
 	return &ReportService{
-		basePath: basePath,
+		basePath:        basePath,
+		dailyReportPath: filepath.Join("vault", "daily"),
+	}
+}
+
+// SetDailyReportPath overrides the relative path used for the daily channel.
+func (s *ReportService) SetDailyReportPath(path string) {
+	if strings.TrimSpace(path) != "" {
+		s.dailyReportPath = filepath.Clean(path)
 	}
 }
 
@@ -27,6 +36,7 @@ func NewReportService(basePath string) *ReportService {
 type WriteRequest struct {
 	Channel   string            `json:"channel" binding:"required"`
 	Content   string            `json:"content" binding:"required"`
+	Date      string            `json:"date"`
 	Source    string            `json:"source"`
 	MessageID string            `json:"message_id"`
 	Metadata  map[string]string `json:"metadata"`
@@ -34,15 +44,16 @@ type WriteRequest struct {
 
 // WriteResult is the result of a write operation.
 type WriteResult struct {
-	FilePath  string `json:"file_path"`
-	Channel   string `json:"channel"`
-	Merged    bool   `json:"merged"`
-	NewSections int  `json:"new_sections"`
-	NewLines  int    `json:"new_lines"`
+	FilePath    string `json:"file_path"`
+	Channel     string `json:"channel"`
+	Merged      bool   `json:"merged"`
+	NewSections int    `json:"new_sections"`
+	NewLines    int    `json:"new_lines"`
 }
 
 // WriteMessage writes a markdown message to the knowledge base.
-// Path: {basePath}/working/messages/{channel}/{date}.md
+// Path: daily reports go to {basePath}/{dailyReportPath}/{date}.md.
+// Other channels keep the legacy path {basePath}/working/messages/{channel}/{date}.md.
 // If the file already exists, performs incremental merge: only adds new content,
 // never deletes or overwrites existing sections.
 func (s *ReportService) WriteMessage(req *WriteRequest) (*WriteResult, error) {
@@ -54,11 +65,13 @@ func (s *ReportService) WriteMessage(req *WriteRequest) (*WriteResult, error) {
 	defer s.mu.Unlock()
 
 	now := time.Now()
-	dateStr := now.Format("2006-01-02")
+	dateStr, err := reportDateString(req.Date, now)
+	if err != nil {
+		return nil, err
+	}
 	timestamp := now.Format(time.RFC3339)
 
-	// Build directory: {basePath}/working/messages/{channel}/
-	dir := filepath.Join(s.basePath, "working", "messages", req.Channel)
+	dir := s.channelDir(req.Channel)
 	if err := os.MkdirAll(dir, 0755); err != nil {
 		return nil, fmt.Errorf("create directory: %w", err)
 	}
@@ -103,6 +116,24 @@ func (s *ReportService) WriteMessage(req *WriteRequest) (*WriteResult, error) {
 		NewSections: 0,
 		NewLines:    0,
 	}, nil
+}
+
+func reportDateString(raw string, fallback time.Time) (string, error) {
+	raw = strings.TrimSpace(raw)
+	if raw == "" {
+		return fallback.Format("2006-01-02"), nil
+	}
+	if _, err := time.Parse("2006-01-02", raw); err != nil {
+		return "", fmt.Errorf("date must be YYYY-MM-DD: %w", err)
+	}
+	return raw, nil
+}
+
+func (s *ReportService) channelDir(channel string) string {
+	if channel == "daily" {
+		return filepath.Join(s.basePath, s.dailyReportPath)
+	}
+	return filepath.Join(s.basePath, "working", "messages", channel)
 }
 
 // buildFrontmatter generates YAML frontmatter for a report entry.

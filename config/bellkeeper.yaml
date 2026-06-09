@@ -262,3 +262,12 @@ knowledge:
   scan_interval: 300
   chunk_min_size: 100
   chunk_max_size: 600
+
+daily_report:
+  enabled: true
+  path: vault/daily
+  watchdog_enabled: true
+  watchdog_time: "22:30"
+  timezone: Asia/Shanghai
+  report_channel: daily
+  alert_channel: alerts

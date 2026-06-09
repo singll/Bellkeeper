@@ -64,6 +64,9 @@ func Setup(r *gin.Engine, handlers *handler.Handlers, mode string, apiKey string
 	if handlers.Report != nil {
 		registerReportRoutes(api, handlers.Report)
 	}
+	if handlers.PKBReport != nil {
+		registerPKBReportRoutes(api, handlers.PKBReport)
+	}
 }
 
 func registerTagRoutes(api *gin.RouterGroup, h *handler.TagHandler) {
@@ -284,6 +287,13 @@ func registerSearchRoutes(api *gin.RouterGroup, h *handler.SearchHandler) {
 func registerReportRoutes(api *gin.RouterGroup, h *handler.ReportHandler) {
 	reports := api.Group("/reports")
 	reports.POST("/write", h.Write)
+}
+
+func registerPKBReportRoutes(api *gin.RouterGroup, h *handler.PKBReportHandler) {
+	pkb := api.Group("/pkb")
+	pkb.GET("/daily", h.Daily)
+	pkb.GET("/vault-cards", h.VaultCards)
+	pkb.GET("/digests/latest", h.LatestDigests)
 }
 
 func registerKnowledgeRoutes(api *gin.RouterGroup, h *handler.KnowledgeHandler) {

@@ -23,6 +23,7 @@ type Services struct {
 	FileIngestion *FileIngestionService
 	Search        *SearchService
 	Report        *ReportService
+	PKBReport     *PKBReportService
 	CrawlQueue    *CrawlQueueService
 	// Optional services (initialized in main.go with infra dependencies)
 	Notification *NotificationService
@@ -99,6 +100,9 @@ func NewServices(repos *repository.Repositories, cfg *config.Config, version str
 	// Seed default pricing on first run
 	_ = pricer.SeedDefaultPricing()
 
+	reportSvc := NewReportService(cfg.FileIngestion.BasePath)
+	reportSvc.SetDailyReportPath(cfg.DailyReport.Path)
+
 	return &Services{
 		Tag:           NewTagService(repos.Tag),
 		RSS:           NewRSSService(repos.RSS, repos.Tag),
@@ -115,7 +119,8 @@ func NewServices(repos *repository.Repositories, cfg *config.Config, version str
 		LogCenter:     logCenterSvc,
 		FileIngestion: fileIngestionSvc,
 		Search:        NewSearchService(repos.Tag, repos.ArticleTag, repos.RSS),
-		Report:        NewReportService(cfg.FileIngestion.BasePath),
+		Report:        reportSvc,
+		PKBReport:     NewPKBReportService(cfg.Knowledge, cfg.DailyReport, activityLogSvc),
 		CrawlQueue:    crawlQueueSvc,
 	}
 }

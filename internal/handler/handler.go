@@ -25,14 +25,15 @@ type Handlers struct {
 	TodoTxt       *TodoTxtHandler
 	Search        *SearchHandler
 	Report        *ReportHandler
+	PKBReport     *PKBReportHandler
 	Crawler       *CrawlerHandler
 	CrawlQueue    *CrawlQueueHandler
 	// Optional handlers
 	MatrixNotify *MatrixNotifyHandler
 	MatrixAdmin  *MatrixAdminHandler
 	// Knowledge handler (initialized in main.go)
-	Knowledge        *KnowledgeHandler
-	KnowledgeFiles   *KnowledgeFilesHandler
+	Knowledge      *KnowledgeHandler
+	KnowledgeFiles *KnowledgeFilesHandler
 }
 
 // NewHandlers creates all handler instances
@@ -55,6 +56,7 @@ func NewHandlers(services *service.Services, repos *repository.Repositories, shu
 		TodoTxt:       NewTodoTxtHandler(memosBaseURL, memosAPIToken),
 		Search:        NewSearchHandler(services.Search),
 		Report:        NewReportHandler(services.Report),
+		PKBReport:     NewPKBReportHandler(services.PKBReport),
 		Crawler:       NewCrawlerHandler(services.Crawler),
 	}
 

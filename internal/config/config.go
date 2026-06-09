@@ -27,6 +27,7 @@ type Config struct {
 	Meilisearch   MeilisearchConfig   `mapstructure:"meilisearch"`
 	Knowledge     KnowledgeConfig     `mapstructure:"knowledge"`
 	CrawlQueue    CrawlQueueConfig    `mapstructure:"crawl_queue"`
+	DailyReport   DailyReportConfig   `mapstructure:"daily_report"`
 }
 
 type LLMProxyConfig struct {
@@ -259,6 +260,17 @@ type CrawlQueueConfig struct {
 	BlockedDomains          []string `mapstructure:"blocked_domains"`           // 预设付费墙域名
 	StaleTimeoutMinutes     int      `mapstructure:"stale_timeout_minutes"`     // 运行超过此分钟数视为卡死
 	RecoveryIntervalMinutes int      `mapstructure:"recovery_interval_minutes"` // 卡死回收检查间隔（分钟）
+}
+
+// DailyReportConfig controls the n8n-backed daily report handoff and watchdog.
+type DailyReportConfig struct {
+	Enabled         bool   `mapstructure:"enabled"`
+	Path            string `mapstructure:"path"`
+	WatchdogEnabled bool   `mapstructure:"watchdog_enabled"`
+	WatchdogTime    string `mapstructure:"watchdog_time"` // HH:MM in Timezone
+	Timezone        string `mapstructure:"timezone"`
+	ReportChannel   string `mapstructure:"report_channel"`
+	AlertChannel    string `mapstructure:"alert_channel"`
 }
 
 // ScanDirConfig 扫描目录配置
@@ -516,4 +528,13 @@ func setDefaults(v *viper.Viper) {
 	})
 	v.SetDefault("crawl_queue.stale_timeout_minutes", 10)
 	v.SetDefault("crawl_queue.recovery_interval_minutes", 5)
+
+	// Daily report
+	v.SetDefault("daily_report.enabled", true)
+	v.SetDefault("daily_report.path", "vault/daily")
+	v.SetDefault("daily_report.watchdog_enabled", true)
+	v.SetDefault("daily_report.watchdog_time", "22:30")
+	v.SetDefault("daily_report.timezone", "Asia/Shanghai")
+	v.SetDefault("daily_report.report_channel", "daily")
+	v.SetDefault("daily_report.alert_channel", "alerts")
 }

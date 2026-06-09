@@ -52,8 +52,9 @@ type App struct {
 	notifyWorker   *worker.NotificationWorker
 
 	// Knowledge services
-	knowledgeIndexSvc *service.KnowledgeIndexService
-	pkbScheduler      *pkb.Scheduler
+	knowledgeIndexSvc   *service.KnowledgeIndexService
+	pkbScheduler        *pkb.Scheduler
+	dailyReportWatchdog *service.DailyReportWatchdog
 
 	// Knowledge adapters (wired to Matrix command service later)
 	knowledgeAskAdapter    *service.AskServiceAdapter
@@ -295,6 +296,17 @@ func (a *App) startBackgroundTasks() {
 		a.logger.Info("[PKBScheduler] PKB scheduler started")
 	}
 
+	if a.cfg.DailyReport.Enabled && a.cfg.DailyReport.WatchdogEnabled {
+		watchdog, err := service.NewDailyReportWatchdog(a.cfg.DailyReport, a.cfg.FileIngestion.BasePath, a.services.Notification)
+		if err != nil {
+			a.logger.Error("[DailyReportWatchdog] failed to initialize", zap.Error(err))
+		} else {
+			a.dailyReportWatchdog = watchdog
+			a.dailyReportWatchdog.Start(context.Background())
+			a.logger.Info("[DailyReportWatchdog] daily report watchdog started")
+		}
+	}
+
 	// Knowledge indexing
 	if a.knowledgeIndexSvc != nil {
 		a.knowledgeIndexSvc.StartFullScan(context.Background())
@@ -401,6 +413,9 @@ func (a *App) Shutdown() error {
 	}
 	if a.pkbScheduler != nil {
 		a.pkbScheduler.Stop()
+	}
+	if a.dailyReportWatchdog != nil {
+		a.dailyReportWatchdog.Stop()
 	}
 	if a.services.LLMJobQueue != nil {
 		a.services.LLMJobQueue.Stop()
