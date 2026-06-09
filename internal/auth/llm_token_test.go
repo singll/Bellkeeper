@@ -4,6 +4,7 @@ import (
 	"errors"
 	"net/http"
 	"net/http/httptest"
+	"strings"
 	"testing"
 
 	"github.com/gin-gonic/gin"
@@ -14,6 +15,8 @@ import (
 // stubTokenStore implements auth.LLMTokenStore for middleware tests (no DB).
 type stubTokenStore struct {
 	byHash       map[string]*model.LLMToken
+	modelGroups  map[string]bool
+	groupErr     error
 	lastUsedID   uint
 	lastUsedSeen bool
 }
@@ -23,6 +26,12 @@ func (s *stubTokenStore) GetByKeyHash(hash string) (*model.LLMToken, error) {
 		return t, nil
 	}
 	return nil, errors.New("not found")
+}
+func (s *stubTokenStore) IsModelGroupName(name string) (bool, error) {
+	if s.groupErr != nil {
+		return false, s.groupErr
+	}
+	return s.modelGroups[name], nil
 }
 func (s *stubTokenStore) CountRequestsToday(uint) (int, error) { return 0, nil }
 func (s *stubTokenStore) TokensUsedToday(uint) (int, error)    { return 0, nil }
@@ -34,11 +43,22 @@ func (s *stubTokenStore) UpdateLastUsed(id uint) error {
 }
 
 func runAuth(store auth.LLMTokenStore, serverKey, bearer string) (*gin.Context, *httptest.ResponseRecorder) {
+	return runAuthWithBody(store, serverKey, bearer, "")
+}
+
+func runAuthWithBody(store auth.LLMTokenStore, serverKey, bearer, body string) (*gin.Context, *httptest.ResponseRecorder) {
 	gin.SetMode(gin.TestMode)
 	w := httptest.NewRecorder()
 	c, _ := gin.CreateTestContext(w)
-	c.Request = httptest.NewRequest(http.MethodPost, "/v1/chat/completions", nil)
+	var reader *strings.Reader
+	if body == "" {
+		reader = strings.NewReader("")
+	} else {
+		reader = strings.NewReader(body)
+	}
+	c.Request = httptest.NewRequest(http.MethodPost, "/v1/chat/completions", reader)
 	c.Request.Header.Set("Authorization", "Bearer "+bearer)
+	c.Request.Header.Set("Content-Type", "application/json")
 	auth.LLMTokenAuth(store, serverKey)(c)
 	return c, w
 }
@@ -91,6 +111,74 @@ func TestLLMTokenAuth_UnknownKeyRejected(t *testing.T) {
 	c, w := runAuth(store, "sk-bk-server-secret", "sk-bk-bogus")
 	if !c.IsAborted() {
 		t.Fatal("unknown key should be rejected")
+	}
+	if w.Code != http.StatusUnauthorized {
+		t.Errorf("status = %d, want 401", w.Code)
+	}
+}
+
+func TestLLMTokenAuth_ModelAllowlist(t *testing.T) {
+	const key = "sk-bk-token"
+	token := &model.LLMToken{ID: 10, CallerID: "client", Enabled: true}
+	token.SetAllowedModels([]string{"gpt-4o"})
+	store := &stubTokenStore{byHash: map[string]*model.LLMToken{model.HashKey(key): token}}
+
+	c, _ := runAuthWithBody(store, "server-key", key, `{"model":"gpt-4o"}`)
+	if c.IsAborted() {
+		t.Fatal("allowed model should pass")
+	}
+
+	c, w := runAuthWithBody(store, "server-key", key, `{"model":"gpt-3.5"}`)
+	if !c.IsAborted() {
+		t.Fatal("disallowed model should be rejected")
+	}
+	if w.Code != http.StatusForbidden {
+		t.Errorf("status = %d, want 403", w.Code)
+	}
+}
+
+func TestLLMTokenAuth_GroupAllowlist(t *testing.T) {
+	const key = "sk-bk-token"
+	token := &model.LLMToken{ID: 11, CallerID: "client", Enabled: true}
+	token.SetAllowedGroups([]string{"pool-coding"})
+	store := &stubTokenStore{
+		byHash:      map[string]*model.LLMToken{model.HashKey(key): token},
+		modelGroups: map[string]bool{"pool-coding": true, "pool-pkb": true},
+	}
+
+	c, _ := runAuthWithBody(store, "server-key", key, `{"model":"pool-coding"}`)
+	if c.IsAborted() {
+		t.Fatal("allowed model group should pass")
+	}
+
+	c, w := runAuthWithBody(store, "server-key", key, `{"model":"pool-pkb"}`)
+	if !c.IsAborted() {
+		t.Fatal("disallowed model group should be rejected")
+	}
+	if w.Code != http.StatusForbidden {
+		t.Errorf("status = %d, want 403", w.Code)
+	}
+}
+
+func TestLLMTokenAuth_EmptyAllowlistsAllowKnownGroup(t *testing.T) {
+	const key = "sk-bk-token"
+	token := &model.LLMToken{ID: 12, CallerID: "client", Enabled: true}
+	store := &stubTokenStore{
+		byHash:      map[string]*model.LLMToken{model.HashKey(key): token},
+		modelGroups: map[string]bool{"pool-open": true},
+	}
+
+	c, _ := runAuthWithBody(store, "server-key", key, `{"model":"pool-open"}`)
+	if c.IsAborted() {
+		t.Fatal("empty allowlists should allow all model groups")
+	}
+}
+
+func TestLLMTokenAuth_EmptyServerKeyDoesNotBypass(t *testing.T) {
+	store := &stubTokenStore{byHash: map[string]*model.LLMToken{}}
+	c, w := runAuth(store, "", "")
+	if !c.IsAborted() {
+		t.Fatal("empty bearer must not bypass when server key is empty")
 	}
 	if w.Code != http.StatusUnauthorized {
 		t.Errorf("status = %d, want 401", w.Code)

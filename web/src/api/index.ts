@@ -287,13 +287,13 @@ export const llmProxyApi = {
   // Token CRUD
   listTokens: () => request<{ data: LLMToken[] }>('/llm/tokens'),
   createToken: (data: Partial<LLMToken>) =>
-    request<{ token: LLMToken; key: string }>('/llm/tokens', { method: 'POST', body: JSON.stringify(data) }),
+    request<{ data: { token: LLMToken; key: string } }>('/llm/tokens', { method: 'POST', body: JSON.stringify(data) }),
   updateToken: (id: number, data: Partial<LLMToken>) =>
     request<{ data: LLMToken }>(`/llm/tokens/${id}`, { method: 'PUT', body: JSON.stringify(data) }),
   deleteToken: (id: number) =>
     request<{ message: string }>(`/llm/tokens/${id}`, { method: 'DELETE' }),
   regenerateTokenKey: (id: number) =>
-    request<{ key: string }>(`/llm/tokens/${id}/regenerate`, { method: 'POST' }),
+    request<{ data: { key: string } }>(`/llm/tokens/${id}/regenerate`, { method: 'POST' }),
   getTokenUsage: (id: number, days?: number) =>
     request<{ data: LLMTokenUsageDaily[] }>(`/llm/tokens/${id}/usage?days=${days || 7}`),
 
@@ -306,7 +306,7 @@ export const llmProxyApi = {
   deletePricing: (id: number) =>
     request<{ message: string }>(`/llm/pricing/${id}`, { method: 'DELETE' }),
   testPricingCalc: (data: { channel_name: string; model: string; prompt_tokens: number; completion_tokens: number; cached_tokens: number }) =>
-    request<{ cost_cents: number; cost_usd: string }>('/llm/pricing/test-calc', { method: 'POST', body: JSON.stringify(data) }),
+    request<{ data: { cost_cents: number; cost_usd: string } }>('/llm/pricing/test-calc', { method: 'POST', body: JSON.stringify(data) }),
 
   // Usage / Billing
   getUsage: (groupBy?: string, from?: string, to?: string) => {

@@ -5,6 +5,7 @@ import (
 	"strings"
 	"sync"
 
+	"github.com/singll/bellkeeper/internal/config"
 	"github.com/singll/bellkeeper/internal/middleware"
 	"go.uber.org/zap"
 )
@@ -13,26 +14,46 @@ import (
 type TaskType string
 
 const (
-	TaskCoding       TaskType = "coding"
-	TaskClassify     TaskType = "classify"
-	TaskSummary      TaskType = "summary"
-	TaskQA           TaskType = "qa"
-	TaskLongContext  TaskType = "long_context"
-	TaskChat         TaskType = "chat"
+	TaskCoding      TaskType = "coding"
+	TaskClassify    TaskType = "classify"
+	TaskSummary     TaskType = "summary"
+	TaskQA          TaskType = "qa"
+	TaskLongContext TaskType = "long_context"
+	TaskChat        TaskType = "chat"
 )
 
 // TaskRouter determines which pool of channels to use based on task type.
 type TaskRouter struct {
-	mu      sync.RWMutex
-	codingStrategy string // free_first | quality_first | complexity_aware
+	mu               sync.RWMutex
+	codingStrategy   string // free_first | quality_first | complexity_aware
+	simpleThreshold  int
+	complexThreshold int
+	complexKeywords  []string
 }
 
 // NewTaskRouter creates a task router with the given coding strategy.
-func NewTaskRouter(codingStrategy string) *TaskRouter {
+func NewTaskRouter(codingStrategy string, complexity config.ComplexityConfig) *TaskRouter {
 	if codingStrategy == "" {
 		codingStrategy = "complexity_aware"
 	}
-	return &TaskRouter{codingStrategy: codingStrategy}
+	if complexity.SimpleThresholdTokens <= 0 {
+		complexity.SimpleThresholdTokens = 1000
+	}
+	if complexity.ComplexThresholdTokens <= 0 {
+		complexity.ComplexThresholdTokens = 4000
+	}
+	if len(complexity.ComplexKeywords) == 0 {
+		complexity.ComplexKeywords = []string{
+			"refactor", "architecture", "debug", "implement entire",
+			"重构", "架构", "设计", "调试", "实现整个",
+		}
+	}
+	return &TaskRouter{
+		codingStrategy:   codingStrategy,
+		simpleThreshold:  complexity.SimpleThresholdTokens,
+		complexThreshold: complexity.ComplexThresholdTokens,
+		complexKeywords:  append([]string(nil), complexity.ComplexKeywords...),
+	}
 }
 
 // DetectTaskType determines the task type from request metadata.
@@ -80,15 +101,29 @@ const (
 )
 
 // DetectComplexity determines coding task complexity.
-func (r *TaskRouter) DetectComplexity(body []byte, promptTokens int) ComplexityLevel {
-	// Check explicit header
-	// (would be extracted from headers in real implementation)
+func (r *TaskRouter) DetectComplexity(headers map[string]string, body []byte, promptTokens int) ComplexityLevel {
+	if explicit := headers["X-Task-Complexity"]; explicit != "" {
+		switch ComplexityLevel(strings.ToLower(explicit)) {
+		case ComplexitySimple:
+			return ComplexitySimple
+		case ComplexityMedium:
+			return ComplexityMedium
+		case ComplexityComplex:
+			return ComplexityComplex
+		}
+	}
+
+	r.mu.RLock()
+	simpleThreshold := r.simpleThreshold
+	complexThreshold := r.complexThreshold
+	keywords := append([]string(nil), r.complexKeywords...)
+	r.mu.RUnlock()
 
 	// Token length heuristic
-	if promptTokens < 1000 {
+	if promptTokens > 0 && promptTokens < simpleThreshold {
 		return ComplexitySimple
 	}
-	if promptTokens > 4000 {
+	if promptTokens > complexThreshold {
 		return ComplexityComplex
 	}
 
@@ -105,12 +140,8 @@ func (r *TaskRouter) DetectComplexity(body []byte, promptTokens int) ComplexityL
 	}
 	lower := strings.ToLower(content)
 
-	complexKeywords := []string{
-		"refactor", "architecture", "debug", "implement entire",
-		"重构", "架构", "设计", "调试", "实现整个",
-	}
-	for _, kw := range complexKeywords {
-		if strings.Contains(lower, kw) {
+	for _, kw := range keywords {
+		if strings.Contains(lower, strings.ToLower(kw)) {
 			return ComplexityComplex
 		}
 	}

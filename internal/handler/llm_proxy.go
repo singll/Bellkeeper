@@ -20,11 +20,11 @@ import (
 )
 
 type LLMProxyHandler struct {
-	svc           *service.LLMProxyService
-	pricer        *service.Pricer
-	tokenRepo     *repository.LLMTokenRepository
+	svc            *service.LLMProxyService
+	pricer         *service.Pricer
+	tokenRepo      *repository.LLMTokenRepository
 	tokenUsageRepo *repository.LLMTokenUsageRepository
-	pricingRepo   *repository.LLMModelPricingRepository
+	pricingRepo    *repository.LLMModelPricingRepository
 }
 
 func NewLLMProxyHandler(
@@ -98,6 +98,7 @@ func (h *LLMProxyHandler) proxyStream(c *gin.Context, path string, body []byte, 
 		return
 	}
 	defer result.BodyReader.Close()
+	defer h.svc.FinalizeStream(result, path, callerID, tokenID)
 
 	// Non-200 responses: read body fully and return as JSON error
 	if result.StatusCode != 200 {
@@ -538,14 +539,14 @@ func (h *LLMProxyHandler) ListTokens(c *gin.Context) {
 
 func (h *LLMProxyHandler) CreateToken(c *gin.Context) {
 	var req struct {
-		Name                 string   `json:"name"`
-		CallerID             string   `json:"caller_id"`
-		AllowedModels        []string `json:"allowed_models"`
-		AllowedGroups        []string `json:"allowed_groups"`
-		QuotaRequestsDaily   int      `json:"quota_requests_daily"`
-		QuotaTokensDaily     int      `json:"quota_tokens_daily"`
-		QuotaCostMonthlyCents int     `json:"quota_cost_monthly_cents"`
-		ExpiresAt            *string  `json:"expires_at"`
+		Name                  string   `json:"name"`
+		CallerID              string   `json:"caller_id"`
+		AllowedModels         []string `json:"allowed_models"`
+		AllowedGroups         []string `json:"allowed_groups"`
+		QuotaRequestsDaily    int      `json:"quota_requests_daily"`
+		QuotaTokensDaily      int      `json:"quota_tokens_daily"`
+		QuotaCostMonthlyCents int      `json:"quota_cost_monthly_cents"`
+		ExpiresAt             *string  `json:"expires_at"`
 	}
 	if err := c.ShouldBindJSON(&req); err != nil {
 		response.BadRequest(c, err.Error())

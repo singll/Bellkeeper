@@ -39,6 +39,14 @@ func (r *LLMTokenRepository) GetByKeyHash(hash string) (*model.LLMToken, error) 
 	return &t, nil
 }
 
+func (r *LLMTokenRepository) IsModelGroupName(name string) (bool, error) {
+	var count int64
+	if err := r.db.Model(&model.LLMModelGroup{}).Where("name = ?", name).Count(&count).Error; err != nil {
+		return false, err
+	}
+	return count > 0, nil
+}
+
 func (r *LLMTokenRepository) GetByCallerID(callerID string) (*model.LLMToken, error) {
 	var t model.LLMToken
 	if err := r.db.Where("caller_id = ?", callerID).First(&t).Error; err != nil {

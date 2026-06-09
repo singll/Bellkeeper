@@ -19,21 +19,22 @@ import (
 // 4. Period detection: analyze 429 patterns
 // 5. RPD learning: record daily cumulative at first quota_exhausted
 type RateLimitLearner struct {
-	mu         sync.RWMutex
-	repo       *repository.LLMRateLimitRepository
-	running    bool
-	stopCh     chan struct{}
+	mu      sync.RWMutex
+	wg      sync.WaitGroup
+	repo    *repository.LLMRateLimitRepository
+	running bool
+	stopCh  chan struct{}
 	// In-memory cache: channel_name:model -> *model.LLMModelRateLimit
-	cache      map[string]*model.LLMModelRateLimit
-	cacheMu    sync.RWMutex
+	cache   map[string]*model.LLMModelRateLimit
+	cacheMu sync.RWMutex
 }
 
 // NewRateLimitLearner creates a new learner instance.
 func NewRateLimitLearner(repo *repository.LLMRateLimitRepository) *RateLimitLearner {
 	return &RateLimitLearner{
-		repo:    repo,
-		stopCh:  make(chan struct{}),
-		cache:   make(map[string]*model.LLMModelRateLimit),
+		repo:   repo,
+		stopCh: make(chan struct{}),
+		cache:  make(map[string]*model.LLMModelRateLimit),
 	}
 }
 
@@ -44,22 +45,30 @@ func (l *RateLimitLearner) Start() {
 	if l.running {
 		return
 	}
+	stopCh := l.stopCh
 	l.running = true
-	go l.loop()
+	l.wg.Add(1)
+	go func() {
+		defer l.wg.Done()
+		l.loop(stopCh)
+	}()
 }
 
 // Stop halts the background loop.
 func (l *RateLimitLearner) Stop() {
 	l.mu.Lock()
-	defer l.mu.Unlock()
 	if !l.running {
+		l.mu.Unlock()
 		return
 	}
 	close(l.stopCh)
+	l.stopCh = make(chan struct{})
 	l.running = false
+	l.mu.Unlock()
+	l.wg.Wait()
 }
 
-func (l *RateLimitLearner) loop() {
+func (l *RateLimitLearner) loop(stopCh <-chan struct{}) {
 	// Evaluate every 5 minutes
 	ticker := time.NewTicker(5 * time.Minute)
 	defer ticker.Stop()
@@ -68,7 +77,7 @@ func (l *RateLimitLearner) loop() {
 		select {
 		case <-ticker.C:
 			l.evaluate()
-		case <-l.stopCh:
+		case <-stopCh:
 			return
 		}
 	}

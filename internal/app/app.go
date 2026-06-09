@@ -283,6 +283,14 @@ func (a *App) startBackgroundTasks() {
 		a.logger.Info("[LLMJobQueue] LLM job queue started")
 	}
 
+	if a.services.LLMProxy != nil {
+		if err := a.services.LLMProxy.Start(context.Background()); err != nil {
+			a.logger.Error("[LLMProxy] failed to start background tasks", zap.Error(err))
+		} else {
+			a.logger.Info("[LLMProxy] background tasks started")
+		}
+	}
+
 	if a.cfg.Knowledge.Enabled {
 		var pkbQueue *service.LLMJobQueueService
 		if a.cfg.LLMJobQueue.Enabled {

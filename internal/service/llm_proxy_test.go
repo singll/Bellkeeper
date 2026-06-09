@@ -166,7 +166,7 @@ func TestSelectChannel_CodingTierOrdering(t *testing.T) {
 }
 
 func TestSelectChannel_TaskEligibility(t *testing.T) {
-	freeCh := newTestChannel("free", "free", true, nil)               // general-purpose
+	freeCh := newTestChannel("free", "free", true, nil)                     // general-purpose
 	kimiCh := newTestChannel("kimi", "standard", false, []string{"coding"}) // coding-only
 	g := newTestGroup(member(kimiCh, "kimi-m"), member(freeCh, "free-m"))
 

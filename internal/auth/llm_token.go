@@ -17,6 +17,7 @@ import (
 // LLMTokenStore abstracts token storage to avoid import cycles.
 type LLMTokenStore interface {
 	GetByKeyHash(hash string) (*model.LLMToken, error)
+	IsModelGroupName(name string) (bool, error)
 	CountRequestsToday(tokenID uint) (int, error)
 	TokensUsedToday(tokenID uint) (int, error)
 	CostThisMonthCents(tokenID uint) (int, error)
@@ -24,9 +25,9 @@ type LLMTokenStore interface {
 }
 
 const (
-	LLMTokenContextKey     = "llm_token"
-	LLMCallerIDContextKey  = "caller_id"
-	LLMTokenIDContextKey   = "token_id"
+	LLMTokenContextKey    = "llm_token"
+	LLMCallerIDContextKey = "caller_id"
+	LLMTokenIDContextKey  = "token_id"
 )
 
 // CallerIdentity holds the validated identity for a request.
@@ -75,7 +76,7 @@ func LLMTokenAuth(tokenRepo LLMTokenStore, serverAPIKey string) gin.HandlerFunc 
 		// callers. If a matching token row exists (the seeded "default" token keyed
 		// off the same api_key), resolve to it so the traffic is billed (token_id != 0);
 		// otherwise fall back to the legacy admin bypass (token_id 0, unbilled).
-		if key == serverAPIKey {
+		if serverAPIKey != "" && key == serverAPIKey {
 			if token, err := tokenRepo.GetByKeyHash(model.HashKey(key)); err == nil && token != nil && token.Enabled {
 				_ = tokenRepo.UpdateLastUsed(token.ID)
 				c.Set(LLMTokenContextKey, token)
@@ -111,14 +112,33 @@ func LLMTokenAuth(tokenRepo LLMTokenStore, serverAPIKey string) gin.HandlerFunc 
 			return
 		}
 
-		// Check allowed models (only for chat/completions and similar endpoints)
-		allowedModels := token.GetAllowedModels()
-		if len(allowedModels) > 0 {
-			modelName := extractModelFromContext(c)
-			if modelName != "" && !containsString(allowedModels, modelName) {
-				response.Forbidden(c, "model not allowed for this token")
+		// Check model/group scopes for chat/completions and similar endpoints.
+		// Request model names may be either real upstream models or virtual model
+		// groups; groups are authorized through allowed_groups so admins can scope
+		// routing pools without exposing their member models directly.
+		modelName := extractModelFromContext(c)
+		if modelName != "" {
+			isGroup, err := tokenRepo.IsModelGroupName(modelName)
+			if err != nil {
+				response.InternalError(c, "failed to validate model scope")
 				c.Abort()
 				return
+			}
+
+			if isGroup {
+				allowedGroups := token.GetAllowedGroups()
+				if len(allowedGroups) > 0 && !containsString(allowedGroups, modelName) {
+					response.Forbidden(c, "model group not allowed for this token")
+					c.Abort()
+					return
+				}
+			} else {
+				allowedModels := token.GetAllowedModels()
+				if len(allowedModels) > 0 && !containsString(allowedModels, modelName) {
+					response.Forbidden(c, "model not allowed for this token")
+					c.Abort()
+					return
+				}
 			}
 		}
 

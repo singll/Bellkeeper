@@ -427,6 +427,13 @@ func setDefaults(v *viper.Viper) {
 	v.SetDefault("llm_proxy.circuit_breaker.cooldown_seconds", 120)
 	v.SetDefault("llm_proxy.circuit_breaker.half_open_max", 1)
 	v.SetDefault("llm_proxy.circuit_breaker.error_window_seconds", 300)
+	v.SetDefault("llm_proxy.coding_routing_strategy", "complexity_aware")
+	v.SetDefault("llm_proxy.complexity.simple_threshold_tokens", 1000)
+	v.SetDefault("llm_proxy.complexity.complex_threshold_tokens", 4000)
+	v.SetDefault("llm_proxy.complexity.complex_keywords", []string{
+		"refactor", "architecture", "debug", "implement entire",
+		"重构", "架构", "设计", "调试", "实现整个",
+	})
 
 	// LLM Job Queue
 	v.SetDefault("llm_job_queue.enabled", true)

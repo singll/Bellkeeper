@@ -11,12 +11,15 @@ import (
 
 // Manager holds balance providers and periodically refreshes them.
 type Manager struct {
-	factory   *Factory
-	providers map[string]Provider // channel_name -> provider
-	results   map[string]*Info    // channel_name -> last fetched info
-	mu        sync.RWMutex
-	interval  time.Duration
-	stopCh    chan struct{}
+	factory     *Factory
+	providers   map[string]Provider // channel_name -> provider
+	results     map[string]*Info    // channel_name -> last fetched info
+	mu          sync.RWMutex
+	lifecycleMu sync.Mutex
+	wg          sync.WaitGroup
+	interval    time.Duration
+	stopCh      chan struct{}
+	running     bool
 }
 
 // NewManager creates a balance manager with the given sync interval.
@@ -94,9 +97,9 @@ func (m *Manager) RefreshAll() {
 					zap.String("channel", n), zap.Error(err))
 				m.mu.Lock()
 				m.results[n] = &Info{
-					ChannelName:  n,
-					Error:        err.Error(),
-					FetchedAt:    time.Now(),
+					ChannelName: n,
+					Error:       err.Error(),
+					FetchedAt:   time.Now(),
 				}
 				m.mu.Unlock()
 				return
@@ -111,7 +114,16 @@ func (m *Manager) RefreshAll() {
 
 // Start begins the background refresh loop.
 func (m *Manager) Start() {
+	m.lifecycleMu.Lock()
+	defer m.lifecycleMu.Unlock()
+	if m.running {
+		return
+	}
+	stopCh := m.stopCh
+	m.running = true
+	m.wg.Add(1)
 	go func() {
+		defer m.wg.Done()
 		ticker := time.NewTicker(m.interval)
 		defer ticker.Stop()
 
@@ -122,7 +134,7 @@ func (m *Manager) Start() {
 			select {
 			case <-ticker.C:
 				m.RefreshAll()
-			case <-m.stopCh:
+			case <-stopCh:
 				return
 			}
 		}
@@ -131,5 +143,14 @@ func (m *Manager) Start() {
 
 // Stop halts the background refresh loop.
 func (m *Manager) Stop() {
+	m.lifecycleMu.Lock()
+	if !m.running {
+		m.lifecycleMu.Unlock()
+		return
+	}
 	close(m.stopCh)
+	m.stopCh = make(chan struct{})
+	m.running = false
+	m.lifecycleMu.Unlock()
+	m.wg.Wait()
 }

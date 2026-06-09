@@ -3,6 +3,7 @@ package service
 import (
 	"bytes"
 	"compress/gzip"
+	"context"
 	"encoding/json"
 	"fmt"
 	"io"
@@ -181,51 +182,62 @@ func (ch *Channel) EWMALatency() float64 {
 // LLMProxyService provides a rate-limited, multi-channel OpenAI-compatible proxy
 // with virtual model groups, sticky routing, and circuit breaker support.
 type LLMProxyService struct {
-	mu             sync.RWMutex
-	cfg            config.LLMProxyConfig
-	channels       map[string]*Channel      // name -> channel
-	modelMap       map[string][]*Channel    // model -> sorted channels (by priority)
-	modelGroups    map[string]*ModelGroup   // group name -> model group
-	repo           *repository.LLMProxyRepository
-	channelRepo    *repository.LLMChannelRepository
-	groupRepo      *repository.LLMModelGroupRepository
-	pricer         *Pricer
-	tokenUsageRepo *repository.LLMTokenUsageRepository
-	balanceMgr     *balance.Manager
-	rateLimitLearner *RateLimitLearner
-	taskRouter     *TaskRouter
-	convMgr        *ConversationBindingManager
-	tokenRepo      *repository.LLMTokenRepository
+	mu                  sync.RWMutex
+	startMu             sync.Mutex
+	started             bool
+	cfg                 config.LLMProxyConfig
+	channels            map[string]*Channel    // name -> channel
+	modelMap            map[string][]*Channel  // model -> sorted channels (by priority)
+	modelGroups         map[string]*ModelGroup // group name -> model group
+	repo                *repository.LLMProxyRepository
+	channelRepo         *repository.LLMChannelRepository
+	groupRepo           *repository.LLMModelGroupRepository
+	pricer              *Pricer
+	tokenUsageRepo      *repository.LLMTokenUsageRepository
+	balanceMgr          *balance.Manager
+	rateLimitLearner    *RateLimitLearner
+	taskRouter          *TaskRouter
+	convMgr             *ConversationBindingManager
+	tokenRepo           *repository.LLMTokenRepository
 	credentialRepo      *repository.LLMChannelCredentialRepository
 	balanceSnapshotRepo *repository.LLMChannelBalanceSnapshotRepository
-	alertAggregator *AlertAggregator
-	groupStopChans []chan struct{} // per-load group-cleanup goroutines (recreated on reload)
-	bgStopChans    []chan struct{} // long-lived background loops (conv cleanup, archival, quota)
+	alertAggregator     *AlertAggregator
+	groupStopChans      []chan struct{} // per-load group-cleanup goroutines (recreated on reload)
+	bgStopChans         []chan struct{} // long-lived background loops (conv cleanup, archival, quota)
+	logQueue            chan proxyLogEntry
+	logStopCh           chan struct{}
+	logWG               sync.WaitGroup
 }
+
+const (
+	llmProxyLogQueueSize = 4096
+	llmProxyLogWorkers   = 2
+)
 
 func NewLLMProxyService(cfg config.LLMProxyConfig, repo *repository.LLMProxyRepository, channelRepo *repository.LLMChannelRepository, groupRepo *repository.LLMModelGroupRepository, pricer *Pricer, tokenUsageRepo *repository.LLMTokenUsageRepository, rateLimitRepo *repository.LLMRateLimitRepository, convRepo *repository.ConversationBindingRepository, tokenRepo *repository.LLMTokenRepository, credentialRepo *repository.LLMChannelCredentialRepository, balanceSnapshotRepo *repository.LLMChannelBalanceSnapshotRepository) *LLMProxyService {
 	svc := &LLMProxyService{
-		cfg:            cfg,
-		channels:       make(map[string]*Channel),
-		modelMap:       make(map[string][]*Channel),
-		modelGroups:    make(map[string]*ModelGroup),
-		repo:           repo,
-		channelRepo:    channelRepo,
-		groupRepo:      groupRepo,
-		pricer:         pricer,
-		tokenUsageRepo: tokenUsageRepo,
-		tokenRepo:      tokenRepo,
+		cfg:                 cfg,
+		channels:            make(map[string]*Channel),
+		modelMap:            make(map[string][]*Channel),
+		modelGroups:         make(map[string]*ModelGroup),
+		repo:                repo,
+		channelRepo:         channelRepo,
+		groupRepo:           groupRepo,
+		pricer:              pricer,
+		tokenUsageRepo:      tokenUsageRepo,
+		tokenRepo:           tokenRepo,
 		credentialRepo:      credentialRepo,
 		balanceSnapshotRepo: balanceSnapshotRepo,
+		logQueue:            make(chan proxyLogEntry, llmProxyLogQueueSize),
+		logStopCh:           make(chan struct{}),
 	}
 
 	// Initialize the rate-limit learner BEFORE loading channels so learned-safe RPM
 	// is available to size token buckets at first load (not just after a reload).
 	svc.rateLimitLearner = NewRateLimitLearner(rateLimitRepo)
 	_ = svc.rateLimitLearner.LoadCache()
-	svc.rateLimitLearner.Start()
 
-	if err := svc.loadFromDB(); err != nil {
+	if err := svc.loadFromDB(false); err != nil {
 		middleware.GetLogger().Error("failed to load llm-proxy config from DB", zap.Error(err))
 	}
 
@@ -233,53 +245,43 @@ func NewLLMProxyService(cfg config.LLMProxyConfig, repo *repository.LLMProxyRepo
 	if cfg.BalanceSyncInterval > 0 {
 		svc.balanceMgr = balance.NewManager(time.Duration(cfg.BalanceSyncInterval) * time.Second)
 		svc.registerBalanceProviders()
-		svc.balanceMgr.Start()
 	}
 
 	// Initialize task router
-	svc.taskRouter = NewTaskRouter(cfg.CodingRoutingStrategy)
+	svc.taskRouter = NewTaskRouter(cfg.CodingRoutingStrategy, cfg.Complexity)
 
 	// Alert aggregator (nil notifier until Matrix infra wires one in via
 	// SetAlertNotifier — until then it still buffers + persists events to DB).
 	svc.alertAggregator = NewAlertAggregator(repo, nil)
-	svc.alertAggregator.Start()
 
 	// Initialize conversation binding manager
 	svc.convMgr = NewConversationBindingManager(convRepo, 24*time.Hour)
 	_ = svc.convMgr.LoadFromDB()
 
-	// Long-lived background loops — their stop channels live in bgStopChans and are
-	// NOT touched by Reload() (which only cycles group-cleanup goroutines).
-	convStop := make(chan struct{})
-	svc.bgStopChans = append(svc.bgStopChans, convStop)
-	go svc.convCleanupLoop(convStop)
-
-	archiveStop := make(chan struct{})
-	svc.bgStopChans = append(svc.bgStopChans, archiveStop)
-	svc.startLogArchival(archiveStop)
-
-	if tokenRepo != nil {
-		quotaStop := make(chan struct{})
-		svc.bgStopChans = append(svc.bgStopChans, quotaStop)
-		go svc.quotaAlertLoop(quotaStop)
-	}
-
-	// Balance snapshot loop — persists a history row per channel whenever the
-	// balance manager publishes a fresh fetch (deduped by FetchedAt). Long-lived,
-	// so its stop channel lives in bgStopChans (not cycled by Reload).
-	if svc.balanceMgr != nil && balanceSnapshotRepo != nil {
-		snapStop := make(chan struct{})
-		svc.bgStopChans = append(svc.bgStopChans, snapStop)
-		go svc.balanceSnapshotLoop(snapStop)
-	}
-
-	// Kimi Code probe loop — re-probes quota_exhausted channels after their breakdown
-	// window elapses (§2.6.4). Long-lived → bgStopChans.
-	probeStop := make(chan struct{})
-	svc.bgStopChans = append(svc.bgStopChans, probeStop)
-	go svc.kimiCodeProbeLoop(probeStop)
-
 	return svc
+}
+
+func (s *LLMProxyService) Start(ctx context.Context) error {
+	s.startMu.Lock()
+	defer s.startMu.Unlock()
+	if s.started {
+		return nil
+	}
+	s.started = true
+
+	if s.rateLimitLearner != nil {
+		s.rateLimitLearner.Start()
+	}
+	if s.balanceMgr != nil {
+		s.balanceMgr.Start()
+	}
+	if s.alertAggregator != nil {
+		s.alertAggregator.Start()
+	}
+	s.startGroupCleanupLoops()
+	s.startBackgroundLoops()
+	s.startLogWorkers()
+	return nil
 }
 
 func (s *LLMProxyService) registerBalanceProviders() {
@@ -480,6 +482,13 @@ func (s *LLMProxyService) probeChannel(ch *Channel) (int, []byte, http.Header, e
 
 // Stop halts background services (balance manager, learner, aggregator, loops).
 func (s *LLMProxyService) Stop() {
+	s.startMu.Lock()
+	defer s.startMu.Unlock()
+	if !s.started {
+		return
+	}
+	s.started = false
+
 	s.mu.Lock()
 	for _, stop := range s.groupStopChans {
 		close(stop)
@@ -499,6 +508,9 @@ func (s *LLMProxyService) Stop() {
 	if s.rateLimitLearner != nil {
 		s.rateLimitLearner.Stop()
 	}
+	close(s.logStopCh)
+	s.logWG.Wait()
+	s.logStopCh = make(chan struct{})
 }
 
 // SetAlertNotifier wires the delivery notifier into the alert aggregator. Called
@@ -666,7 +678,7 @@ func (s *LLMProxyService) convCleanupLoop(stopCh <-chan struct{}) {
 }
 
 // loadFromDB loads channel and model group configuration from the database.
-func (s *LLMProxyService) loadFromDB() error {
+func (s *LLMProxyService) loadFromDB(startCleanupLoops bool) error {
 	dbChannels, err := s.channelRepo.ListEnabled()
 	if err != nil {
 		return fmt.Errorf("load channels: %w", err)
@@ -722,8 +734,10 @@ func (s *LLMProxyService) loadFromDB() error {
 		}
 		modelGroups[gCfg.Name] = group
 
-		stop := group.StartCleanup(1 * time.Minute)
-		stopChans = append(stopChans, stop)
+		if startCleanupLoops {
+			stop := group.StartCleanup(1 * time.Minute)
+			stopChans = append(stopChans, stop)
+		}
 
 		middleware.GetLogger().Info("initialized model group",
 			zap.String("group", gCfg.Name), zap.Int("members", len(group.Members)),
@@ -744,6 +758,10 @@ func (s *LLMProxyService) loadFromDB() error {
 // Reload reloads all channels and model groups from the database,
 // preserving health and rate-limiter state for unchanged channels.
 func (s *LLMProxyService) Reload() error {
+	s.startMu.Lock()
+	started := s.started
+	s.startMu.Unlock()
+
 	s.mu.Lock()
 	defer s.mu.Unlock()
 
@@ -758,7 +776,7 @@ func (s *LLMProxyService) Reload() error {
 	// Preserve existing channel state
 	oldChannels := s.channels
 
-	if err := s.loadFromDB(); err != nil {
+	if err := s.loadFromDB(started); err != nil {
 		return err
 	}
 
@@ -774,6 +792,50 @@ func (s *LLMProxyService) Reload() error {
 	}
 
 	return nil
+}
+
+func (s *LLMProxyService) startGroupCleanupLoops() {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+
+	groups := make([]*ModelGroup, 0, len(s.modelGroups))
+	for _, group := range s.modelGroups {
+		groups = append(groups, group)
+	}
+
+	for _, stop := range s.groupStopChans {
+		close(stop)
+	}
+	s.groupStopChans = make([]chan struct{}, 0, len(groups))
+	for _, group := range groups {
+		s.groupStopChans = append(s.groupStopChans, group.StartCleanup(time.Minute))
+	}
+}
+
+func (s *LLMProxyService) startBackgroundLoops() {
+	convStop := make(chan struct{})
+	s.bgStopChans = append(s.bgStopChans, convStop)
+	go s.convCleanupLoop(convStop)
+
+	archiveStop := make(chan struct{})
+	s.bgStopChans = append(s.bgStopChans, archiveStop)
+	s.startLogArchival(archiveStop)
+
+	if s.tokenRepo != nil {
+		quotaStop := make(chan struct{})
+		s.bgStopChans = append(s.bgStopChans, quotaStop)
+		go s.quotaAlertLoop(quotaStop)
+	}
+
+	if s.balanceMgr != nil && s.balanceSnapshotRepo != nil {
+		snapStop := make(chan struct{})
+		s.bgStopChans = append(s.bgStopChans, snapStop)
+		go s.balanceSnapshotLoop(snapStop)
+	}
+
+	probeStop := make(chan struct{})
+	s.bgStopChans = append(s.bgStopChans, probeStop)
+	go s.kimiCodeProbeLoop(probeStop)
 }
 
 // resolveChannelKey returns the effective API key for a channel and its source:
@@ -1176,7 +1238,7 @@ func (s *LLMProxyService) codingPref(body []byte) string {
 	}
 	strategy := s.taskRouter.GetCodingStrategy()
 	if strategy == "complexity_aware" {
-		return string(s.taskRouter.DetectComplexity(body, 0))
+		return string(s.taskRouter.DetectComplexity(nil, body, 0))
 	}
 	return strategy
 }
@@ -1521,7 +1583,9 @@ func extractTokenUsage(body []byte) (prompt, comp, cached int) {
 			} `json:"prompt_tokens_details,omitempty"`
 		} `json:"usage"`
 	}
-	if err := json.Unmarshal(body, &openaiResp); err == nil && openaiResp.Usage.PromptTokens > 0 {
+	if err := json.Unmarshal(body, &openaiResp); err == nil &&
+		(openaiResp.Usage.PromptTokens > 0 || openaiResp.Usage.CompletionTokens > 0 ||
+			openaiResp.Usage.CachedTokens > 0 || openaiResp.Usage.PromptTokensDetails.CachedTokens > 0) {
 		cached := openaiResp.Usage.CachedTokens
 		if cached == 0 {
 			cached = openaiResp.Usage.PromptTokensDetails.CachedTokens
@@ -1540,7 +1604,8 @@ func extractTokenUsage(body []byte) (prompt, comp, cached int) {
 		} `json:"usage"`
 	}
 	if err := json.Unmarshal(body, &anthropicResp); err == nil &&
-		(anthropicResp.Usage.InputTokens > 0 || anthropicResp.Usage.CacheReadInputTokens > 0) {
+		(anthropicResp.Usage.InputTokens > 0 || anthropicResp.Usage.OutputTokens > 0 ||
+			anthropicResp.Usage.CacheReadInputTokens > 0 || anthropicResp.Usage.CacheCreationInputTokens > 0) {
 		cached := anthropicResp.Usage.CacheReadInputTokens
 		prompt := anthropicResp.Usage.InputTokens +
 			anthropicResp.Usage.CacheReadInputTokens +
@@ -1551,69 +1616,195 @@ func extractTokenUsage(body []byte) (prompt, comp, cached int) {
 	return 0, 0, 0
 }
 
+type streamUsageTracker struct {
+	rc      io.ReadCloser
+	mu      sync.Mutex
+	pending string
+	prompt  int
+	comp    int
+	cached  int
+}
+
+func newStreamUsageTracker(rc io.ReadCloser) *streamUsageTracker {
+	return &streamUsageTracker{rc: rc}
+}
+
+func (t *streamUsageTracker) Read(p []byte) (int, error) {
+	n, err := t.rc.Read(p)
+	if n > 0 {
+		t.observe(p[:n])
+	}
+	return n, err
+}
+
+func (t *streamUsageTracker) Close() error {
+	return t.rc.Close()
+}
+
+func (t *streamUsageTracker) Usage() (prompt, comp, cached int) {
+	t.mu.Lock()
+	defer t.mu.Unlock()
+	return t.prompt, t.comp, t.cached
+}
+
+func (t *streamUsageTracker) observe(chunk []byte) {
+	t.mu.Lock()
+	defer t.mu.Unlock()
+	t.pending += string(chunk)
+	for {
+		i := strings.IndexByte(t.pending, '\n')
+		if i < 0 {
+			if len(t.pending) > 64*1024 {
+				t.pending = t.pending[len(t.pending)-64*1024:]
+			}
+			return
+		}
+		line := strings.TrimSpace(t.pending[:i])
+		t.pending = t.pending[i+1:]
+		if !strings.HasPrefix(line, "data:") {
+			continue
+		}
+		data := strings.TrimSpace(strings.TrimPrefix(line, "data:"))
+		if data == "" || data == "[DONE]" {
+			continue
+		}
+		prompt, comp, cached := extractTokenUsage([]byte(data))
+		if prompt > t.prompt {
+			t.prompt = prompt
+		}
+		if comp > t.comp {
+			t.comp = comp
+		}
+		if cached > t.cached {
+			t.cached = cached
+		}
+	}
+}
+
+type proxyLogEntry struct {
+	channelName  string
+	modelName    string
+	path         string
+	statusCode   int
+	isRateLimit  bool
+	retryCount   int
+	durationMs   int
+	promptTokens int
+	compTokens   int
+	cachedTokens int
+	errMsg       string
+	callerID     string
+	tokenID      uint
+	createdAt    time.Time
+}
+
 func (s *LLMProxyService) logRequest(channelName, modelName, path string, statusCode int,
 	isRateLimit bool, retryCount, durationMs, promptTokens, compTokens, cachedTokens int,
 	errMsg, callerID string, tokenID uint) {
 	if s.repo == nil {
 		return
 	}
-	go func() {
-		// Price by the real upstream model. Group requests log "virtual→real" for
-		// traceability, but pricing must use the real model name.
-		pricingModel := modelName
-		if i := strings.Index(modelName, "→"); i >= 0 {
-			pricingModel = modelName[i+len("→"):]
-		}
+	entry := proxyLogEntry{
+		channelName:  channelName,
+		modelName:    modelName,
+		path:         path,
+		statusCode:   statusCode,
+		isRateLimit:  isRateLimit,
+		retryCount:   retryCount,
+		durationMs:   durationMs,
+		promptTokens: promptTokens,
+		compTokens:   compTokens,
+		cachedTokens: cachedTokens,
+		errMsg:       errMsg,
+		callerID:     callerID,
+		tokenID:      tokenID,
+		createdAt:    time.Now(),
+	}
+	select {
+	case s.logQueue <- entry:
+	case <-s.logStopCh:
+		return
+	default:
+		middleware.GetLogger().Warn("llm proxy log queue full; dropping log entry",
+			zap.String("channel", channelName), zap.String("model", modelName), zap.Int("status", statusCode))
+	}
+}
 
-		// Calculate cost in micro-cents (precise) and cents (rounded display).
-		var costMicroCents int64
-		var costCents int
-		if s.pricer != nil && promptTokens+compTokens > 0 {
-			costMicroCents, _ = s.pricer.CalcMicroCents(channelName, pricingModel, Usage{
-				PromptTokens:     promptTokens,
-				CompletionTokens: compTokens,
-				CachedTokens:     cachedTokens,
-			})
-			costCents = int(MicroCentsToCents(costMicroCents))
-		}
-
-		entry := &model.LLMProxyLog{
-			ChannelName:    channelName,
-			Model:          modelName,
-			RequestPath:    path,
-			StatusCode:     statusCode,
-			IsRateLimit:    isRateLimit,
-			RetryCount:     retryCount,
-			DurationMs:     durationMs,
-			PromptTokens:   promptTokens,
-			CompTokens:     compTokens,
-			CachedTokens:   cachedTokens,
-			CostCents:      costCents,
-			CostMicroCents: costMicroCents,
-			ErrorMessage:   errMsg,
-			CallerID:       callerID,
-			CreatedAt:      time.Now(),
-		}
-		if err := s.repo.CreateLog(entry); err != nil {
-			middleware.GetLogger().Warn("failed to log llm proxy request", zap.Error(err))
-			return
-		}
-
-		// Aggregate token usage by token (daily). Skip the server/admin key (tokenID 0):
-		// it has no billable token row and would pollute aggregates with id 0.
-		if s.tokenUsageRepo != nil && tokenID != 0 {
-			requests := 1
-			errCount := 0
-			if statusCode >= 400 {
-				errCount = 1
-				requests = 0 // Don't count errors as successful requests
+func (s *LLMProxyService) startLogWorkers() {
+	for i := 0; i < llmProxyLogWorkers; i++ {
+		s.logWG.Add(1)
+		go func() {
+			defer s.logWG.Done()
+			for {
+				select {
+				case entry := <-s.logQueue:
+					s.persistProxyLog(entry)
+				case <-s.logStopCh:
+					for {
+						select {
+						case entry := <-s.logQueue:
+							s.persistProxyLog(entry)
+						default:
+							return
+						}
+					}
+				}
 			}
-			if err := s.tokenUsageRepo.AddUsage(tokenID, time.Now().Truncate(24*time.Hour),
-				requests, promptTokens, compTokens, cachedTokens, costCents, costMicroCents, errCount); err != nil {
-				middleware.GetLogger().Warn("failed to aggregate token usage", zap.Error(err))
-			}
+		}()
+	}
+}
+
+func (s *LLMProxyService) persistProxyLog(e proxyLogEntry) {
+	pricingModel := e.modelName
+	if i := strings.Index(e.modelName, "→"); i >= 0 {
+		pricingModel = e.modelName[i+len("→"):]
+	}
+
+	var costMicroCents int64
+	var costCents int
+	if s.pricer != nil && e.promptTokens+e.compTokens > 0 {
+		costMicroCents, _ = s.pricer.CalcMicroCents(e.channelName, pricingModel, Usage{
+			PromptTokens:     e.promptTokens,
+			CompletionTokens: e.compTokens,
+			CachedTokens:     e.cachedTokens,
+		})
+		costCents = int(MicroCentsToCents(costMicroCents))
+	}
+
+	entry := &model.LLMProxyLog{
+		ChannelName:    e.channelName,
+		Model:          e.modelName,
+		RequestPath:    e.path,
+		StatusCode:     e.statusCode,
+		IsRateLimit:    e.isRateLimit,
+		RetryCount:     e.retryCount,
+		DurationMs:     e.durationMs,
+		PromptTokens:   e.promptTokens,
+		CompTokens:     e.compTokens,
+		CachedTokens:   e.cachedTokens,
+		CostCents:      costCents,
+		CostMicroCents: costMicroCents,
+		ErrorMessage:   e.errMsg,
+		CallerID:       e.callerID,
+		CreatedAt:      e.createdAt,
+	}
+	if err := s.repo.CreateLog(entry); err != nil {
+		middleware.GetLogger().Warn("failed to log llm proxy request", zap.Error(err))
+		return
+	}
+
+	if s.tokenUsageRepo != nil && e.tokenID != 0 {
+		requests := 1
+		errCount := 0
+		if e.statusCode >= 400 {
+			errCount = 1
+			requests = 0
 		}
-	}()
+		if err := s.tokenUsageRepo.AddUsage(e.tokenID, e.createdAt.Truncate(24*time.Hour),
+			requests, e.promptTokens, e.compTokens, e.cachedTokens, costCents, costMicroCents, errCount); err != nil {
+			middleware.GetLogger().Warn("failed to aggregate token usage", zap.Error(err))
+		}
+	}
 }
 
 // logGroupRequest logs a model group proxy attempt for traceability.
@@ -1639,6 +1830,8 @@ type StreamResult struct {
 	ProviderType string
 	ChannelName  string
 	ModelName    string
+	StartedAt    time.Time
+	tracker      *streamUsageTracker
 }
 
 // IsStreamRequest checks if the request body has stream:true.
@@ -1691,8 +1884,6 @@ func (s *LLMProxyService) ProxyStreamRequest(
 					result, err := s.tryChannelStream(ch, method, path, headers, rewrittenBody, callerID)
 					if err == nil {
 						result.ModelName = binding.Model
-						s.logRequest(ch.Config.Name, binding.Model, path, result.StatusCode, false,
-							0, 0, 0, 0, 0, "", callerID, tokenID)
 						s.convMgr.Touch(convID, 0, 0)
 					}
 					return result, err
@@ -1716,9 +1907,6 @@ func (s *LLMProxyService) ProxyStreamRequest(
 		result, err := s.tryChannelStream(ch, method, path, headers, rewrittenBody, callerID)
 		if err == nil {
 			result.ModelName = modelName + "→" + realModel
-			// Log stream start
-			s.logRequest(ch.Config.Name, modelName+"→"+realModel, path, result.StatusCode, false,
-				0, 0, 0, 0, 0, "", callerID, tokenID)
 			if convID != "" {
 				if taskKey != "" && group.Sticky != nil {
 					if stickyCh, stickyModel := group.GetStickyBinding(taskKey); stickyCh != nil {
@@ -1746,8 +1934,6 @@ func (s *LLMProxyService) ProxyStreamRequest(
 	result, err := s.tryChannelStream(ch, method, path, headers, body, callerID)
 	if err == nil {
 		result.ModelName = modelName
-		s.logRequest(ch.Config.Name, modelName, path, result.StatusCode, false,
-			0, 0, 0, 0, 0, "", callerID, tokenID)
 		if convID != "" {
 			s.convMgr.Set(convID, ch.Config.ID, ch.Config.Name, modelName, "")
 		}
@@ -1827,6 +2013,7 @@ func (s *LLMProxyService) tryChannelStream(
 		Timeout:   0,
 	}
 
+	startedAt := time.Now()
 	resp, err := noTimeoutClient.Do(req)
 	if err != nil {
 		return nil, fmt.Errorf("upstream stream request: %w", err)
@@ -1850,18 +2037,42 @@ func (s *LLMProxyService) tryChannelStream(
 			RespHeaders:  resp.Header,
 			ProviderType: ch.Config.ProviderType,
 			ChannelName:  ch.Config.Name,
+			StartedAt:    startedAt,
 		}, nil
 	}
 
 	ch.Health.RecordSuccess()
+	tracker := newStreamUsageTracker(resp.Body)
 
 	return &StreamResult{
 		StatusCode:   resp.StatusCode,
-		BodyReader:   resp.Body,
+		BodyReader:   tracker,
 		RespHeaders:  resp.Header,
 		ProviderType: ch.Config.ProviderType,
 		ChannelName:  ch.Config.Name,
+		StartedAt:    startedAt,
+		tracker:      tracker,
 	}, nil
+}
+
+func (s *LLMProxyService) FinalizeStream(result *StreamResult, path, callerID string, tokenID uint) {
+	if result == nil {
+		return
+	}
+	promptTokens, compTokens, cachedTokens := 0, 0, 0
+	errMsg := ""
+	if result.tracker != nil {
+		promptTokens, compTokens, cachedTokens = result.tracker.Usage()
+	}
+	if result.StatusCode < 400 && promptTokens+compTokens+cachedTokens == 0 {
+		errMsg = "stream usage unavailable"
+	}
+	startedAt := result.StartedAt
+	if startedAt.IsZero() {
+		startedAt = time.Now()
+	}
+	s.logRequest(result.ChannelName, result.ModelName, path, result.StatusCode, result.StatusCode == 429,
+		0, int(time.Since(startedAt).Milliseconds()), promptTokens, compTokens, cachedTokens, errMsg, callerID, tokenID)
 }
 
 // --- Management APIs ---

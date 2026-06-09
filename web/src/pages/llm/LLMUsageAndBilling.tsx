@@ -142,7 +142,7 @@ const LLMUsageAndBilling: Component = () => {
         toast.success('Token 已更新')
       } else {
         const res = await llmProxyApi.createToken(payload)
-        setNewKey(res.key)
+        setNewKey(res.data.key)
         setShowKeyModal(true)
         toast.success('Token 已创建')
       }
@@ -170,7 +170,7 @@ const LLMUsageAndBilling: Component = () => {
     if (!confirm('重新生成 API Key？旧 Key 将立即失效。')) return
     try {
       const res = await llmProxyApi.regenerateTokenKey(id)
-      setNewKey(res.key)
+      setNewKey(res.data.key)
       setShowKeyModal(true)
       toast.success('Key 已重新生成')
       refetchTokens()
