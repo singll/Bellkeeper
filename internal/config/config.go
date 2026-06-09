@@ -127,6 +127,7 @@ type DatabaseConfig struct {
 	MaxIdleConns    int    `mapstructure:"max_idle_conns"`
 	MaxOpenConns    int    `mapstructure:"max_open_conns"`
 	ConnMaxLifetime int    `mapstructure:"conn_max_lifetime"` // minutes
+	AutoMigrate     bool   `mapstructure:"auto_migrate"`
 }
 
 func (d DatabaseConfig) DSN() string {
@@ -396,6 +397,7 @@ func setDefaults(v *viper.Viper) {
 	v.SetDefault("database.max_idle_conns", 10)
 	v.SetDefault("database.max_open_conns", 100)
 	v.SetDefault("database.conn_max_lifetime", 60)
+	v.SetDefault("database.auto_migrate", true)
 
 	// N8N — URL defaults left empty so workflow.go can fall back to DB settings
 	v.SetDefault("n8n.webhook_base_url", "")

@@ -87,11 +87,15 @@ func NewApp(cfgFile string) (*App, error) {
 		return nil, fmt.Errorf("init database: %w", err)
 	}
 
-	if err := model.AutoMigrateWithLLMSeed(db, cfg); err != nil {
-		if sqlDB, e := db.DB(); e == nil {
-			sqlDB.Close()
+	if cfg.Database.AutoMigrate {
+		if err := model.AutoMigrateWithLLMSeed(db, cfg); err != nil {
+			if sqlDB, e := db.DB(); e == nil {
+				sqlDB.Close()
+			}
+			return nil, fmt.Errorf("migrate: %w", err)
 		}
-		return nil, fmt.Errorf("migrate: %w", err)
+	} else {
+		logger.Info("database AutoMigrate disabled; expecting schema migrations to be applied")
 	}
 
 	shutdownChan := make(chan struct{}, 1)

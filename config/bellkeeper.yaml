@@ -16,6 +16,7 @@ database:
   # max_idle_conns: 10      # 连接池最大空闲连接
   # max_open_conns: 100     # 连接池最大打开连接
   # conn_max_lifetime: 60   # 连接最大生命周期（分钟）
+  auto_migrate: true        # 开发便利；生产建议设为 false 并先执行 migrations
 
 n8n:
   webhook_base_url: ${BELLKEEPER_N8N_WEBHOOK_BASE_URL}
