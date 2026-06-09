@@ -3,6 +3,7 @@ package config
 import (
 	"fmt"
 	"os"
+	"reflect"
 	"strings"
 
 	"github.com/spf13/viper"
@@ -301,28 +302,66 @@ func Load(cfgFile string) (*Config, error) {
 		return nil, fmt.Errorf("failed to unmarshal config: %w", err)
 	}
 
-	// Expand ${VAR} references in LLM proxy channel configs
+	// Preserve raw LLM channel API key references before recursive expansion.
 	for i := range cfg.LLMProxy.Channels {
 		cfg.LLMProxy.Channels[i].RawAPIKey = cfg.LLMProxy.Channels[i].APIKey
-		cfg.LLMProxy.Channels[i].BaseURL = os.ExpandEnv(cfg.LLMProxy.Channels[i].BaseURL)
-		cfg.LLMProxy.Channels[i].APIKey = os.ExpandEnv(cfg.LLMProxy.Channels[i].APIKey)
 	}
 
-	// Expand ${VAR} references in Matrix config
-	cfg.Matrix.HomeserverURL = os.ExpandEnv(cfg.Matrix.HomeserverURL)
-	cfg.Matrix.BotAccessToken = os.ExpandEnv(cfg.Matrix.BotAccessToken)
+	expandStringFields(&cfg)
 
-	// Expand ${VAR} references in Firecrawl config
-	cfg.FileIngestion.Firecrawl.APIURL = os.ExpandEnv(cfg.FileIngestion.Firecrawl.APIURL)
-
-	// Expand ${VAR} references in Memos config
-	cfg.Memos.BaseURL = os.ExpandEnv(cfg.Memos.BaseURL)
-	cfg.Memos.APIToken = os.ExpandEnv(cfg.Memos.APIToken)
-
-	// Expand ${VAR} references in Meilisearch config
-	cfg.Meilisearch.APIKey = os.ExpandEnv(cfg.Meilisearch.APIKey)
+	if err := cfg.ValidateSecurity(); err != nil {
+		return nil, err
+	}
 
 	return &cfg, nil
+}
+
+func expandStringFields(v interface{}) {
+	rv := reflect.ValueOf(v)
+	if rv.Kind() != reflect.Pointer || rv.IsNil() {
+		return
+	}
+	expandValue(rv.Elem())
+}
+
+func expandValue(v reflect.Value) {
+	if !v.IsValid() {
+		return
+	}
+	switch v.Kind() {
+	case reflect.String:
+		if v.CanSet() {
+			v.SetString(os.ExpandEnv(v.String()))
+		}
+	case reflect.Struct:
+		for i := 0; i < v.NumField(); i++ {
+			expandValue(v.Field(i))
+		}
+	case reflect.Slice:
+		for i := 0; i < v.Len(); i++ {
+			expandValue(v.Index(i))
+		}
+	case reflect.Pointer:
+		if !v.IsNil() {
+			expandValue(v.Elem())
+		}
+	}
+}
+
+func (c *Config) ValidateSecurity() error {
+	mode := strings.ToLower(c.Server.Mode)
+	if mode == "release" {
+		if c.Server.APIKey == "" {
+			return fmt.Errorf("server.api_key is required in release mode")
+		}
+		if os.Getenv("BELLKEEPER_CREDENTIAL_KEY") == "" {
+			return fmt.Errorf("BELLKEEPER_CREDENTIAL_KEY is required in release mode")
+		}
+	}
+	if mode == "noauth" && strings.EqualFold(os.Getenv("BELLKEEPER_ALLOW_NOAUTH"), "false") {
+		return fmt.Errorf("server.mode noauth is disabled by BELLKEEPER_ALLOW_NOAUTH=false")
+	}
+	return nil
 }
 
 func setDefaults(v *viper.Viper) {
