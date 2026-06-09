@@ -21,13 +21,13 @@ import (
 
 // FileIngestionService handles file ingestion from URLs
 type FileIngestionService struct {
-	cfg          config.FileIngestionConfig
-	extractor    *ExtractorService
-	datasetSvc   *DatasetService
-	classifySvc  *ClassifyService
-	tagRepo      *repository.TagRepository
-	articleRepo  *repository.ArticleTagRepository
-	activityLog  *ActivityLogService
+	cfg         config.FileIngestionConfig
+	extractor   *ExtractorService
+	datasetSvc  *DatasetService
+	classifySvc *ClassifyService
+	tagRepo     *repository.TagRepository
+	articleRepo *repository.ArticleTagRepository
+	activityLog *ActivityLogService
 }
 
 // IngestURLRequest represents a request to ingest a URL
@@ -36,23 +36,23 @@ type IngestURLRequest struct {
 	Title    string   `json:"title"`
 	Tags     []string `json:"tags"`
 	Category string   `json:"category"`
-	Layer    string   `json:"layer"`    // "raw" or "working"
-	Content  string   `json:"content"`  // 可选：传入已提取的内容，跳过 Extract 步骤
+	Layer    string   `json:"layer"`   // "raw" or "working"
+	Content  string   `json:"content"` // 可选：传入已提取的内容，跳过 Extract 步骤
 }
 
 // IngestURLResponse represents the response from URL ingestion
 type IngestURLResponse struct {
-	Success        bool     `json:"success"`
-	Status         string   `json:"status"` // "success", "duplicate", "duplicate_content", "extract_failed"
-	FilePath       string   `json:"file_path,omitempty"`
-	DocumentID     string   `json:"document_id,omitempty"`
-	DatasetID      string   `json:"dataset_id,omitempty"`
-	Title          string   `json:"title,omitempty"`
-	Tags           []string `json:"tags,omitempty"`
-	Extractor      string   `json:"extractor,omitempty"`
-	ExistingTitle  string   `json:"existing_title,omitempty"`  // for duplicate_content: title of existing article
-	ExistingURL    string   `json:"existing_url,omitempty"`    // for duplicate_content: URL of existing article
-	ErrorMessage   string   `json:"error_message,omitempty"`
+	Success       bool     `json:"success"`
+	Status        string   `json:"status"` // "success", "duplicate", "duplicate_content", "extract_failed"
+	FilePath      string   `json:"file_path,omitempty"`
+	DocumentID    string   `json:"document_id,omitempty"`
+	DatasetID     string   `json:"dataset_id,omitempty"`
+	Title         string   `json:"title,omitempty"`
+	Tags          []string `json:"tags,omitempty"`
+	Extractor     string   `json:"extractor,omitempty"`
+	ExistingTitle string   `json:"existing_title,omitempty"` // for duplicate_content: title of existing article
+	ExistingURL   string   `json:"existing_url,omitempty"`   // for duplicate_content: URL of existing article
+	ErrorMessage  string   `json:"error_message,omitempty"`
 }
 
 // NewFileIngestionService creates a new FileIngestionService
@@ -164,9 +164,16 @@ func (s *FileIngestionService) IngestURL(req *IngestURLRequest) (*IngestURLRespo
 	if layer == "" {
 		layer = s.cfg.DefaultLayer
 	}
+	if err := s.validateLayer(layer); err != nil {
+		return nil, err
+	}
+	req.Layer = layer
 
 	// Create layer directory if not exists
-	layerDir := filepath.Join(s.cfg.BasePath, layer)
+	layerDir, err := s.resolveLayerDir(layer)
+	if err != nil {
+		return nil, err
+	}
 	if err := os.MkdirAll(layerDir, 0755); err != nil {
 		return nil, fmt.Errorf("failed to create layer directory: %w", err)
 	}
@@ -213,6 +220,56 @@ func (s *FileIngestionService) IngestURL(req *IngestURLRequest) (*IngestURLRespo
 		Tags:      req.Tags,
 		Extractor: extraction.Extractor,
 	}, nil
+}
+
+func (s *FileIngestionService) validateLayer(layer string) error {
+	if layer == "" {
+		return fmt.Errorf("layer is required")
+	}
+	if filepath.IsAbs(layer) || filepath.Clean(layer) != layer || strings.Contains(layer, "/") || strings.Contains(layer, `\`) {
+		return fmt.Errorf("invalid layer: %s", layer)
+	}
+
+	allowed := map[string]struct{}{
+		"raw":     {},
+		"archive": {},
+		"vault":   {},
+	}
+	for _, configured := range []string{s.cfg.RawDir, s.cfg.WorkingDir, s.cfg.DefaultLayer} {
+		if configured != "" {
+			allowed[configured] = struct{}{}
+		}
+	}
+	if _, ok := allowed[layer]; !ok {
+		return fmt.Errorf("invalid layer: %s", layer)
+	}
+	return nil
+}
+
+func (s *FileIngestionService) resolveLayerDir(layer string) (string, error) {
+	absBase, err := filepath.Abs(s.cfg.BasePath)
+	if err != nil {
+		return "", fmt.Errorf("failed to resolve base path: %w", err)
+	}
+	absLayer, err := filepath.Abs(filepath.Join(absBase, layer))
+	if err != nil {
+		return "", fmt.Errorf("failed to resolve layer path: %w", err)
+	}
+	rel, err := filepath.Rel(absBase, absLayer)
+	if err != nil || rel == ".." || strings.HasPrefix(rel, ".."+string(filepath.Separator)) || filepath.IsAbs(rel) {
+		return "", fmt.Errorf("access denied: layer outside base directory")
+	}
+
+	if realBase, err := filepath.EvalSymlinks(absBase); err == nil {
+		if realLayer, err := filepath.EvalSymlinks(absLayer); err == nil {
+			realRel, relErr := filepath.Rel(realBase, realLayer)
+			if relErr != nil || realRel == ".." || strings.HasPrefix(realRel, ".."+string(filepath.Separator)) || filepath.IsAbs(realRel) {
+				return "", fmt.Errorf("access denied: layer outside base directory")
+			}
+		}
+	}
+
+	return absLayer, nil
 }
 
 // generateFrontmatter generates YAML frontmatter for the file

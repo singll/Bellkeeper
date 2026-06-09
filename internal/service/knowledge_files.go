@@ -13,7 +13,7 @@ import (
 
 // KnowledgeFilesService provides file browsing and management for the knowledge base
 type KnowledgeFilesService struct {
-	basePath  string
+	basePath string
 	scanDirs []config.ScanDirConfig
 }
 
@@ -39,39 +39,71 @@ type KnowledgeFileEntry struct {
 
 // FileContent represents file content for reading
 type FileContent struct {
-	Path     string `json:"path"`
-	Name     string `json:"name"`
-	Content  string `json:"content"`
-	Size     int64  `json:"size"`
+	Path     string    `json:"path"`
+	Name     string    `json:"name"`
+	Content  string    `json:"content"`
+	Size     int64     `json:"size"`
 	Modified time.Time `json:"modified"`
 }
 
 // FilesStats represents file statistics
 type FilesStats struct {
-	TotalFiles    int64            `json:"total_files"`
-	TotalDirs     int64            `json:"total_dirs"`
-	TotalSize     int64            `json:"total_size"`
-	ByLayer       map[string]int64 `json:"by_layer"`
-	ByType        map[string]int64 `json:"by_type"`
+	TotalFiles int64            `json:"total_files"`
+	TotalDirs  int64            `json:"total_dirs"`
+	TotalSize  int64            `json:"total_size"`
+	ByLayer    map[string]int64 `json:"by_layer"`
+	ByType     map[string]int64 `json:"by_type"`
 }
 
 // NewKnowledgeFilesService creates a new knowledge files service
 func NewKnowledgeFilesService(cfg config.KnowledgeConfig) *KnowledgeFilesService {
 	return &KnowledgeFilesService{
-		basePath:  cfg.BasePath,
+		basePath: cfg.BasePath,
 		scanDirs: cfg.ScanDirs,
 	}
 }
 
+func (s *KnowledgeFilesService) resolvePath(relativePath string) (string, error) {
+	if filepath.IsAbs(relativePath) {
+		return "", fmt.Errorf("access denied: absolute paths are not allowed")
+	}
+
+	absBase, err := filepath.Abs(s.basePath)
+	if err != nil {
+		return "", fmt.Errorf("failed to resolve base path: %w", err)
+	}
+	absFull, err := filepath.Abs(filepath.Join(absBase, filepath.Clean(relativePath)))
+	if err != nil {
+		return "", fmt.Errorf("failed to resolve path: %w", err)
+	}
+	if !isPathWithin(absBase, absFull) {
+		return "", fmt.Errorf("access denied: path outside base directory")
+	}
+
+	realBase, err := filepath.EvalSymlinks(absBase)
+	if err != nil {
+		return "", fmt.Errorf("failed to resolve base path symlinks: %w", err)
+	}
+	if realFull, err := filepath.EvalSymlinks(absFull); err == nil && !isPathWithin(realBase, realFull) {
+		return "", fmt.Errorf("access denied: path outside base directory")
+	}
+
+	return absFull, nil
+}
+
+func isPathWithin(base, path string) bool {
+	rel, err := filepath.Rel(base, path)
+	if err != nil {
+		return false
+	}
+	return rel == "." || (rel != ".." && !strings.HasPrefix(rel, ".."+string(filepath.Separator)) && !filepath.IsAbs(rel))
+}
+
 // GetTree returns the directory tree starting from the given path
 func (s *KnowledgeFilesService) GetTree(relativePath string) (*TreeNode, error) {
-	fullPath := filepath.Join(s.basePath, relativePath)
-
-	// Security check: ensure path is within basePath
-	absBase, _ := filepath.Abs(s.basePath)
-	absFull, _ := filepath.Abs(fullPath)
-	if !strings.HasPrefix(absFull, absBase) {
-		return nil, fmt.Errorf("access denied: path outside base directory")
+	fullPath, err := s.resolvePath(relativePath)
+	if err != nil {
+		return nil, err
 	}
 
 	info, err := os.Stat(fullPath)
@@ -84,10 +116,10 @@ func (s *KnowledgeFilesService) GetTree(relativePath string) (*TreeNode, error) 
 
 	if !info.IsDir() {
 		return &TreeNode{
-			Name: filepath.Base(fullPath),
-			Path: relativePath,
-			Type: "file",
-			Size: info.Size(),
+			Name:     filepath.Base(fullPath),
+			Path:     relativePath,
+			Type:     "file",
+			Size:     info.Size(),
 			Modified: info.ModTime(),
 		}, nil
 	}
@@ -156,13 +188,9 @@ func (s *KnowledgeFilesService) buildTreeNode(fullPath, relativePath string) (*T
 
 // ListFiles returns a list of files in the given directory
 func (s *KnowledgeFilesService) ListFiles(relativePath string, layer string) ([]KnowledgeFileEntry, error) {
-	fullPath := filepath.Join(s.basePath, relativePath)
-
-	// Security check
-	absBase, _ := filepath.Abs(s.basePath)
-	absFull, _ := filepath.Abs(fullPath)
-	if !strings.HasPrefix(absFull, absBase) {
-		return nil, fmt.Errorf("access denied: path outside base directory")
+	fullPath, err := s.resolvePath(relativePath)
+	if err != nil {
+		return nil, err
 	}
 
 	entries, err := os.ReadDir(fullPath)
@@ -214,13 +242,9 @@ func (s *KnowledgeFilesService) ListFiles(relativePath string, layer string) ([]
 
 // ReadFile returns the content of a file
 func (s *KnowledgeFilesService) ReadFile(relativePath string) (*FileContent, error) {
-	fullPath := filepath.Join(s.basePath, relativePath)
-
-	// Security check
-	absBase, _ := filepath.Abs(s.basePath)
-	absFull, _ := filepath.Abs(fullPath)
-	if !strings.HasPrefix(absFull, absBase) {
-		return nil, fmt.Errorf("access denied: path outside base directory")
+	fullPath, err := s.resolvePath(relativePath)
+	if err != nil {
+		return nil, err
 	}
 
 	info, err := os.Stat(fullPath)

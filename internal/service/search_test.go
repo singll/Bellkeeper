@@ -1,106 +1,111 @@
 package service
 
 import (
+	"errors"
+	"strings"
 	"testing"
 
 	"github.com/singll/bellkeeper/internal/model"
-	"github.com/stretchr/testify/assert"
+	"github.com/singll/bellkeeper/internal/repository"
 )
 
-func TestSearchService_NewSearchService(t *testing.T) {
-	// Test that NewSearchService creates a valid service
-	// (repos would be nil in unit test, but constructor should not panic)
-	svc := NewSearchService(nil, nil, nil)
-	assert.NotNil(t, svc)
+type fakeTagSearchRepo struct {
+	keyword string
+	limit   int
+	tags    []model.Tag
+	err     error
 }
 
-func TestSearchService_Search_MethodExists(t *testing.T) {
-	// Test that Search method exists and has correct signature
-	// Without mock repos, calling Search panics - we verify method exists
-	svc := NewSearchService(nil, nil, nil)
-	_ = svc
-	// Method signature: func (s *SearchService) Search(query string, scope string, limit int) (*SearchResult, error)
-	t.Log("Search method exists with correct signature: Search(query string, scope string, limit int) (*SearchResult, error)")
+func (r *fakeTagSearchRepo) Search(keyword string, limit int) ([]model.Tag, error) {
+	r.keyword = keyword
+	r.limit = limit
+	return r.tags, r.err
 }
 
-func TestSearchService_Search_ZeroLimit(t *testing.T) {
-	// Test that Search accepts zero limit
-	svc := NewSearchService(nil, nil, nil)
-	_ = svc
-	t.Log("Search accepts zero limit (requires mock repo for full test)")
+type fakeArticleSearchRepo struct {
+	opts repository.ListArticleTagOpts
+	docs []model.ArticleTag
+	err  error
 }
 
-func TestSearchService_Search_NegativeLimit(t *testing.T) {
-	// Test that Search accepts negative limit
-	svc := NewSearchService(nil, nil, nil)
-	_ = svc
-	t.Log("Search accepts negative limit (requires mock repo for full test)")
+func (r *fakeArticleSearchRepo) ListWithFilter(opts repository.ListArticleTagOpts) ([]model.ArticleTag, int64, error) {
+	r.opts = opts
+	return r.docs, int64(len(r.docs)), r.err
 }
 
-func TestSearchService_Search_ValidScopes(t *testing.T) {
-	// Test that Search accepts various scopes
-	svc := NewSearchService(nil, nil, nil)
-	_ = svc
-	t.Log("Search accepts scopes: all, tags, documents, rss (requires mock repo for full test)")
+type fakeRSSSearchRepo struct {
+	keyword string
+	limit   int
+	feeds   []model.RSSFeed
+	err     error
 }
 
-func TestSearchResult_Structure(t *testing.T) {
-	// Test SearchResult structure
-	result := &SearchResult{
-		Tags:       []model.Tag{},
-		Documents:  []model.ArticleTag{},
-		RSSFeeds:   []model.RSSFeed{},
-		TotalCount: 0,
+func (r *fakeRSSSearchRepo) Search(keyword string, limit int) ([]model.RSSFeed, error) {
+	r.keyword = keyword
+	r.limit = limit
+	return r.feeds, r.err
+}
+
+func TestSearchServiceSearchAllAggregatesResults(t *testing.T) {
+	tags := &fakeTagSearchRepo{tags: []model.Tag{{ID: 1, Name: "go"}}}
+	docs := &fakeArticleSearchRepo{docs: []model.ArticleTag{{ID: 2, ArticleTitle: "Go notes"}}}
+	rss := &fakeRSSSearchRepo{feeds: []model.RSSFeed{{ID: 3, Name: "Go feed"}}}
+	svc := NewSearchService(tags, docs, rss)
+
+	result, err := svc.Search(" go ", "all", 0)
+	if err != nil {
+		t.Fatalf("Search returned error: %v", err)
 	}
-
-	assert.NotNil(t, result.Tags)
-	assert.NotNil(t, result.Documents)
-	assert.NotNil(t, result.RSSFeeds)
-	assert.Equal(t, int64(0), result.TotalCount)
-}
-
-func TestSearchResult_WithData(t *testing.T) {
-	// Test SearchResult with actual data
-	result := &SearchResult{
-		Tags: []model.Tag{
-			{ID: 1, Name: "test-tag"},
-		},
-		Documents: []model.ArticleTag{
-			{ID: 1, ArticleTitle: "Test Article"},
-		},
-		RSSFeeds: []model.RSSFeed{
-			{ID: 1, Name: "Test Feed"},
-		},
-		TotalCount: 3,
+	if result.TotalCount != 3 {
+		t.Fatalf("TotalCount = %d, want 3", result.TotalCount)
 	}
-
-	assert.Len(t, result.Tags, 1)
-	assert.Equal(t, "test-tag", result.Tags[0].Name)
-	assert.Len(t, result.Documents, 1)
-	assert.Equal(t, "Test Article", result.Documents[0].ArticleTitle)
-	assert.Len(t, result.RSSFeeds, 1)
-	assert.Equal(t, "Test Feed", result.RSSFeeds[0].Name)
-	assert.Equal(t, int64(3), result.TotalCount)
+	if tags.keyword != "%go%" || tags.limit != 10 {
+		t.Fatalf("tag search keyword/limit = %q/%d, want %%go%%/10", tags.keyword, tags.limit)
+	}
+	if docs.opts.Keyword != "go" || docs.opts.PerPage != 10 {
+		t.Fatalf("document search opts = %+v, want keyword go and per_page 10", docs.opts)
+	}
+	if rss.keyword != "%go%" || rss.limit != 10 {
+		t.Fatalf("rss search keyword/limit = %q/%d, want %%go%%/10", rss.keyword, rss.limit)
+	}
 }
 
-func TestSearchService_SearchResultTypes(t *testing.T) {
-	// Test that SearchResult types are correct
-	svc := NewSearchService(nil, nil, nil)
-	_ = svc
+func TestSearchServiceScopeOnlyCallsRequestedRepo(t *testing.T) {
+	tags := &fakeTagSearchRepo{tags: []model.Tag{{ID: 1, Name: "go"}}}
+	docs := &fakeArticleSearchRepo{}
+	rss := &fakeRSSSearchRepo{}
+	svc := NewSearchService(tags, docs, rss)
 
-	// Verify SearchResult struct fields exist and have correct types
-	result := &SearchResult{}
-	_ = result.Tags       // []model.Tag
-	_ = result.Documents  // []model.ArticleTag
-	_ = result.RSSFeeds   // []model.RSSFeed
-	_ = result.TotalCount // int64
-
-	t.Log("SearchResult struct has correct field types")
+	result, err := svc.Search("go", "tags", 5)
+	if err != nil {
+		t.Fatalf("Search returned error: %v", err)
+	}
+	if len(result.Tags) != 1 || len(result.Documents) != 0 || len(result.RSSFeeds) != 0 {
+		t.Fatalf("unexpected scoped result: %+v", result)
+	}
+	if docs.opts.PerPage != 0 || rss.limit != 0 {
+		t.Fatalf("non-tag repos should not be called, docs=%+v rss_limit=%d", docs.opts, rss.limit)
+	}
 }
 
-func TestSearchService_Constructor(t *testing.T) {
-	// Test that constructor creates a valid struct
-	svc := NewSearchService(nil, nil, nil)
-	assert.NotNil(t, svc)
-	// Fields are nil when repos are nil, but struct is valid
+func TestSearchServicePropagatesRepoError(t *testing.T) {
+	svc := NewSearchService(
+		&fakeTagSearchRepo{err: errors.New("db down")},
+		&fakeArticleSearchRepo{},
+		&fakeRSSSearchRepo{},
+	)
+
+	_, err := svc.Search("go", "tags", 5)
+	if err == nil || !strings.Contains(err.Error(), "search tags") {
+		t.Fatalf("Search err = %v, want wrapped tag error", err)
+	}
+}
+
+func TestSearchServiceRejectsInvalidScope(t *testing.T) {
+	svc := NewSearchService(&fakeTagSearchRepo{}, &fakeArticleSearchRepo{}, &fakeRSSSearchRepo{})
+
+	_, err := svc.Search("go", "unknown", 5)
+	if err == nil || !strings.Contains(err.Error(), "invalid search scope") {
+		t.Fatalf("Search err = %v, want invalid scope", err)
+	}
 }

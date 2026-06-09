@@ -38,6 +38,7 @@ type AskService struct {
 	searchService *FileSearchService
 	llmClient     *llmclient.Client
 	llmJobs       *LLMJobQueueService
+	allowedLayers map[string]struct{}
 }
 
 // NewAskService 创建问答服务
@@ -57,10 +58,22 @@ func NewAskService(search *FileSearchService, llmProxyURL, apiKey string, queue 
 	}
 }
 
+func (s *AskService) SetAllowedLayers(layers []string) {
+	s.allowedLayers = make(map[string]struct{}, len(layers))
+	for _, layer := range layers {
+		if layer != "" {
+			s.allowedLayers[layer] = struct{}{}
+		}
+	}
+}
+
 // Ask 问答
 func (s *AskService) Ask(ctx context.Context, req AskRequest) (*AskResponse, error) {
 	if req.TopK <= 0 {
 		req.TopK = 5
+	}
+	if err := s.validateLayers(req.Layers); err != nil {
+		return nil, err
 	}
 
 	// 1. 搜索相关文档
@@ -182,4 +195,16 @@ func (s *AskService) callLLM(ctx context.Context, question, contextContent strin
 		},
 		llmclient.ChatOptions{CallerID: "knowledge-ask", TaskType: "qa"},
 	)
+}
+
+func (s *AskService) validateLayers(layers []string) error {
+	if len(s.allowedLayers) == 0 || len(layers) == 0 {
+		return nil
+	}
+	for _, layer := range layers {
+		if _, ok := s.allowedLayers[layer]; !ok {
+			return fmt.Errorf("invalid knowledge layer: %s", layer)
+		}
+	}
+	return nil
 }

@@ -162,6 +162,11 @@ func (a *App) setupKnowledge() error {
 		fmt.Sprintf("http://localhost:%d/api/llm/v1", a.cfg.Server.Port),
 		a.cfg.Server.APIKey,
 		askQueue)
+	askLayers := make([]string, 0, len(a.cfg.Knowledge.ScanDirs))
+	for _, dir := range a.cfg.Knowledge.ScanDirs {
+		askLayers = append(askLayers, dir.Layer)
+	}
+	askSvc.SetAllowedLayers(askLayers)
 
 	knowledgeSearchAdapter := service.NewSearchServiceAdapter(knowledgeSearchSvc)
 	knowledgeAskAdapter := service.NewAskServiceAdapter(askSvc)
@@ -434,6 +439,9 @@ func (a *App) Shutdown() error {
 	}
 	if a.services.LLMProxy != nil {
 		a.services.LLMProxy.Stop()
+	}
+	if a.knowledgeIndexSvc != nil {
+		a.knowledgeIndexSvc.Stop()
 	}
 
 	// Matrix infrastructure (reverse order of initialization)

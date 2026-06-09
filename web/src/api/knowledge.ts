@@ -11,6 +11,8 @@ import type {
 
 const API_BASE = '/api'
 
+export type APIResponse<T> = { data: T }
+
 async function request<T>(
   endpoint: string,
   options: RequestInit = {}
@@ -35,7 +37,7 @@ async function request<T>(
 export const knowledgeFilesApi = {
   // Get directory tree
   getTree: (path = '') =>
-    request<{ data: TreeNode }>(`/knowledge/files/tree?path=${encodeURIComponent(path)}`),
+    request<APIResponse<TreeNode>>(`/knowledge/files/tree?path=${encodeURIComponent(path)}`),
 
   // List files in directory
   listFiles: (path = '', layer?: string) => {
@@ -85,7 +87,7 @@ export const knowledgeAskApi = {
 
 // Knowledge Index API
 export const knowledgeIndexApi = {
-  getStats: () => request<{ data: { indexed_count: number; is_indexing: boolean; last_indexed_at?: string } }>('/files/stats'),
+  getStats: () => request<{ data: { indexed_count: number; number_of_documents?: number; is_indexing: boolean; last_indexed_at?: string; available_layers?: string[] } }>('/files/stats'),
   rebuild: () =>
     request<{ message: string }>('/files/rebuild', { method: 'POST' }),
   health: () => request<{ status: string; meilisearch: string }>('/files/health'),

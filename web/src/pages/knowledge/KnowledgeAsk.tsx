@@ -1,4 +1,4 @@
-import { Component, createSignal, createResource, For, Show } from 'solid-js'
+import { Component, createEffect, createMemo, createSignal, createResource, For, Show } from 'solid-js'
 import { knowledgeAskApi, knowledgeIndexApi } from '@/api/knowledge'
 import { useToast } from '@/components/Toast'
 import type { KnowledgeAskResponse, KnowledgeAskReference } from '@/types'
@@ -18,13 +18,18 @@ const KnowledgeAsk: Component = () => {
   const [question, setQuestion] = createSignal('')
   const [history, setHistory] = createSignal<ChatMessage[]>([])
   const [asking, setAsking] = createSignal(false)
-  const [selectedLayers, setSelectedLayers] = createSignal<string[]>(['raw', 'working', 'knowledge'])
+  const [selectedLayers, setSelectedLayers] = createSignal<string[]>([])
 
   // Index status
   const [indexStats] = createResource(() => knowledgeIndexApi.getStats())
 
   // Available layers
-  const layers = ['raw', 'working', 'knowledge']
+  const layers = createMemo(() => indexStats()?.data?.available_layers ?? ['archive', 'vault'])
+  createEffect(() => {
+    if (selectedLayers().length === 0 && layers().length > 0) {
+      setSelectedLayers(layers())
+    }
+  })
 
   // Handle ask
   const handleAsk = async (e: Event) => {
@@ -184,7 +189,7 @@ const KnowledgeAsk: Component = () => {
           {/* Layer filter */}
           <div class="flex items-center gap-2 mb-3 text-sm">
             <span class="text-dark-400">搜索层级:</span>
-            <For each={layers}>
+            <For each={layers()}>
               {(layer) => (
                 <label class="flex items-center gap-1 cursor-pointer">
                   <input

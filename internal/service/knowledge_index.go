@@ -24,8 +24,10 @@ type KnowledgeIndexService struct {
 	splitter    *ChunkSplitter
 
 	// Goroutine 生命周期管理
-	stopCh chan struct{}
-	wg     sync.WaitGroup
+	stopCh  chan struct{}
+	wg      sync.WaitGroup
+	mu      sync.Mutex
+	stopped bool
 }
 
 // NewKnowledgeIndexService 创建索引服务
@@ -39,7 +41,7 @@ func NewKnowledgeIndexService(
 		scanner:     NewFileScanner(cfg),
 		parser:      NewMarkdownParser(),
 		splitter:    NewChunkSplitter(cfg.ChunkMinSize, cfg.ChunkMaxSize),
-		stopCh:     make(chan struct{}),
+		stopCh:      make(chan struct{}),
 	}
 }
 
@@ -130,7 +132,14 @@ func (s *KnowledgeIndexService) IncrementalScan(ctx context.Context) error {
 
 // Stop 停止后台任务
 func (s *KnowledgeIndexService) Stop() {
+	s.mu.Lock()
+	if s.stopped {
+		s.mu.Unlock()
+		return
+	}
+	s.stopped = true
 	close(s.stopCh)
+	s.mu.Unlock()
 	s.wg.Wait()
 }
 
@@ -277,9 +286,27 @@ func (s *KnowledgeIndexService) GetStats(ctx context.Context) (map[string]interf
 
 	return map[string]interface{}{
 		"number_of_documents": stats.NumberOfDocuments,
-		"is_indexing":        stats.IsIndexing,
+		"indexed_count":       stats.NumberOfDocuments,
+		"is_indexing":         stats.IsIndexing,
 		"field_distribution":  stats.FieldDistribution,
+		"available_layers":    s.availableLayers(),
 	}, nil
+}
+
+func (s *KnowledgeIndexService) availableLayers() []string {
+	layers := make([]string, 0, len(s.cfg.ScanDirs))
+	seen := make(map[string]struct{}, len(s.cfg.ScanDirs))
+	for _, dir := range s.cfg.ScanDirs {
+		if dir.Layer == "" {
+			continue
+		}
+		if _, ok := seen[dir.Layer]; ok {
+			continue
+		}
+		seen[dir.Layer] = struct{}{}
+		layers = append(layers, dir.Layer)
+	}
+	return layers
 }
 
 // GetHealth 检查服务健康状态

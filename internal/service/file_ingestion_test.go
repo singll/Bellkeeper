@@ -3,6 +3,8 @@ package service
 import (
 	"testing"
 
+	"github.com/singll/bellkeeper/internal/config"
+
 	"github.com/stretchr/testify/assert"
 )
 
@@ -226,4 +228,25 @@ func TestFileIngestionService_escapeYAML(t *testing.T) {
 	assert.Contains(t, frontmatter, `title: "Test \`)
 	// Should not have unescaped quotes that would break YAML
 	assert.NotContains(t, frontmatter, `title: "Test "quoted"`)
+}
+
+func TestFileIngestionService_validateLayer(t *testing.T) {
+	svc := &FileIngestionService{cfg: config.FileIngestionConfig{
+		BasePath:     t.TempDir(),
+		RawDir:       "raw",
+		WorkingDir:   "working",
+		DefaultLayer: "raw",
+	}}
+
+	for _, layer := range []string{"raw", "working", "archive", "vault"} {
+		if err := svc.validateLayer(layer); err != nil {
+			t.Fatalf("validateLayer(%q) unexpected error: %v", layer, err)
+		}
+	}
+
+	for _, layer := range []string{"../outside", "raw/../vault", "custom", "/tmp"} {
+		if err := svc.validateLayer(layer); err == nil {
+			t.Fatalf("validateLayer(%q) should reject unsafe or unknown layer", layer)
+		}
+	}
 }
