@@ -73,6 +73,8 @@ func AutoMigrate(db *gorm.DB) error {
 		&MatrixUserRole{},
 		&CrawlSource{},
 		&CrawlDomainProfile{},
+		&CrawlExtractionRule{},
+		&CrawlRuleTrial{},
 		&CrawlJob{},
 	); err != nil {
 		return err

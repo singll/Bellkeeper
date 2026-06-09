@@ -440,3 +440,33 @@ func (r *CrawlJobRepository) GetRecentlyBlockedDomains(since time.Time) ([]strin
 		Find(&domains).Error
 	return domains, err
 }
+
+func (r *CrawlJobRepository) FindDeadOrBlockedDomains(since time.Time) ([]string, error) {
+	var domains []string
+	err := r.db.Model(&model.CrawlJob{}).
+		Select("DISTINCT source_domain").
+		Where("source_domain != '' AND status IN ? AND updated_at >= ?",
+			[]string{string(model.CrawlJobDead), string(model.CrawlJobBlocked)},
+			since,
+		).
+		Pluck("source_domain", &domains).Error
+	return domains, err
+}
+
+func (r *CrawlJobRepository) RetryDeadOrBlockedByDomain(domain string) (int64, error) {
+	result := r.db.Model(&model.CrawlJob{}).
+		Where("source_domain = ? AND status IN ?",
+			domain,
+			[]string{string(model.CrawlJobDead), string(model.CrawlJobBlocked)},
+		).
+		Updates(map[string]interface{}{
+			"status":        string(model.CrawlJobPending),
+			"retry_count":   0,
+			"next_retry_at": nil,
+			"started_at":    nil,
+			"error_type":    "",
+			"error_message": "",
+			"block_reason":  "",
+		})
+	return result.RowsAffected, result.Error
+}

@@ -37,6 +37,7 @@ type Repositories struct {
 	MatrixUserRole     *MatrixUserRoleRepository
 	CrawlJob           *CrawlJobRepository
 	CrawlDomainProfile *CrawlDomainProfileRepository
+	CrawlExtractionRule *CrawlExtractionRuleRepository
 }
 
 // NewRepositories creates all repository instances
@@ -73,5 +74,6 @@ func NewRepositories(db *gorm.DB) *Repositories {
 		MatrixUserRole:     NewMatrixUserRoleRepository(db),
 		CrawlJob:           NewCrawlJobRepository(db),
 		CrawlDomainProfile: NewCrawlDomainProfileRepository(db),
+		CrawlExtractionRule: NewCrawlExtractionRuleRepository(db),
 	}
 }

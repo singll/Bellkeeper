@@ -25,6 +25,7 @@ type Services struct {
 	Report        *ReportService
 	PKBReport     *PKBReportService
 	CrawlQueue    *CrawlQueueService
+	RuleOptimizer *RuleOptimizerService
 	// Optional services (initialized in main.go with infra dependencies)
 	Notification *NotificationService
 	MatrixAdmin  *AdminService
@@ -90,9 +91,13 @@ func NewServices(repos *repository.Repositories, cfg *config.Config, version str
 
 	// Create crawl queue service (if enabled)
 	var crawlQueueSvc *CrawlQueueService
+	var ruleOptimizerSvc *RuleOptimizerService
 	if cfg.CrawlQueue.Enabled {
 		crawlQueueSvc = NewCrawlQueueService(cfg.CrawlQueue, repos.CrawlJob, repos.CrawlDomainProfile, extractorSvc, fileIngestionSvc, activityLogSvc)
 		rssFetcherSvc.SetCrawlQueueService(crawlQueueSvc)
+		if cfg.CrawlQueue.RuleOptimizerEnabled {
+			ruleOptimizerSvc = NewRuleOptimizerService(cfg.CrawlQueue, repos.CrawlExtractionRule, repos.CrawlJob, cfg.Classify.LLMProxyURL, cfg.Server.APIKey, extractorSvc, activityLogSvc)
+		}
 	}
 
 	// Create pricing service
@@ -122,6 +127,7 @@ func NewServices(repos *repository.Repositories, cfg *config.Config, version str
 		Report:        reportSvc,
 		PKBReport:     NewPKBReportService(cfg.Knowledge, cfg.DailyReport, activityLogSvc),
 		CrawlQueue:    crawlQueueSvc,
+		RuleOptimizer: ruleOptimizerSvc,
 	}
 }
 

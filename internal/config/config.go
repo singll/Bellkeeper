@@ -265,6 +265,11 @@ type CrawlQueueConfig struct {
 	DomainThrottleEnabled    bool     `mapstructure:"domain_throttle_enabled"`
 	DomainDefaultDelay       int      `mapstructure:"domain_default_delay_seconds"`
 	DomainDefaultConcurrency int      `mapstructure:"domain_default_max_concurrency"`
+	RuleOptimizerEnabled     bool     `mapstructure:"rule_optimizer_enabled"`
+	RuleOptimizerInterval    int      `mapstructure:"rule_optimizer_interval_minutes"`
+	RuleMaxTrials            int      `mapstructure:"rule_max_trials"`
+	RuleSampleSize           int      `mapstructure:"rule_sample_size"`
+	RuleQualityMinChars      int      `mapstructure:"rule_quality_min_chars"`
 }
 
 // DailyReportConfig controls the n8n-backed daily report handoff and watchdog.
@@ -545,6 +550,11 @@ func setDefaults(v *viper.Viper) {
 	v.SetDefault("crawl_queue.domain_throttle_enabled", true)
 	v.SetDefault("crawl_queue.domain_default_delay_seconds", 60)
 	v.SetDefault("crawl_queue.domain_default_max_concurrency", 1)
+	v.SetDefault("crawl_queue.rule_optimizer_enabled", true)
+	v.SetDefault("crawl_queue.rule_optimizer_interval_minutes", 30)
+	v.SetDefault("crawl_queue.rule_max_trials", 3)
+	v.SetDefault("crawl_queue.rule_sample_size", 5)
+	v.SetDefault("crawl_queue.rule_quality_min_chars", 200)
 
 	// Daily report
 	v.SetDefault("daily_report.enabled", true)

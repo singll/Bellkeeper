@@ -344,6 +344,12 @@ func (a *App) startBackgroundTasks() {
 		a.logger.Info("[CrawlQueue] crawl queue started")
 	}
 
+	// Rule optimizer
+	if a.services.RuleOptimizer != nil {
+		a.services.RuleOptimizer.Start(context.Background())
+		a.logger.Info("[RuleOptimizer] rule optimizer started")
+	}
+
 }
 
 // SetupHTTP configures the Gin router and HTTP server.
@@ -427,6 +433,9 @@ func (a *App) Shutdown() error {
 	// Core services
 	if a.services.CrawlQueue != nil {
 		a.services.CrawlQueue.Stop()
+	}
+	if a.services.RuleOptimizer != nil {
+		a.services.RuleOptimizer.Stop()
 	}
 	if a.pkbScheduler != nil {
 		a.pkbScheduler.Stop()

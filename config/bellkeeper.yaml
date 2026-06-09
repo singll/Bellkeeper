@@ -256,6 +256,11 @@ crawl_queue:
   domain_throttle_enabled: true
   domain_default_delay_seconds: 60
   domain_default_max_concurrency: 1
+  rule_optimizer_enabled: true
+  rule_optimizer_interval_minutes: 30
+  rule_max_trials: 3
+  rule_sample_size: 5
+  rule_quality_min_chars: 200
 
 # 知识库配置
 knowledge:

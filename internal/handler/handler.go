@@ -28,6 +28,7 @@ type Handlers struct {
 	PKBReport     *PKBReportHandler
 	Crawler       *CrawlerHandler
 	CrawlQueue    *CrawlQueueHandler
+	ExtractionRule *ExtractionRuleHandler
 	// Optional handlers
 	MatrixNotify *MatrixNotifyHandler
 	MatrixAdmin  *MatrixAdminHandler
@@ -63,6 +64,13 @@ func NewHandlers(services *service.Services, repos *repository.Repositories, shu
 	// Set crawl queue handler (if available)
 	if services.CrawlQueue != nil {
 		h.CrawlQueue = NewCrawlQueueHandler(services.CrawlQueue)
+	}
+
+	// Set extraction rule handler (if available)
+	if services.RuleOptimizer != nil {
+		h.ExtractionRule = NewExtractionRuleHandler(services.RuleOptimizer, repos.CrawlExtractionRule)
+	} else if repos.CrawlExtractionRule != nil {
+		h.ExtractionRule = NewExtractionRuleHandler(nil, repos.CrawlExtractionRule)
 	}
 
 	// Set optional handlers

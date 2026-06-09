@@ -45,6 +45,11 @@ func Setup(r *gin.Engine, handlers *handler.Handlers, mode string, apiKey string
 		registerCrawlQueueRoutes(api, handlers.CrawlQueue)
 	}
 
+	// Extraction rule routes
+	if handlers.ExtractionRule != nil {
+		registerExtractionRuleRoutes(api, handlers.ExtractionRule)
+	}
+
 	// Matrix notification routes
 	if handlers.MatrixNotify != nil {
 		registerMatrixNotifyRoutes(api, handlers.MatrixNotify)
@@ -366,4 +371,13 @@ func registerLogCenterRoutes(api *gin.RouterGroup, h *handler.LogCenterHandler) 
 	logs.POST("/alerts", h.CreateAlertRule)
 	logs.PUT("/alerts/:id", h.UpdateAlertRule)
 	logs.DELETE("/alerts/:id", h.DeleteAlertRule)
+}
+
+func registerExtractionRuleRoutes(api *gin.RouterGroup, h *handler.ExtractionRuleHandler) {
+	rules := api.Group("/crawl/rules")
+	rules.GET("", h.ListRules)
+	rules.POST("", h.CreateRule)
+	rules.GET("/domain/:domain", h.GetRule)
+	rules.PUT("/:id/status", h.UpdateRuleStatus)
+	rules.GET("/:id/trials", h.ListTrials)
 }
