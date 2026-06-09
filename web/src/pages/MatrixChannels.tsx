@@ -34,7 +34,7 @@ const MatrixChannels: Component = () => {
 
     setSubmitting(true)
     try {
-      await matrixApi.updateChannel(channel.name, form())
+      await matrixApi.updateChannel(channel.channel_name, form())
       toast.success('频道更新成功')
       setEditing(null)
     } catch (err) {
@@ -45,7 +45,7 @@ const MatrixChannels: Component = () => {
   }
 
   const getRoomName = (roomId: string) => {
-    const room = rooms()?.data?.data?.find((r) => r.room_id === roomId)
+    const room = rooms()?.data?.find((r) => r.room_id === roomId)
     return room?.room_name || roomId.slice(0, 15) + '...'
   }
 
@@ -102,7 +102,7 @@ const MatrixChannels: Component = () => {
                         </svg>
                       </div>
                       <div>
-                        <h3 class="font-semibold text-white">{channel.name}</h3>
+                        <h3 class="font-semibold text-white">{channel.channel_name}</h3>
                         <div class="flex items-center gap-2 mt-1">
                           <span class={`status-dot ${channel.is_active ? 'status-dot-success' : 'status-dot-gray'}`} />
                           <span class={`text-xs ${channel.is_active ? 'text-emerald-400' : 'text-dark-500'}`}>
@@ -143,7 +143,7 @@ const MatrixChannels: Component = () => {
       <Modal
         open={!!editing()}
         onClose={() => setEditing(null)}
-        title={`编辑频道: ${editing()?.name}`}
+        title={`编辑频道: ${editing()?.channel_name}`}
         size="md"
         footer={
           <>
@@ -175,7 +175,7 @@ const MatrixChannels: Component = () => {
               onChange={(e) => setForm({ ...form(), room_id: e.currentTarget.value })}
             >
               <option value="">选择房间</option>
-              <For each={rooms()?.data?.data ?? []}>
+              <For each={rooms()?.data ?? []}>
                 {(room) => (
                   <option value={room.room_id}>{room.room_name || room.room_id}</option>
                 )}

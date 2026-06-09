@@ -20,6 +20,19 @@ func NewLogCenterHandler(svc *service.LogCenterService, apiKey string) *LogCente
 	return &LogCenterHandler{svc: svc, apiKey: apiKey}
 }
 
+func (h *LogCenterHandler) requireAdmin(c *gin.Context) bool {
+	if h.apiKey == "" {
+		response.Error(c, 401, "unauthorized: admin key not configured")
+		return false
+	}
+	apiKey := c.GetHeader("X-API-Key")
+	if apiKey == "" || subtle.ConstantTimeCompare([]byte(apiKey), []byte(h.apiKey)) != 1 {
+		response.Error(c, 401, "unauthorized: admin only")
+		return false
+	}
+	return true
+}
+
 func (h *LogCenterHandler) CreateEntry(c *gin.Context) {
 	var req struct {
 		Module     string `json:"module" binding:"required"`
@@ -137,10 +150,7 @@ func (h *LogCenterHandler) ListSources(c *gin.Context) {
 }
 
 func (h *LogCenterHandler) RegisterSource(c *gin.Context) {
-	// Admin only: requires server api_key
-	apiKey := c.GetHeader("X-API-Key")
-	if subtle.ConstantTimeCompare([]byte(apiKey), []byte(h.apiKey)) != 1 {
-		response.Error(c, 401, "unauthorized: admin only")
+	if !h.requireAdmin(c) {
 		return
 	}
 
@@ -172,10 +182,7 @@ func (h *LogCenterHandler) RegisterSource(c *gin.Context) {
 }
 
 func (h *LogCenterHandler) UpdateSource(c *gin.Context) {
-	// Admin only: requires server api_key
-	apiKey := c.GetHeader("X-API-Key")
-	if subtle.ConstantTimeCompare([]byte(apiKey), []byte(h.apiKey)) != 1 {
-		response.Error(c, 401, "unauthorized: admin only")
+	if !h.requireAdmin(c) {
 		return
 	}
 
@@ -204,10 +211,7 @@ func (h *LogCenterHandler) UpdateSource(c *gin.Context) {
 }
 
 func (h *LogCenterHandler) DeleteSource(c *gin.Context) {
-	// Admin only: requires server api_key
-	apiKey := c.GetHeader("X-API-Key")
-	if subtle.ConstantTimeCompare([]byte(apiKey), []byte(h.apiKey)) != 1 {
-		response.Error(c, 401, "unauthorized: admin only")
+	if !h.requireAdmin(c) {
 		return
 	}
 
@@ -258,10 +262,7 @@ func (h *LogCenterHandler) ListAlertRules(c *gin.Context) {
 }
 
 func (h *LogCenterHandler) CreateAlertRule(c *gin.Context) {
-	// Admin only: requires server api_key
-	apiKey := c.GetHeader("X-API-Key")
-	if subtle.ConstantTimeCompare([]byte(apiKey), []byte(h.apiKey)) != 1 {
-		response.Error(c, 401, "unauthorized: admin only")
+	if !h.requireAdmin(c) {
 		return
 	}
 
@@ -284,10 +285,7 @@ func (h *LogCenterHandler) CreateAlertRule(c *gin.Context) {
 }
 
 func (h *LogCenterHandler) UpdateAlertRule(c *gin.Context) {
-	// Admin only: requires server api_key
-	apiKey := c.GetHeader("X-API-Key")
-	if subtle.ConstantTimeCompare([]byte(apiKey), []byte(h.apiKey)) != 1 {
-		response.Error(c, 401, "unauthorized: admin only")
+	if !h.requireAdmin(c) {
 		return
 	}
 
@@ -316,10 +314,7 @@ func (h *LogCenterHandler) UpdateAlertRule(c *gin.Context) {
 }
 
 func (h *LogCenterHandler) DeleteAlertRule(c *gin.Context) {
-	// Admin only: requires server api_key
-	apiKey := c.GetHeader("X-API-Key")
-	if subtle.ConstantTimeCompare([]byte(apiKey), []byte(h.apiKey)) != 1 {
-		response.Error(c, 401, "unauthorized: admin only")
+	if !h.requireAdmin(c) {
 		return
 	}
 

@@ -38,6 +38,8 @@ import type {
 
 const API_BASE = '/api'
 
+export type APIResponse<T> = { data: T }
+
 async function request<T>(
   endpoint: string,
   options: RequestInit = {}
@@ -66,7 +68,7 @@ export const tagsApi = {
     ),
 
   get: (id: number) =>
-    request<{ data: Tag }>(`/tags/${id}`),
+    request<APIResponse<Tag>>(`/tags/${id}`),
 
   create: (data: Partial<Tag>) =>
     request<{ data: Tag }>('/tags', {
@@ -389,16 +391,16 @@ export const logsApi = {
 
 // Matrix Platform API
 export const matrixApi = {
-  // Stats - returns stats directly, not wrapped in { data: ... }
+  // Stats
   getStats: () =>
-    request<MatrixStats>('/matrix/admin/stats'),
+    request<{ data: MatrixStats }>('/matrix/admin/stats'),
 
   // Rooms
   listRooms: (params?: { page?: number; page_size?: number }) => {
     const p = new URLSearchParams()
     if (params?.page) p.set('page', String(params.page))
     if (params?.page_size) p.set('page_size', String(params.page_size))
-    return request<{ data: PaginatedResponse<MatrixRoom> }>(`/matrix/admin/rooms?${p}`)
+    return request<{ data: MatrixRoom[] }>(`/matrix/admin/rooms?${p}`)
   },
 
   createRoom: (data: Partial<MatrixRoom>) =>
@@ -464,10 +466,10 @@ export const matrixApi = {
   listNotifications: (params?: { page?: number; page_size?: number; channel?: string; status?: string }) => {
     const p = new URLSearchParams()
     if (params?.page) p.set('page', String(params.page))
-    if (params?.page_size) p.set('page_size', String(params.page_size))
+    if (params?.page_size) p.set('limit', String(params.page_size))
     if (params?.channel) p.set('channel', params.channel)
     if (params?.status) p.set('status', params.status)
-    return request<{ data: PaginatedResponse<MatrixNotification> }>(`/matrix/admin/notifications?${p}`)
+    return request<{ data: MatrixNotification[] }>(`/matrix/admin/notifications?${p}`)
   },
 
   getNotification: (id: number) =>
@@ -480,10 +482,10 @@ export const matrixApi = {
   listEvents: (params?: { page?: number; page_size?: number; event_type?: string; room_id?: string }) => {
     const p = new URLSearchParams()
     if (params?.page) p.set('page', String(params.page))
-    if (params?.page_size) p.set('page_size', String(params.page_size))
+    if (params?.page_size) p.set('limit', String(params.page_size))
     if (params?.event_type) p.set('event_type', params.event_type)
     if (params?.room_id) p.set('room_id', params.room_id)
-    return request<{ data: PaginatedResponse<MatrixEvent> }>(`/matrix/admin/events?${p}`)
+    return request<{ data: MatrixEvent[] }>(`/matrix/admin/events?${p}`)
   },
 
   getEvent: (id: number) =>

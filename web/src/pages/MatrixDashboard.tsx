@@ -8,15 +8,15 @@ const MatrixDashboard: Component = () => {
   const [events] = createResource(() => matrixApi.listEvents({ page: 1, page_size: 10 }))
 
   const statCards = () => [
-    { label: '房间总数', value: stats()?.rooms ?? 0, icon: 'home' },
-    { label: '活跃频道', value: stats()?.channels ?? 0, icon: 'broadcast' },
-    { label: '注册命令', value: stats()?.commands ?? 0, icon: 'command' },
-    { label: '24h 通知', value: stats()?.notifications_24h ?? 0, icon: 'bell' },
+    { label: '房间总数', value: stats()?.data.rooms ?? 0, icon: 'home' },
+    { label: '活跃频道', value: stats()?.data.channels ?? 0, icon: 'broadcast' },
+    { label: '注册命令', value: stats()?.data.commands ?? 0, icon: 'command' },
+    { label: '24h 通知', value: stats()?.data.notifications_24h ?? 0, icon: 'bell' },
   ]
 
   const quickStats = () => [
-    { label: '24h 事件数', value: stats()?.events_24h ?? 0 },
-    { label: '活跃房间', value: stats()?.active_rooms ?? 0 },
+    { label: '24h 事件数', value: stats()?.data.events_24h ?? 0 },
+    { label: '活跃房间', value: stats()?.data.active_rooms ?? 0 },
   ]
 
   const iconSvg = (type: string) => {
@@ -96,20 +96,20 @@ const MatrixDashboard: Component = () => {
         </div>
         <div class="divide-y divide-dark-700">
           <Show
-            when={!events.loading && (events()?.data?.data?.length ?? 0) > 0}
+            when={!events.loading && (events()?.data?.length ?? 0) > 0}
             fallback={
               <div class="px-6 py-8 text-center">
                 <p class="text-dark-500">暂无事件记录</p>
               </div>
             }
           >
-            <For each={events()?.data?.data ?? []}>
+            <For each={events()?.data ?? []}>
               {(event) => (
                 <div class="px-6 py-3 flex items-center justify-between hover:bg-dark-800/50 transition-colors">
                   <div class="flex items-center gap-4">
                     <span class="text-sm text-dark-400">{formatDateShort(event.created_at)}</span>
-                    <span class={`badge ${event.type === 'command' ? 'badge-blue' : 'badge-green'}`}>
-                      {event.type === 'command' ? '命令' : event.type}
+                    <span class={`badge ${event.event_type === 'command' ? 'badge-blue' : 'badge-green'}`}>
+                      {event.event_type === 'command' ? '命令' : event.event_type}
                     </span>
                     <span class="text-sm text-dark-300">{event.sender}</span>
                   </div>

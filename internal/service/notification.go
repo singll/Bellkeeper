@@ -7,6 +7,7 @@ import (
 	"encoding/json"
 	"fmt"
 	"log"
+	"sync"
 	"time"
 
 	"github.com/singll/bellkeeper/internal/config"
@@ -21,27 +22,28 @@ type NotificationService struct {
 	redis        *infra.RedisClient
 	nats         *infra.NATSClient
 	repos        *repository.Repositories
+	channelsMu   sync.RWMutex
 	channels     map[string]*model.MatrixChannel // cached channel config
 	notifySender *NotificationSender
 }
 
 // NotificationRequest represents a notification API request
 type NotificationRequest struct {
-	Channel    string            `json:"channel" binding:"required"` // alerts, daily, todo, qa
-	Message    string            `json:"message" binding:"required"`
-	MessageType string           `json:"message_type"` // text, html, markdown (default: text)
-	RoomID     string            `json:"room_id"`       // optional, overrides channel room
-	Metadata   map[string]string `json:"metadata"`     // optional metadata
-	ID         string            `json:"id"`           // idempotency key, auto-generated if empty
+	Channel     string            `json:"channel" binding:"required"` // alerts, daily, todo, qa
+	Message     string            `json:"message" binding:"required"`
+	MessageType string            `json:"message_type"` // text, html, markdown (default: text)
+	RoomID      string            `json:"room_id"`      // optional, overrides channel room
+	Metadata    map[string]string `json:"metadata"`     // optional metadata
+	ID          string            `json:"id"`           // idempotency key, auto-generated if empty
 }
 
 // NotificationResponse represents the API response
 type NotificationResponse struct {
-	Success         bool   `json:"success"`
-	NotificationID  string `json:"notification_id,omitempty"`
-	Message         string `json:"message,omitempty"`
-	RetryCount      int    `json:"retry_count,omitempty"`
-	LastError       string `json:"last_error,omitempty"`
+	Success        bool   `json:"success"`
+	NotificationID string `json:"notification_id,omitempty"`
+	Message        string `json:"message,omitempty"`
+	RetryCount     int    `json:"retry_count,omitempty"`
+	LastError      string `json:"last_error,omitempty"`
 }
 
 // NewNotificationService creates a new notification service
@@ -52,11 +54,11 @@ func NewNotificationService(
 	repos *repository.Repositories,
 ) *NotificationService {
 	svc := &NotificationService{
-		cfg:       cfg,
-		redis:     redis,
-		nats:      nats,
-		repos:     repos,
-		channels:  make(map[string]*model.MatrixChannel),
+		cfg:      cfg,
+		redis:    redis,
+		nats:     nats,
+		repos:    repos,
+		channels: make(map[string]*model.MatrixChannel),
 	}
 
 	// Load channel config
@@ -73,10 +75,15 @@ func (s *NotificationService) loadChannels(ctx context.Context) {
 		return
 	}
 
+	next := make(map[string]*model.MatrixChannel, len(channels))
 	for _, ch := range channels {
-		s.channels[ch.ChannelName] = ch
+		next[ch.ChannelName] = ch
 		log.Printf("[Notify] loaded channel: %s -> %s", ch.ChannelName, ch.RoomID)
 	}
+
+	s.channelsMu.Lock()
+	s.channels = next
+	s.channelsMu.Unlock()
 }
 
 // ReloadChannels reloads channel configuration
@@ -104,7 +111,7 @@ func (s *NotificationService) Send(ctx context.Context, req *NotificationRequest
 	var roomID string
 	if req.RoomID != "" {
 		roomID = req.RoomID
-	} else if channel, ok := s.channels[req.Channel]; ok {
+	} else if channel := s.getChannel(req.Channel); channel != nil {
 		roomID = channel.RoomID
 	} else {
 		return &NotificationResponse{
@@ -199,11 +206,20 @@ func (s *NotificationService) GetStatus(ctx context.Context, id string) (*model.
 
 // GetChannels returns all configured channels
 func (s *NotificationService) GetChannels(ctx context.Context) []*model.MatrixChannel {
+	s.channelsMu.RLock()
+	defer s.channelsMu.RUnlock()
+
 	result := make([]*model.MatrixChannel, 0, len(s.channels))
 	for _, ch := range s.channels {
 		result = append(result, ch)
 	}
 	return result
+}
+
+func (s *NotificationService) getChannel(name string) *model.MatrixChannel {
+	s.channelsMu.RLock()
+	defer s.channelsMu.RUnlock()
+	return s.channels[name]
 }
 
 // NotificationQueueMessage represents a message in the NATS queue

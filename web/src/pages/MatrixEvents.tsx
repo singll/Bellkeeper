@@ -49,7 +49,7 @@ const MatrixEvents: Component = () => {
     }
   }
 
-  const totalPages = () => Math.ceil((events()?.data?.total || 0) / 20)
+  const totalPages = () => 1
 
   return (
     <div class="animate-fade-in">
@@ -130,7 +130,7 @@ const MatrixEvents: Component = () => {
                 }
               >
                 <Show
-                  when={events()?.data?.data && events()!.data.data.length > 0}
+                  when={events()?.data && events()!.data.length > 0}
                   fallback={
                     <tr>
                       <td colspan="6">
@@ -145,13 +145,13 @@ const MatrixEvents: Component = () => {
                     </tr>
                   }
                 >
-                  <For each={events()?.data?.data ?? []}>
+                  <For each={events()?.data ?? []}>
                     {(event) => (
                       <tr class="group">
                         <td>
                           <span class="text-dark-400 text-sm">{formatTime(event.created_at)}</span>
                         </td>
-                        <td>{getTypeBadge(event.type)}</td>
+                        <td>{getTypeBadge(event.event_type)}</td>
                         <td>
                           <span class="font-mono text-sm text-dark-400 truncate max-w-[150px] block" title={event.room_id}>
                             {event.room_id}
@@ -160,7 +160,7 @@ const MatrixEvents: Component = () => {
                         <td>
                           <span class="text-dark-300">{event.sender}</span>
                         </td>
-                        <td>{getStatusBadge(event.status)}</td>
+                        <td>{getStatusBadge(event.processing_status)}</td>
                         <td class="text-right">
                           <div class="flex items-center justify-end gap-1 opacity-0 group-hover:opacity-100 transition-opacity">
                             <button
@@ -185,7 +185,7 @@ const MatrixEvents: Component = () => {
       <Show when={totalPages() > 1}>
         <div class="flex items-center justify-between mt-4">
           <div class="text-sm text-dark-400">
-            共 <span class="text-dark-200 font-medium">{events()?.data?.total || 0}</span> 条记录
+            共 <span class="text-dark-200 font-medium">{events()?.data?.length || 0}</span> 条记录
           </div>
           <div class="flex gap-2">
             <button
@@ -232,7 +232,7 @@ const MatrixEvents: Component = () => {
                 </div>
                 <div class="p-3 bg-dark-900 rounded-lg">
                   <div class="text-xs text-dark-500 mb-1">类型</div>
-                  <div class="mt-1">{getTypeBadge(selected()!.type)}</div>
+                  <div class="mt-1">{getTypeBadge(selected()!.event_type)}</div>
                 </div>
                 <div class="col-span-2 p-3 bg-dark-900 rounded-lg">
                   <div class="text-xs text-dark-500 mb-1">房间</div>
@@ -244,7 +244,7 @@ const MatrixEvents: Component = () => {
                 </div>
                 <div class="p-3 bg-dark-900 rounded-lg">
                   <div class="text-xs text-dark-500 mb-1">状态</div>
-                  <div class="mt-1">{getStatusBadge(selected()!.status)}</div>
+                  <div class="mt-1">{getStatusBadge(selected()!.processing_status)}</div>
                 </div>
                 <div class="p-3 bg-dark-900 rounded-lg">
                   <div class="text-xs text-dark-500 mb-1">创建时间</div>

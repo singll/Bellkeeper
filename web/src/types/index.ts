@@ -262,28 +262,39 @@ export interface ParseDocState {
 // Matrix Platform Types
 
 export interface MatrixRoom {
+  id: number
   room_id: string
   room_name: string
   room_type: string
   is_active: boolean
+  config?: Record<string, unknown>
+  created_at?: string
+  updated_at?: string
 }
 
 export interface MatrixChannel {
-  name: string
+  id: number
+  channel_name: string
   room_id: string
   is_active: boolean
   priority: number
   config?: Record<string, unknown>
+  created_at?: string
+  updated_at?: string
 }
 
 export interface MatrixCommand {
-  name: string
+  id: number
+  command_name: string
   handler_type: string
+  handler_config?: Record<string, unknown>
   permission_level: string
   room_scope: string
   is_active: boolean
   description?: string
   usage_example?: string
+  created_at?: string
+  updated_at?: string
 }
 
 export interface MatrixNotification {
@@ -298,11 +309,14 @@ export interface MatrixNotification {
 }
 
 export interface MatrixEvent {
+  id: number
   event_id: string
   room_id: string
   sender: string
-  type: string
-  status: string
+  event_type: string
+  processing_status: string
+  error_message?: string
+  processed_at?: string
   created_at: string
 }
 

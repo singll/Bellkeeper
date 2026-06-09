@@ -13,12 +13,12 @@ const MatrixRooms: Component = () => {
   const [rooms, { refetch }] = createResource(() => matrixApi.listRooms({ page: 1, page_size: 100 }))
 
   const [form, setForm] = createSignal({
-    name: '',
+    room_name: '',
     room_type: 'notification',
   })
 
   const openCreateModal = () => {
-    setForm({ name: '', room_type: 'notification' })
+    setForm({ room_name: '', room_type: 'notification' })
     setRoomId('')
     setShowModal(true)
   }
@@ -92,7 +92,7 @@ const MatrixRooms: Component = () => {
                 }
               >
                 <Show
-                  when={rooms()?.data?.data && rooms()!.data.data.length > 0}
+                  when={rooms()?.data && rooms()!.data.length > 0}
                   fallback={
                     <tr>
                       <td colspan="5">
@@ -107,7 +107,7 @@ const MatrixRooms: Component = () => {
                     </tr>
                   }
                 >
-                  <For each={rooms()?.data?.data ?? []}>
+                  <For each={rooms()?.data ?? []}>
                     {(room) => (
                       <tr class="group">
                         <td>
@@ -201,8 +201,8 @@ const MatrixRooms: Component = () => {
               type="text"
               class="input"
               placeholder="如：通知房间"
-              value={form().name}
-              onInput={(e) => setForm({ ...form(), name: e.currentTarget.value })}
+              value={form().room_name}
+              onInput={(e) => setForm({ ...form(), room_name: e.currentTarget.value })}
             />
           </div>
           <div>

@@ -56,33 +56,48 @@ func (r *CrawlJobRepository) Enqueue(job *model.CrawlJob) error {
 // channelType filters by job channel; empty string accepts any.
 func (r *CrawlJobRepository) Dequeue(channelType string) (*model.CrawlJob, error) {
 	var job model.CrawlJob
-	tx := r.db.Model(&model.CrawlJob{}).
-		Where("status IN ?", []string{string(model.CrawlJobPending), string(model.CrawlJobRetrying)}).
-		Where("next_retry_at IS NULL OR next_retry_at <= ?", time.Now())
+	now := time.Now()
+	err := r.db.Transaction(func(tx *gorm.DB) error {
+		query := tx.Clauses(clause.Locking{Strength: "UPDATE", Options: "SKIP LOCKED"}).
+			Where("status IN ?", []string{string(model.CrawlJobPending), string(model.CrawlJobRetrying)}).
+			Where("next_retry_at IS NULL OR next_retry_at <= ?", now)
 
-	if channelType != "" && channelType != "auto" {
-		// Specific channel workers also pick up "auto" jobs
-		tx = tx.Where("channel_type IN ?", []string{channelType, "auto"})
-	}
-
-	err := tx.
-		Order("priority DESC, created_at ASC").
-		Limit(1).
-		Clauses(clause.Locking{Strength: "UPDATE", Options: "SKIP LOCKED"}).
-		First(&job).Error
-
-	if err != nil {
-		if errors.Is(err, gorm.ErrRecordNotFound) {
-			return nil, nil // empty queue
+		if channelType != "" && channelType != "auto" {
+			// Specific channel workers also pick up "auto" jobs
+			query = query.Where("channel_type IN ?", []string{channelType, "auto"})
 		}
+
+		err := query.
+			Order("priority DESC, created_at ASC, id ASC").
+			Limit(1).
+			First(&job).Error
+		if errors.Is(err, gorm.ErrRecordNotFound) {
+			return nil
+		}
+		if err != nil {
+			return err
+		}
+
+		result := tx.Model(&model.CrawlJob{}).
+			Where("id = ? AND status IN ?", job.ID, []string{string(model.CrawlJobPending), string(model.CrawlJobRetrying)}).
+			Updates(map[string]interface{}{
+				"status":     string(model.CrawlJobRunning),
+				"started_at": now,
+			})
+		if result.Error != nil {
+			return result.Error
+		}
+		if result.RowsAffected != 1 {
+			job = model.CrawlJob{}
+		}
+		return nil
+	})
+	if err != nil {
 		return nil, err
 	}
-
-	now := time.Now()
-	r.db.Model(&job).Updates(map[string]interface{}{
-		"status":     string(model.CrawlJobRunning),
-		"started_at": now,
-	})
+	if job.ID == 0 {
+		return nil, nil // empty queue or lost claim
+	}
 
 	job.Status = model.CrawlJobRunning
 	job.StartedAt = &now
@@ -127,10 +142,10 @@ func (r *CrawlJobRepository) MarkBlocked(id uint, reason string) error {
 // MarkDead sets status to 'dead' — permanent failure.
 func (r *CrawlJobRepository) MarkDead(id uint, errType, errMsg string) error {
 	return r.db.Model(&model.CrawlJob{}).Where("id = ?", id).Updates(map[string]interface{}{
-		"status":       string(model.CrawlJobDead),
-		"error_type":   errType,
+		"status":        string(model.CrawlJobDead),
+		"error_type":    errType,
 		"error_message": errMsg,
-		"completed_at": time.Now(),
+		"completed_at":  time.Now(),
 	}).Error
 }
 
@@ -197,15 +212,15 @@ func (r *CrawlJobRepository) List(opts ListCrawlJobOpts) ([]model.CrawlJob, int6
 
 // CrawlQueueStats holds aggregate queue statistics
 type CrawlQueueStats struct {
-	Pending   int64 `json:"pending"`
-	Running   int64 `json:"running"`
-	Success   int64 `json:"success"`
-	Retrying  int64 `json:"retrying"`
-	Failed    int64 `json:"failed"`
-	Blocked   int64 `json:"blocked"`
-	Dead      int64 `json:"dead"`
-	Skipped   int64 `json:"skipped"`
-	Total     int64 `json:"total"`
+	Pending  int64 `json:"pending"`
+	Running  int64 `json:"running"`
+	Success  int64 `json:"success"`
+	Retrying int64 `json:"retrying"`
+	Failed   int64 `json:"failed"`
+	Blocked  int64 `json:"blocked"`
+	Dead     int64 `json:"dead"`
+	Skipped  int64 `json:"skipped"`
+	Total    int64 `json:"total"`
 }
 
 // Stats returns aggregate counts by status.

@@ -5,12 +5,16 @@ import (
 	"context"
 	"net/http"
 	"os/exec"
+	"regexp"
+	"strconv"
 	"strings"
 	"time"
 
 	"github.com/gin-gonic/gin"
 	"github.com/singll/bellkeeper/internal/pkg/response"
 )
+
+var safeSystemArgPattern = regexp.MustCompile(`^[A-Za-z0-9][A-Za-z0-9_.:-]{0,127}$`)
 
 // SystemHandler handles system-level operations like restart and monitoring
 type SystemHandler struct {
@@ -50,13 +54,28 @@ func runShell(cmd string, timeout time.Duration) (string, error) {
 	return strings.TrimSpace(string(out)), err
 }
 
+func runCommand(timeout time.Duration, name string, args ...string) (string, error) {
+	ctx, cancel := context.WithTimeout(context.Background(), timeout)
+	defer cancel()
+
+	out, err := exec.CommandContext(ctx, name, args...).Output()
+	return strings.TrimSpace(string(out)), err
+}
+
+func isSafeSystemArg(s string) bool {
+	return safeSystemArgPattern.MatchString(s)
+}
+
 // DiskUsage returns disk usage data with optional threshold filter
 func (h *SystemHandler) DiskUsage(c *gin.Context) {
 	threshold := 80
 	if t := c.Query("threshold"); t != "" {
-		if _, err := exec.Command("sh", "-c", "echo $((threshold))").Output(); err == nil {
-			threshold = 80 // placeholder, parsed from query
+		parsed, err := strconv.Atoi(t)
+		if err != nil || parsed < 0 || parsed > 100 {
+			response.BadRequest(c, "threshold must be an integer between 0 and 100")
+			return
 		}
+		threshold = parsed
 	}
 
 	output, err := runShell("df -h | awk 'NR>1 {print $6\"|\"int($5)}' | tr -d '%'", 10*time.Second)
@@ -82,9 +101,9 @@ func (h *SystemHandler) DiskUsage(c *gin.Context) {
 		}
 		if usage >= threshold {
 			alerts = append(alerts, gin.H{
-				"mount":  parts[0],
-				"usage":  usage,
-				"alert":  usage > 90,
+				"mount": parts[0],
+				"usage": usage,
+				"alert": usage > 90,
 			})
 		}
 	}
@@ -132,8 +151,12 @@ func (h *SystemHandler) ContainerRestart(c *gin.Context) {
 		response.BadRequest(c, "container name required")
 		return
 	}
+	if !isSafeSystemArg(name) {
+		response.BadRequest(c, "invalid container name")
+		return
+	}
 
-	output, err := runShell("docker restart "+name, 30*time.Second)
+	output, err := runCommand(30*time.Second, "docker", "restart", name)
 	if err != nil {
 		response.InternalError(c, err.Error())
 		return
@@ -153,9 +176,13 @@ func (h *SystemHandler) BackupRun(c *gin.Context) {
 		response.BadRequest(c, "host parameter required")
 		return
 	}
+	if !isSafeSystemArg(host) {
+		response.BadRequest(c, "invalid host")
+		return
+	}
 
 	var buf bytes.Buffer
-	cmd := exec.Command("sh", "-c", "./spool.sh backup "+host)
+	cmd := exec.Command("./spool.sh", "backup", host)
 	cmd.Dir = "/home/ubuntu/SilkSpool"
 	cmd.Stdout = &buf
 	cmd.Stderr = &buf

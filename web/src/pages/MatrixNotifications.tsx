@@ -49,7 +49,7 @@ const MatrixNotifications: Component = () => {
     }
   }
 
-  const totalPages = () => Math.ceil((notifications()?.data?.total || 0) / 20)
+  const totalPages = () => 1
 
   return (
     <div class="animate-fade-in">
@@ -78,7 +78,7 @@ const MatrixNotifications: Component = () => {
             >
               <option value="">全部频道</option>
               <For each={channels()?.data ?? []}>
-                {(ch) => <option value={ch.name}>{ch.name}</option>}
+                {(ch) => <option value={ch.channel_name}>{ch.channel_name}</option>}
               </For>
             </select>
           </div>
@@ -114,7 +114,7 @@ const MatrixNotifications: Component = () => {
                 }
               >
                 <Show
-                  when={notifications()?.data?.data && notifications()!.data.data.length > 0}
+                  when={notifications()?.data && notifications()!.data.length > 0}
                   fallback={
                     <tr>
                       <td colspan="5">
@@ -129,7 +129,7 @@ const MatrixNotifications: Component = () => {
                     </tr>
                   }
                 >
-                  <For each={notifications()?.data?.data ?? []}>
+                  <For each={notifications()?.data ?? []}>
                     {(notif) => (
                       <tr class="group">
                         <td>
@@ -179,7 +179,7 @@ const MatrixNotifications: Component = () => {
       <Show when={totalPages() > 1}>
         <div class="flex items-center justify-between mt-4">
           <div class="text-sm text-dark-400">
-            共 <span class="text-dark-200 font-medium">{notifications()?.data?.total || 0}</span> 条记录
+            共 <span class="text-dark-200 font-medium">{notifications()?.data?.length || 0}</span> 条记录
           </div>
           <div class="flex gap-2">
             <button

@@ -12,7 +12,7 @@ const MatrixCommands: Component = () => {
 
   const handleToggle = async (cmd: MatrixCommand) => {
     try {
-      await matrixApi.updateCommand(cmd.name, { is_active: !cmd.is_active })
+      await matrixApi.updateCommand(cmd.command_name, { is_active: !cmd.is_active })
       toast.success('状态已更新')
       refetch()
     } catch (err) {
@@ -25,7 +25,7 @@ const MatrixCommands: Component = () => {
     if (!cmd) return
     try {
       setTestResult('正在执行...')
-      const res = await matrixApi.testCommand(cmd.name, {
+      const res = await matrixApi.testCommand(cmd.command_name, {
         room_id: '',
         user_id: '',
         args: '',
@@ -122,7 +122,7 @@ const MatrixCommands: Component = () => {
                             <svg class="w-4 h-4 text-dark-500" fill="none" stroke="currentColor" viewBox="0 0 24 24">
                               <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M8 9l3 3-3 3m5 0h3M5 20h14a2 2 0 002-2V6a2 2 0 00-2-2H5a2 2 0 00-2 2v12a2 2 0 002 2z" />
                             </svg>
-                            <span class="font-mono font-medium text-white">{cmd.name}</span>
+                            <span class="font-mono font-medium text-white">{cmd.command_name}</span>
                           </div>
                         </td>
                         <td>
@@ -183,7 +183,7 @@ const MatrixCommands: Component = () => {
           <div class="fixed inset-0 bg-black/60" onClick={() => setTesting(null)} />
           <div class="relative bg-dark-800 rounded-xl border border-dark-700 shadow-2xl w-full max-w-lg mx-4">
             <div class="flex items-center justify-between px-6 py-4 border-b border-dark-700">
-              <h3 class="text-lg font-semibold text-white">测试命令: {testing()?.name}</h3>
+              <h3 class="text-lg font-semibold text-white">测试命令: {testing()?.command_name}</h3>
               <button class="btn btn-ghost btn-sm p-1" onClick={() => setTesting(null)}>
                 <svg class="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
                   <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M6 18L18 6M6 6l12 12" />

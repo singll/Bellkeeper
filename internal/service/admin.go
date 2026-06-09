@@ -85,11 +85,11 @@ func (s *AdminService) DeleteRoom(ctx context.Context, roomID string) error {
 
 // ChannelResponse represents channel info for API response
 type ChannelResponse struct {
-	Name      string                 `json:"name"`
-	RoomID    string                 `json:"room_id"`
-	IsActive  bool                   `json:"is_active"`
-	Priority  int                    `json:"priority"`
-	Config    map[string]interface{} `json:"config,omitempty"`
+	Name     string                 `json:"name"`
+	RoomID   string                 `json:"room_id"`
+	IsActive bool                   `json:"is_active"`
+	Priority int                    `json:"priority"`
+	Config   map[string]interface{} `json:"config,omitempty"`
 }
 
 // ListChannels returns all configured channels
@@ -182,11 +182,13 @@ type EventLog struct {
 
 // NotificationLog represents a notification log entry
 type NotificationLog struct {
-	ID      uint      `json:"id"`
-	Channel string    `json:"channel"`
-	Status  string    `json:"status"`
-	Retries int       `json:"retry_count"`
-	Created time.Time `json:"created_at"`
+	ID             uint      `json:"id"`
+	ChannelName    string    `json:"channel_name"`
+	Status         string    `json:"status"`
+	Retries        int       `json:"retry_count"`
+	MessageContent string    `json:"message_content,omitempty"`
+	ErrorMessage   string    `json:"error_message,omitempty"`
+	CreatedAt      time.Time `json:"created_at"`
 }
 
 // GetEventLogs returns recent event logs
@@ -220,11 +222,13 @@ func (s *AdminService) GetNotificationLogs(ctx context.Context, limit int) ([]*N
 	result := make([]*NotificationLog, len(notifications))
 	for i, n := range notifications {
 		result[i] = &NotificationLog{
-			ID:      n.ID,
-			Channel: n.ChannelName,
-			Status:  n.Status,
-			Retries: n.RetryCount,
-			Created: n.CreatedAt,
+			ID:             n.ID,
+			ChannelName:    n.ChannelName,
+			Status:         n.Status,
+			Retries:        n.RetryCount,
+			MessageContent: n.MessageContent,
+			ErrorMessage:   n.LastError,
+			CreatedAt:      n.CreatedAt,
 		}
 	}
 	return result, nil
@@ -302,17 +306,17 @@ func (s *AdminService) ListAllUserRoles(ctx context.Context, limit, offset int) 
 
 // CommandLogResponse represents a command log for API response
 type CommandLogResponse struct {
-	ID              uint      `json:"id"`
-	EventID         string    `json:"event_id"`
-	Command         string    `json:"command"`
-	UserID          string    `json:"user_id"`
-	RoomID          string    `json:"room_id"`
-	Args            string    `json:"args"`
-	ExecutionStatus string    `json:"execution_status"`
-	ExecutionTimeMs int       `json:"execution_time_ms"`
-	ErrorMessage    string    `json:"error_message,omitempty"`
-	ResponseEventID string    `json:"response_event_id,omitempty"`
-	CreatedAt       time.Time `json:"created_at"`
+	ID              uint       `json:"id"`
+	EventID         string     `json:"event_id"`
+	Command         string     `json:"command"`
+	UserID          string     `json:"user_id"`
+	RoomID          string     `json:"room_id"`
+	Args            string     `json:"args"`
+	ExecutionStatus string     `json:"execution_status"`
+	ExecutionTimeMs int        `json:"execution_time_ms"`
+	ErrorMessage    string     `json:"error_message,omitempty"`
+	ResponseEventID string     `json:"response_event_id,omitempty"`
+	CreatedAt       time.Time  `json:"created_at"`
 	CompletedAt     *time.Time `json:"completed_at,omitempty"`
 }
 

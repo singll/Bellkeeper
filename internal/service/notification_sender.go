@@ -6,6 +6,7 @@ import (
 	"fmt"
 	"log"
 	"strings"
+	"sync"
 	"time"
 
 	"github.com/singll/bellkeeper/internal/matrix/gateway"
@@ -15,6 +16,7 @@ import (
 
 // NotificationSender sends notifications to Matrix
 type NotificationSender struct {
+	mu     sync.RWMutex
 	client *gateway.Client
 	repos  *repository.Repositories
 }
@@ -29,11 +31,20 @@ func NewNotificationSender(client *gateway.Client, repos *repository.Repositorie
 
 // UpdateClient updates the matrix client
 func (s *NotificationSender) UpdateClient(client *gateway.Client) {
+	s.mu.Lock()
+	defer s.mu.Unlock()
 	s.client = client
 }
 
 // Send delivers a notification to Matrix
 func (s *NotificationSender) Send(ctx context.Context, msg *NotificationQueueMessage) error {
+	s.mu.RLock()
+	client := s.client
+	s.mu.RUnlock()
+	if client == nil {
+		return fmt.Errorf("matrix client not ready")
+	}
+
 	// Determine message format
 	var htmlBody string
 	var textBody string
@@ -54,7 +65,7 @@ func (s *NotificationSender) Send(ctx context.Context, msg *NotificationQueueMes
 	}
 
 	// Send to Matrix
-	eventID, err := s.client.SendHTMLMessage(ctx, msg.RoomID, htmlBody, textBody)
+	eventID, err := client.SendHTMLMessage(ctx, msg.RoomID, htmlBody, textBody)
 	if err != nil {
 		return fmt.Errorf("failed to send message: %w", err)
 	}
@@ -158,10 +169,10 @@ func (s *NotificationSender) RetryFailedNotifications(ctx context.Context, maxRe
 	for _, n := range notifications {
 		msg := &NotificationQueueMessage{
 			NotificationID: n.NotificationID,
-			RoomID:        n.RoomID,
-			Message:       n.MessageContent,
-			MessageType:   n.MessageType,
-			RetryCount:    n.RetryCount + 1,
+			RoomID:         n.RoomID,
+			Message:        n.MessageContent,
+			MessageType:    n.MessageType,
+			RetryCount:     n.RetryCount + 1,
 		}
 
 		if err := s.Send(ctx, msg); err != nil {
