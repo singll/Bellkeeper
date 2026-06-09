@@ -2,6 +2,7 @@ package service
 
 import (
 	"testing"
+	"time"
 
 	"github.com/singll/bellkeeper/internal/model"
 	"github.com/stretchr/testify/assert"
@@ -123,4 +124,20 @@ func TestRSSFeed_Integration(t *testing.T) {
 func TestRSSFeed_TableName(t *testing.T) {
 	feed := model.RSSFeed{}
 	assert.Equal(t, "rss_feeds", feed.TableName())
+}
+
+func TestIsRSSFeedDueRespectsFetchInterval(t *testing.T) {
+	now := time.Date(2026, 6, 9, 10, 0, 0, 0, time.UTC)
+	lastFetched := now.Add(-30 * time.Minute)
+	feed := model.RSSFeed{
+		LastFetchedAt:        &lastFetched,
+		FetchIntervalMinutes: 60,
+	}
+
+	due, next := isRSSFeedDue(feed, now)
+	assert.False(t, due)
+	assert.Equal(t, lastFetched.Add(60*time.Minute), next)
+
+	due, _ = isRSSFeedDue(feed, now.Add(31*time.Minute))
+	assert.True(t, due)
 }

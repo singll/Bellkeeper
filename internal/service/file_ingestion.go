@@ -3,6 +3,7 @@ package service
 import (
 	"crypto/sha256"
 	"encoding/hex"
+	"encoding/json"
 	"errors"
 	"fmt"
 	"net/url"
@@ -14,6 +15,7 @@ import (
 
 	"github.com/singll/bellkeeper/internal/config"
 	"github.com/singll/bellkeeper/internal/model"
+	"github.com/singll/bellkeeper/internal/pkg/defaults"
 	"github.com/singll/bellkeeper/internal/repository"
 
 	"gorm.io/gorm"
@@ -139,6 +141,8 @@ func (s *FileIngestionService) IngestURL(req *IngestURLRequest) (*IngestURLRespo
 	}
 
 	// 4. 分类标签（可选）
+	datasetID := ""
+	tagSource := "user"
 	if s.classifySvc != nil && len(req.Tags) == 0 {
 		classifyResult, err := s.classifySvc.ClassifyArticle(&ClassifyRequest{
 			Title:   req.Title,
@@ -147,10 +151,22 @@ func (s *FileIngestionService) IngestURL(req *IngestURLRequest) (*IngestURLRespo
 		})
 		if err == nil && classifyResult != nil {
 			req.Tags = classifyResult.Tags
+			datasetID = classifyResult.DatasetID
+			tagSource = "llm"
 			if req.Category == "" {
 				req.Category = classifyResult.PrimaryDomain
 			}
 		}
+	}
+	req.Tags = normalizeTagList(req.Tags)
+
+	tagRecords, err := s.getOrCreateTagRecords(req.Tags)
+	if err != nil {
+		s.logIngestion(req.URL, "tag_create_failed", fmt.Sprintf("tag creation failed: %v", err))
+		tagRecords = nil
+	}
+	if datasetID == "" {
+		datasetID = s.resolveDatasetID(req.Tags, req.Category)
 	}
 
 	// 5. 生成 frontmatter
@@ -190,9 +206,24 @@ func (s *FileIngestionService) IngestURL(req *IngestURLRequest) (*IngestURLRespo
 
 	// 10. 提取域名
 	sourceDomain := s.extractDomain(req.URL)
+	documentID := s.documentID(contentHash)
+	primaryTagID := uint(0)
+	if len(tagRecords) > 0 {
+		primaryTagID = tagRecords[0].ID
+	}
+	metadata := map[string]interface{}{
+		"tag_source": tagSource,
+	}
+	if len(req.Tags) > 0 {
+		metadata["tags"] = req.Tags
+	}
+	metadataJSON, _ := json.Marshal(metadata)
 
 	// 11. 记录元数据
 	article := &model.ArticleTag{
+		DocumentID:   documentID,
+		DatasetID:    datasetID,
+		TagID:        primaryTagID,
 		ArticleURL:   req.URL,
 		ArticleTitle: req.Title,
 		FilePath:     filePath,
@@ -202,11 +233,14 @@ func (s *FileIngestionService) IngestURL(req *IngestURLRequest) (*IngestURLRespo
 		IndexStatus:  "pending",
 		ContentHash:  contentHash,
 		SourceDomain: sourceDomain,
+		Metadata:     metadataJSON,
 	}
 
 	if err := s.articleRepo.Create(article); err != nil {
 		// File created but DB record failed - log warning but don't fail
 		s.logIngestion(req.URL, "db_failed", fmt.Sprintf("file created but DB record failed: %v", err))
+	} else {
+		s.createAdditionalArticleTagRows(article, tagRecords[1:])
 	}
 
 	// 12. 记录日志
@@ -216,10 +250,75 @@ func (s *FileIngestionService) IngestURL(req *IngestURLRequest) (*IngestURLRespo
 		Success:   true,
 		Status:    "success",
 		FilePath:  filePath,
+		DatasetID: datasetID,
 		Title:     req.Title,
 		Tags:      req.Tags,
 		Extractor: extraction.Extractor,
 	}, nil
+}
+
+func (s *FileIngestionService) getOrCreateTagRecords(names []string) ([]model.Tag, error) {
+	if s.tagRepo == nil || len(names) == 0 {
+		return nil, nil
+	}
+	tags := make([]model.Tag, 0, len(names))
+	for _, name := range names {
+		tag, err := s.tagRepo.FindOrCreate(name, defaults.DefaultTagColor)
+		if err != nil {
+			return nil, err
+		}
+		tags = append(tags, *tag)
+	}
+	return tags, nil
+}
+
+func (s *FileIngestionService) resolveDatasetID(tags []string, category string) string {
+	if s.datasetSvc != nil {
+		if mapping, _, err := s.datasetSvc.RecommendByTags(tags, category); err == nil && mapping != nil && mapping.DatasetID != "" {
+			return mapping.DatasetID
+		}
+	}
+	if category != "" {
+		return category
+	}
+	return "daily-digest"
+}
+
+func (s *FileIngestionService) documentID(contentHash string) string {
+	if len(contentHash) >= 16 {
+		return "doc_" + contentHash[:16]
+	}
+	if contentHash != "" {
+		return "doc_" + contentHash
+	}
+	return fmt.Sprintf("doc_%d", time.Now().UnixNano())
+}
+
+func (s *FileIngestionService) createAdditionalArticleTagRows(base *model.ArticleTag, tags []model.Tag) {
+	if s.articleRepo == nil || base == nil || len(tags) == 0 {
+		return
+	}
+	for _, tag := range tags {
+		row := &model.ArticleTag{
+			DocumentID:   base.DocumentID,
+			DatasetID:    base.DatasetID,
+			TagID:        tag.ID,
+			ArticleTitle: base.ArticleTitle,
+			ArticleURL:   base.ArticleURL,
+			CanonicalURL: base.CanonicalURL,
+			ContentHash:  base.ContentHash,
+			SourceDomain: base.SourceDomain,
+			FilePath:     base.FilePath,
+			Layer:        base.Layer,
+			Extractor:    base.Extractor,
+			IngestStatus: "tag_association",
+			IndexStatus:  "skipped",
+			Metadata:     base.Metadata,
+		}
+		if err := s.articleRepo.Create(row); err != nil {
+			s.logIngestion(base.ArticleURL, "tag_link_failed", fmt.Sprintf("tag association failed for tag %d: %v", tag.ID, err))
+		}
+	}
 }
 
 func (s *FileIngestionService) validateLayer(layer string) error {

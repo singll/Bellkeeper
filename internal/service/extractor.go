@@ -48,9 +48,9 @@ type TrafilaturaOutput struct {
 
 // FirecrawlRequest represents the request to Firecrawl API
 type FirecrawlRequest struct {
-	URL     string `json:"url"`
+	URL     string   `json:"url"`
 	Formats []string `json:"formats"`
-	Timeout int    `json:"timeout,omitempty"`
+	Timeout int      `json:"timeout,omitempty"`
 }
 
 // FirecrawlResponse represents the response from Firecrawl API
@@ -70,8 +70,8 @@ type FirecrawlResponse struct {
 // NewExtractorService creates a new ExtractorService
 func NewExtractorService(cfg config.FileIngestionConfig, activityLog *ActivityLogService) *ExtractorService {
 	return &ExtractorService{
-		cfg: cfg,
-		httpClient: httpclient.NewClientWithTimeout(time.Duration(cfg.Firecrawl.Timeout) * time.Second),
+		cfg:         cfg,
+		httpClient:  httpclient.NewClientWithTimeout(time.Duration(cfg.Firecrawl.Timeout) * time.Second),
 		activityLog: activityLog,
 	}
 }
@@ -200,6 +200,9 @@ func (s *ExtractorService) extractWithFirecrawl(req *ExtractionRequest) (*Extrac
 	}
 
 	if resp.StatusCode != http.StatusOK {
+		if retryAfter := resp.Header.Get("Retry-After"); retryAfter != "" {
+			return nil, fmt.Errorf("HTTP %d retry_after=%q: %s", resp.StatusCode, retryAfter, string(respBody))
+		}
 		return nil, fmt.Errorf("HTTP %d: %s", resp.StatusCode, string(respBody))
 	}
 

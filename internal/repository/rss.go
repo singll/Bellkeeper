@@ -15,7 +15,7 @@ func NewRSSRepository(db *gorm.DB) *RSSRepository {
 	return &RSSRepository{db: db}
 }
 
-func (r *RSSRepository) List(page, perPage int, category, keyword string) ([]model.RSSFeed, int64, error) {
+func (r *RSSRepository) List(page, perPage int, category, keyword string, isActive *bool) ([]model.RSSFeed, int64, error) {
 	var feeds []model.RSSFeed
 	var total int64
 
@@ -25,6 +25,9 @@ func (r *RSSRepository) List(page, perPage int, category, keyword string) ([]mod
 	}
 	if keyword != "" {
 		query = query.Where("name ILIKE ? OR url ILIKE ?", "%"+keyword+"%", "%"+keyword+"%")
+	}
+	if isActive != nil {
+		query = query.Where("is_active = ?", *isActive)
 	}
 
 	if err := query.Count(&total).Error; err != nil {

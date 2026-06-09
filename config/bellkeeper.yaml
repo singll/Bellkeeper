@@ -39,7 +39,7 @@ classify:
   llm_proxy_url: "http://localhost:8080/api/llm/v1"
   model: "Qwen/Qwen3-8B"
   temperature: 0.3
-  max_content_len: 1000
+  max_content_len: 3000
   timeout: 10
   # prompt: ""  # 留空使用内置默认提示词，可自定义 LLM 分类提示词
 

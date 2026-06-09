@@ -18,10 +18,10 @@ import (
 // Health tracking constants
 const (
 	HealthScoreMax          = 100
-	HealthScoreThreshold    = 20  // auto-unpause when health_score recovers above this
-	HealthScoreDecrement    = 15  // 每次连续失败扣减（5次失败后 health=25，仍可恢复）
-	HealthScoreIncrement    = 10  // increase per successful fetch (capped at 100)
-	HealthScoreRecoveryStep = 5   // gradual recovery per successful fetch after failure
+	HealthScoreThreshold    = 20 // auto-unpause when health_score recovers above this
+	HealthScoreDecrement    = 15 // 每次连续失败扣减（5次失败后 health=25，仍可恢复）
+	HealthScoreIncrement    = 10 // increase per successful fetch (capped at 100)
+	HealthScoreRecoveryStep = 5  // gradual recovery per successful fetch after failure
 
 	// Retry backoff: 1min -> 5min -> 30min -> 2h
 	RetryDelayMin    = 1 * time.Minute
@@ -205,17 +205,31 @@ func (s *RSSFetcherService) fetchAllActive(ctx context.Context) {
 		return
 	}
 
-	log.Printf("[RSSFetcher] fetching %d active feeds", len(feeds))
+	now := time.Now()
+	dueFeeds := make([]model.RSSFeed, 0, len(feeds))
+	for _, feed := range feeds {
+		if due, next := isRSSFeedDue(feed, now); due {
+			dueFeeds = append(dueFeeds, feed)
+		} else {
+			log.Printf("[RSSFetcher] skipping feed %d (%s): next fetch at %s", feed.ID, feed.Name, next.Format(time.RFC3339))
+		}
+	}
+	if len(dueFeeds) == 0 {
+		log.Printf("[RSSFetcher] no feeds due (active=%d)", len(feeds))
+		return
+	}
+
+	log.Printf("[RSSFetcher] fetching %d due feeds (active=%d)", len(dueFeeds), len(feeds))
 
 	// Process feeds in batches with per-source concurrency
 	batchSize := s.cfg.MaxPerBatch
-	for i := 0; i < len(feeds); i += batchSize {
+	for i := 0; i < len(dueFeeds); i += batchSize {
 		end := i + batchSize
-		if end > len(feeds) {
-			end = len(feeds)
+		if end > len(dueFeeds) {
+			end = len(dueFeeds)
 		}
 
-		batch := feeds[i:end]
+		batch := dueFeeds[i:end]
 		var wg sync.WaitGroup
 		for _, feed := range batch {
 			wg.Add(1)
@@ -232,6 +246,18 @@ func (s *RSSFetcherService) fetchAllActive(ctx context.Context) {
 		}
 		wg.Wait()
 	}
+}
+
+func isRSSFeedDue(feed model.RSSFeed, now time.Time) (bool, time.Time) {
+	if feed.LastFetchedAt == nil {
+		return true, time.Time{}
+	}
+	intervalMinutes := feed.FetchIntervalMinutes
+	if intervalMinutes <= 0 {
+		intervalMinutes = 60
+	}
+	next := feed.LastFetchedAt.Add(time.Duration(intervalMinutes) * time.Minute)
+	return !now.Before(next), next
 }
 
 // getSemaphore returns (or creates) a concurrency semaphore for a source
@@ -263,12 +289,14 @@ func (s *RSSFetcherService) FetchFeed(ctx context.Context, feedID uint) error {
 
 // FetchFeedResult holds the result of a fetch operation
 type FetchFeedResult struct {
-	FeedID     uint   `json:"feed_id"`
-	FeedName   string `json:"feed_name"`
-	ItemsFound int    `json:"items_found"`
-	ItemsNew   int    `json:"items_new"`
-	ItemsDup   int    `json:"items_dup"`
-	Error      string `json:"error,omitempty"`
+	FeedID        uint   `json:"feed_id"`
+	FeedName      string `json:"feed_name"`
+	ItemsFound    int    `json:"items_found"`
+	ItemsNew      int    `json:"items_new"`
+	ItemsDup      int    `json:"items_dup"`
+	Skipped       bool   `json:"skipped,omitempty"`
+	SkippedReason string `json:"skipped_reason,omitempty"`
+	Error         string `json:"error,omitempty"`
 }
 
 // fetchFeedInternalResult holds the internal result of fetching a single feed
@@ -635,7 +663,7 @@ func (s *RSSFetcherService) PauseSource(feedID uint) error {
 
 // GetSourceHealthStatus returns health status for all feeds
 func (s *RSSFetcherService) GetSourceHealthStatus() ([]SourceHealthStatus, error) {
-	feeds, _, err := s.rssRepo.List(1, 1000, "", "")
+	feeds, _, err := s.rssRepo.List(1, 1000, "", "", nil)
 	if err != nil {
 		return nil, err
 	}
@@ -643,19 +671,19 @@ func (s *RSSFetcherService) GetSourceHealthStatus() ([]SourceHealthStatus, error
 	statuses := make([]SourceHealthStatus, 0, len(feeds))
 	for _, feed := range feeds {
 		statuses = append(statuses, SourceHealthStatus{
-			FeedID:             feed.ID,
-			FeedName:           feed.Name,
-			URL:                feed.URL,
-			Category:           feed.Category,
-			IsActive:           feed.IsActive,
-			IsPaused:           feed.IsPaused,
-			HealthScore:        feed.HealthScore,
+			FeedID:              feed.ID,
+			FeedName:            feed.Name,
+			URL:                 feed.URL,
+			Category:            feed.Category,
+			IsActive:            feed.IsActive,
+			IsPaused:            feed.IsPaused,
+			HealthScore:         feed.HealthScore,
 			ConsecutiveFailures: feed.ConsecutiveFailures,
-			LastFailureReason:  feed.LastFailureReason,
-			TotalFetched:       feed.TotalFetched,
-			TotalFailed:        feed.TotalFailed,
-			LastFetchedAt:      feed.LastFetchedAt,
-			PausedAt:           feed.PausedAt,
+			LastFailureReason:   feed.LastFailureReason,
+			TotalFetched:        feed.TotalFetched,
+			TotalFailed:         feed.TotalFailed,
+			LastFetchedAt:       feed.LastFetchedAt,
+			PausedAt:            feed.PausedAt,
 		})
 	}
 	return statuses, nil
@@ -695,12 +723,14 @@ func (s *RSSFetcherService) logActivity(module, action, status, summary string, 
 
 // FetchAllResult holds the result of fetching all feeds
 type FetchAllResult struct {
-	TotalFeeds int               `json:"total_feeds"`
-	Results    []FetchFeedResult `json:"results"`
+	TotalFeeds   int               `json:"total_feeds"`
+	FetchedFeeds int               `json:"fetched_feeds"`
+	SkippedFeeds int               `json:"skipped_feeds"`
+	Results      []FetchFeedResult `json:"results"`
 }
 
 // FetchAll fetches all active feeds and returns results
-func (s *RSSFetcherService) FetchAll(ctx context.Context) (*FetchAllResult, error) {
+func (s *RSSFetcherService) FetchAll(ctx context.Context, force bool) (*FetchAllResult, error) {
 	feeds, err := s.rssRepo.GetActive()
 	if err != nil {
 		return nil, fmt.Errorf("failed to get feeds: %w", err)
@@ -711,10 +741,21 @@ func (s *RSSFetcherService) FetchAll(ctx context.Context) (*FetchAllResult, erro
 		Results:    make([]FetchFeedResult, 0, len(feeds)),
 	}
 
+	now := time.Now()
 	for _, feed := range feeds {
 		fetchResult := FetchFeedResult{
 			FeedID:   feed.ID,
 			FeedName: feed.Name,
+		}
+
+		if !force {
+			if due, next := isRSSFeedDue(feed, now); !due {
+				fetchResult.Skipped = true
+				fetchResult.SkippedReason = fmt.Sprintf("next fetch at %s", next.Format(time.RFC3339))
+				result.SkippedFeeds++
+				result.Results = append(result.Results, fetchResult)
+				continue
+			}
 		}
 
 		internalResult := s.fetchFeed(ctx, &feed)
@@ -724,6 +765,7 @@ func (s *RSSFetcherService) FetchAll(ctx context.Context) (*FetchAllResult, erro
 		if internalResult.Error != nil {
 			fetchResult.Error = internalResult.Error.Error()
 		}
+		result.FetchedFeeds++
 
 		result.Results = append(result.Results, fetchResult)
 	}
@@ -741,8 +783,8 @@ func (s *RSSFetcherService) GetStatus() map[string]interface{} {
 	s.retryMu.Unlock()
 
 	return map[string]interface{}{
-		"running":       s.running,
-		"config":        s.cfg,
-		"retry_queue":   retryCount,
+		"running":     s.running,
+		"config":      s.cfg,
+		"retry_queue": retryCount,
 	}
 }

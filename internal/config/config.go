@@ -451,7 +451,7 @@ func setDefaults(v *viper.Viper) {
 	v.SetDefault("classify.llm_proxy_url", "http://localhost:8080/api/llm/v1")
 	v.SetDefault("classify.model", "glm-4-flash")
 	v.SetDefault("classify.temperature", 0.3)
-	v.SetDefault("classify.max_content_len", 1000)
+	v.SetDefault("classify.max_content_len", 3000)
 	v.SetDefault("classify.timeout", 5)
 	v.SetDefault("classify.prompt", "")
 

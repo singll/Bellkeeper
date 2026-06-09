@@ -72,7 +72,7 @@ func (s *CrawlService) FetchSource(ctx context.Context, sourceID uint) (*FetchFe
 
 // FetchAllActiveSources batch fetches all active (non-paused) RSS sources
 func (s *CrawlService) FetchAllActiveSources(ctx context.Context) (*FetchAllResult, error) {
-	return s.rssFetcher.FetchAll(ctx)
+	return s.rssFetcher.FetchAll(ctx, false)
 }
 
 // ProcessArticle processes a single RSS item: extract -> dedup -> classify -> ingest.

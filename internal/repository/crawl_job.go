@@ -111,7 +111,7 @@ func (r *CrawlJobRepository) UpdateStatus(id uint, status model.CrawlJobStatus, 
 	}
 	updates["status"] = string(status)
 
-	if status == model.CrawlJobSuccess {
+	if status.IsTerminal() {
 		updates["completed_at"] = time.Now()
 	}
 
@@ -223,6 +223,31 @@ type CrawlQueueStats struct {
 	Total    int64 `json:"total"`
 }
 
+// CrawlAuditBucket is a grouped count used by crawl audit reports.
+type CrawlAuditBucket struct {
+	Key   string `json:"key"`
+	Count int64  `json:"count"`
+}
+
+// CrawlExtractorAudit reports extraction outcomes grouped by extractor.
+type CrawlExtractorAudit struct {
+	Extractor   string  `json:"extractor"`
+	Success     int64   `json:"success"`
+	Failed      int64   `json:"failed"`
+	Total       int64   `json:"total"`
+	SuccessRate float64 `json:"success_rate"`
+}
+
+// CrawlAuditStats holds recent crawl health aggregates.
+type CrawlAuditStats struct {
+	Since         time.Time             `json:"since"`
+	Total         int64                 `json:"total"`
+	ByStatus      []CrawlAuditBucket    `json:"by_status"`
+	TopDomains    []CrawlAuditBucket    `json:"top_domains"`
+	TopErrorTypes []CrawlAuditBucket    `json:"top_error_types"`
+	Extractors    []CrawlExtractorAudit `json:"extractors"`
+}
+
 // Stats returns aggregate counts by status.
 func (r *CrawlJobRepository) Stats() (*CrawlQueueStats, error) {
 	var stats CrawlQueueStats
@@ -245,6 +270,79 @@ func (r *CrawlJobRepository) Stats() (*CrawlQueueStats, error) {
 	}
 
 	return &stats, nil
+}
+
+// Audit returns grouped recent crawl failures and extractor success rates.
+func (r *CrawlJobRepository) Audit(since time.Time, limit int) (*CrawlAuditStats, error) {
+	if limit <= 0 {
+		limit = 10
+	}
+	if limit > 100 {
+		limit = 100
+	}
+	base := func() *gorm.DB {
+		return r.db.Model(&model.CrawlJob{}).Where("updated_at >= ?", since)
+	}
+
+	stats := &CrawlAuditStats{Since: since}
+	if err := base().Count(&stats.Total).Error; err != nil {
+		return nil, err
+	}
+
+	if err := base().
+		Select("status AS key, count(*) AS count").
+		Group("status").
+		Order("count DESC").
+		Scan(&stats.ByStatus).Error; err != nil {
+		return nil, err
+	}
+
+	failureStatuses := []string{
+		string(model.CrawlJobFailed),
+		string(model.CrawlJobRetrying),
+		string(model.CrawlJobBlocked),
+		string(model.CrawlJobDead),
+	}
+
+	if err := base().
+		Where("status IN ? AND source_domain <> ''", failureStatuses).
+		Select("source_domain AS key, count(*) AS count").
+		Group("source_domain").
+		Order("count DESC").
+		Limit(limit).
+		Scan(&stats.TopDomains).Error; err != nil {
+		return nil, err
+	}
+
+	errorExpr := "COALESCE(NULLIF(error_type, ''), NULLIF(block_reason, ''), status)"
+	if err := base().
+		Where("status IN ?", failureStatuses).
+		Select(errorExpr + " AS key, count(*) AS count").
+		Group(errorExpr).
+		Order("count DESC").
+		Limit(limit).
+		Scan(&stats.TopErrorTypes).Error; err != nil {
+		return nil, err
+	}
+
+	if err := base().
+		Select(`COALESCE(NULLIF(extractor_used, ''), 'unknown') AS extractor,
+			SUM(CASE WHEN status = 'success' THEN 1 ELSE 0 END) AS success,
+			SUM(CASE WHEN status IN ('failed', 'retrying', 'blocked', 'dead') THEN 1 ELSE 0 END) AS failed,
+			COUNT(*) AS total`).
+		Group("COALESCE(NULLIF(extractor_used, ''), 'unknown')").
+		Order("total DESC").
+		Scan(&stats.Extractors).Error; err != nil {
+		return nil, err
+	}
+	for i := range stats.Extractors {
+		denominator := stats.Extractors[i].Success + stats.Extractors[i].Failed
+		if denominator > 0 {
+			stats.Extractors[i].SuccessRate = float64(stats.Extractors[i].Success) / float64(denominator)
+		}
+	}
+
+	return stats, nil
 }
 
 // GetBlockedSince returns blocked jobs created after a given time.

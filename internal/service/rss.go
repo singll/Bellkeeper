@@ -14,8 +14,8 @@ func NewRSSService(repo *repository.RSSRepository, tagRepo *repository.TagReposi
 	return &RSSService{repo: repo, tagRepo: tagRepo}
 }
 
-func (s *RSSService) List(page, perPage int, category, keyword string) ([]model.RSSFeed, int64, error) {
-	return s.repo.List(page, perPage, category, keyword)
+func (s *RSSService) List(page, perPage int, category, keyword string, isActive *bool) ([]model.RSSFeed, int64, error) {
+	return s.repo.List(page, perPage, category, keyword, isActive)
 }
 
 func (s *RSSService) GetByID(id uint) (*model.RSSFeed, error) {

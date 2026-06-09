@@ -363,10 +363,22 @@ func (s *ChunkSplitter) splitByParagraphs(body, filePath string) []Chunk {
 func parseSimpleYAML(content string) map[string]string {
 	result := make(map[string]string)
 	lines := strings.Split(content, "\n")
+	currentListKey := ""
 
 	for _, line := range lines {
 		trimmed := strings.TrimSpace(line)
 		if trimmed == "" || strings.HasPrefix(trimmed, "#") {
+			continue
+		}
+		if strings.HasPrefix(trimmed, "- ") && currentListKey != "" {
+			value := strings.TrimSpace(strings.TrimPrefix(trimmed, "- "))
+			value = strings.Trim(value, "\"'")
+			if value != "" {
+				if result[currentListKey] != "" {
+					result[currentListKey] += ","
+				}
+				result[currentListKey] += value
+			}
 			continue
 		}
 
@@ -376,10 +388,14 @@ func parseSimpleYAML(content string) map[string]string {
 		if len(matches) >= 3 {
 			key := matches[1]
 			value := strings.TrimSpace(matches[2])
+			currentListKey = ""
 			// 去除引号
 			value = strings.Trim(value, "\"")
 			value = strings.Trim(value, "'")
 			result[key] = value
+			if value == "" {
+				currentListKey = key
+			}
 		}
 	}
 
@@ -411,17 +427,19 @@ func getStringFromMap(m map[string]string, key string) string {
 
 // getTagsFromMap 获取标签列表
 func getTagsFromMap(m map[string]string) []string {
-	tagsStr := m["tags"]
+	tagsStr := strings.TrimSpace(m["tags"])
 	if tagsStr == "" {
 		return nil
 	}
 
-	// 支持逗号分隔或 YAML 列表格式
+	tagsStr = strings.Trim(tagsStr, "[]")
+
+	// 支持逗号分隔、内联数组或简单 YAML 列表格式
 	if strings.Contains(tagsStr, ",") {
 		parts := strings.Split(tagsStr, ",")
 		var tags []string
 		for _, p := range parts {
-			t := strings.TrimSpace(p)
+			t := cleanFrontmatterTag(p)
 			if t != "" {
 				tags = append(tags, t)
 			}
@@ -429,7 +447,17 @@ func getTagsFromMap(m map[string]string) []string {
 		return tags
 	}
 
-	return []string{tagsStr}
+	if tag := cleanFrontmatterTag(tagsStr); tag != "" {
+		return []string{tag}
+	}
+	return nil
+}
+
+func cleanFrontmatterTag(tag string) string {
+	tag = strings.TrimSpace(tag)
+	tag = strings.Trim(tag, "[]\"'`")
+	tag = strings.TrimSpace(tag)
+	return tag
 }
 
 // getIntFromMap 安全获取整数

@@ -44,7 +44,9 @@ func (r *ArticleTagRepository) GetByURL(url string) (*model.ArticleTag, error) {
 // GetByContentHash retrieves an article tag by content hash
 func (r *ArticleTagRepository) GetByContentHash(hash string) (*model.ArticleTag, error) {
 	var article model.ArticleTag
-	err := r.db.Where("content_hash = ?", hash).First(&article).Error
+	err := r.db.Where("content_hash = ? AND (ingest_status IS NULL OR ingest_status <> ?)", hash, "tag_association").
+		Order("id ASC").
+		First(&article).Error
 	if err != nil {
 		return nil, err
 	}
@@ -157,6 +159,8 @@ func (r *ArticleTagRepository) ListWithFilter(opts ListArticleTagOpts) ([]model.
 	}
 	if opts.Status != "" {
 		query = query.Where("ingest_status = ?", opts.Status)
+	} else {
+		query = query.Where("ingest_status IS NULL OR ingest_status <> ?", "tag_association")
 	}
 	if opts.Keyword != "" {
 		keyword := "%" + opts.Keyword + "%"

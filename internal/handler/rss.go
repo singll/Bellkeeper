@@ -1,6 +1,8 @@
 package handler
 
 import (
+	"strconv"
+
 	"github.com/gin-gonic/gin"
 	"github.com/singll/bellkeeper/internal/model"
 	"github.com/singll/bellkeeper/internal/pkg/defaults"
@@ -9,8 +11,8 @@ import (
 )
 
 type RSSHandler struct {
-	svc       *service.RSSService
-	fetcher   *service.RSSFetcherService
+	svc     *service.RSSService
+	fetcher *service.RSSFetcherService
 }
 
 func NewRSSHandler(svc *service.RSSService, fetcher *service.RSSFetcherService) *RSSHandler {
@@ -32,8 +34,17 @@ func (h *RSSHandler) List(c *gin.Context) {
 	page, perPage := response.ParsePagination(c)
 	category := c.Query("category")
 	keyword := c.Query("keyword")
+	var isActive *bool
+	if raw := c.Query("is_active"); raw != "" {
+		parsed, err := strconv.ParseBool(raw)
+		if err != nil {
+			response.BadRequest(c, "invalid is_active")
+			return
+		}
+		isActive = &parsed
+	}
 
-	feeds, total, err := h.svc.List(page, perPage, category, keyword)
+	feeds, total, err := h.svc.List(page, perPage, category, keyword, isActive)
 	if err != nil {
 		response.InternalError(c, err.Error())
 		return
@@ -171,7 +182,8 @@ func (h *RSSHandler) FetchAll(c *gin.Context) {
 		return
 	}
 
-	result, err := h.fetcher.FetchAll(c.Request.Context())
+	force, _ := strconv.ParseBool(c.DefaultQuery("force", "false"))
+	result, err := h.fetcher.FetchAll(c.Request.Context(), force)
 	if err != nil {
 		response.InternalError(c, err.Error())
 		return

@@ -2,6 +2,7 @@ package handler
 
 import (
 	"strconv"
+	"strings"
 	"time"
 
 	"github.com/singll/bellkeeper/internal/model"
@@ -30,6 +31,49 @@ func (h *CrawlQueueHandler) Stats(c *gin.Context) {
 		return
 	}
 	response.Success(c, stats)
+}
+
+// Audit handles GET /api/crawl/queue/audit
+func (h *CrawlQueueHandler) Audit(c *gin.Context) {
+	limit, _ := strconv.Atoi(c.DefaultQuery("limit", "10"))
+	since := time.Now().Add(-24 * time.Hour)
+	if rawSince := c.Query("since"); rawSince != "" {
+		if parsed, err := time.Parse(time.RFC3339, rawSince); err == nil {
+			since = parsed
+		} else if parsed, err := time.Parse("2006-01-02", rawSince); err == nil {
+			since = parsed
+		} else {
+			response.BadRequest(c, "invalid since")
+			return
+		}
+	} else if rawWindow := c.DefaultQuery("window", "24h"); rawWindow != "" {
+		window, err := parseAuditWindow(rawWindow)
+		if err != nil {
+			response.BadRequest(c, "invalid window")
+			return
+		}
+		since = time.Now().Add(-window)
+	}
+
+	stats, err := h.svc.Audit(since, limit)
+	if err != nil {
+		response.InternalError(c, err.Error())
+		return
+	}
+	response.Success(c, stats)
+}
+
+func parseAuditWindow(raw string) (time.Duration, error) {
+	raw = strings.TrimSpace(strings.ToLower(raw))
+	if strings.HasSuffix(raw, "d") {
+		days, err := strconv.Atoi(strings.TrimSuffix(raw, "d"))
+		if err != nil || days <= 0 {
+			_, parseErr := time.ParseDuration(raw)
+			return 0, parseErr
+		}
+		return time.Duration(days) * 24 * time.Hour, nil
+	}
+	return time.ParseDuration(raw)
 }
 
 // ListJobs handles GET /api/crawl/queue/jobs

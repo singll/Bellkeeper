@@ -94,7 +94,7 @@ func (s *HealthService) Detailed() *DetailedHealth {
 	}
 
 	if s.rssRepo != nil {
-		if _, total, _ := s.rssRepo.List(1, 1, "", ""); total > 0 {
+		if _, total, _ := s.rssRepo.List(1, 1, "", "", nil); total > 0 {
 			metrics["rss_feeds_count"] = total
 		}
 	}

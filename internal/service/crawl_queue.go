@@ -7,7 +7,9 @@ import (
 	"log"
 	"math"
 	"math/rand"
+	"net/http"
 	"net/url"
+	"strconv"
 	"strings"
 	"sync"
 	"time"
@@ -158,11 +160,11 @@ func (s *CrawlQueueService) Enqueue(sourceID uint, rawURL, title, channelType st
 	// Layer 1: domain blacklist check
 	if s.isBlockedDomain(domain) {
 		job := &model.CrawlJob{
-			SourceID:    sourceID,
-			URL:         rawURL,
-			Title:       title,
-			Status:      model.CrawlJobBlocked,
-			ChannelType: channelType,
+			SourceID:     sourceID,
+			URL:          rawURL,
+			Title:        title,
+			Status:       model.CrawlJobBlocked,
+			ChannelType:  channelType,
 			SourceDomain: domain,
 			BlockReason:  "domain_blacklist",
 		}
@@ -399,11 +401,38 @@ func (s *CrawlQueueService) handleExtractionFailure(job *model.CrawlJob, err err
 	}
 
 	switch errType {
-	case "4xx":
-		// 403/404 → dead immediately
+	case "not_found", "client_error":
 		s.repo.MarkDead(job.ID, errType, errMsg)
 		s.logActivity("job_dead", "dead",
-			fmt.Sprintf("Dead (4xx): %s err=%s", job.URL, errMsg), job.SourceID)
+			fmt.Sprintf("Dead (%s): %s err=%s", errType, job.URL, errMsg), job.SourceID)
+	case "forbidden":
+		if job.RetryCount >= 1 {
+			s.repo.MarkBlocked(job.ID, "forbidden")
+			s.logActivity("job_blocked", "blocked",
+				fmt.Sprintf("Blocked (forbidden after retry): %s err=%s", job.URL, errMsg), job.SourceID)
+			s.notifyBlocked(job.URL, job.SourceDomain, "forbidden")
+		} else {
+			nextRetry := s.calculateBackoff(job.RetryCount, errType)
+			s.repo.MarkRetry(job.ID, nextRetry, errType, errMsg)
+			s.logActivity("job_retry", "retrying",
+				fmt.Sprintf("Retry (forbidden): %s attempt=%d next=%s err=%s", job.URL, job.RetryCount+1, nextRetry.Format(time.RFC3339), errMsg),
+				job.SourceID)
+		}
+	case "rate_limited":
+		if job.RetryCount >= job.MaxRetries {
+			s.repo.MarkDead(job.ID, errType, errMsg)
+			s.logActivity("job_dead", "dead",
+				fmt.Sprintf("Dead (rate_limited max retries): %s retries=%d err=%s", job.URL, job.RetryCount, errMsg), job.SourceID)
+		} else {
+			nextRetry := s.calculateBackoff(job.RetryCount, errType)
+			if retryAfter, ok := retryAfterFromError(err, time.Now()); ok && retryAfter.After(time.Now()) {
+				nextRetry = retryAfter
+			}
+			s.repo.MarkRetry(job.ID, nextRetry, errType, errMsg)
+			s.logActivity("job_retry", "retrying",
+				fmt.Sprintf("Retry (rate_limited): %s attempt=%d next=%s err=%s", job.URL, job.RetryCount+1, nextRetry.Format(time.RFC3339), errMsg),
+				job.SourceID)
+		}
 	case "paywall":
 		s.repo.MarkBlocked(job.ID, "paywall_detected")
 		s.logActivity("job_blocked", "blocked",
@@ -411,7 +440,7 @@ func (s *CrawlQueueService) handleExtractionFailure(job *model.CrawlJob, err err
 		s.notifyBlocked(job.URL, job.SourceDomain, "paywall_detected")
 		s.autoLearnDomain(job.SourceDomain)
 	default:
-		// Retryable: timeout, 5xx, network, empty_content, unknown
+		// Retryable: timeout, server_error, network, empty_content, unknown
 		if job.RetryCount >= job.MaxRetries {
 			s.repo.MarkDead(job.ID, errType, errMsg)
 			s.logActivity("job_dead", "dead",
@@ -477,10 +506,18 @@ func (s *CrawlQueueService) calculateBackoff(attempt int, errType string) time.T
 	base := time.Duration(s.cfg.RetryBackoffBase) * time.Second
 	cap := time.Duration(s.cfg.RetryBackoffMax) * time.Second
 
-	// 5xx errors use shorter intervals
-	if errType == "5xx" {
+	switch errType {
+	case "server_error":
 		base = 30 * time.Second
 		cap = 5 * time.Minute
+	case "rate_limited", "forbidden":
+		minBase := 5 * time.Minute
+		if base < minBase {
+			base = minBase
+		}
+		if cap < base {
+			cap = base
+		}
 	}
 
 	// Exponential: base * 2^attempt
@@ -569,6 +606,11 @@ func (s *CrawlQueueService) Stats() (*repository.CrawlQueueStats, error) {
 	return s.repo.Stats()
 }
 
+// Audit returns recent crawl failure and extractor aggregates.
+func (s *CrawlQueueService) Audit(since time.Time, limit int) (*repository.CrawlAuditStats, error) {
+	return s.repo.Audit(since, limit)
+}
+
 // ListJobs returns filtered crawl jobs.
 func (s *CrawlQueueService) ListJobs(opts repository.ListCrawlJobOpts) ([]model.CrawlJob, int64, error) {
 	return s.repo.List(opts)
@@ -600,10 +642,10 @@ func (s *CrawlQueueService) UnblockJob(id uint) error {
 
 // WorkerStatus holds per-channel worker health info.
 type WorkerStatus struct {
-	Channel        string `json:"channel"`
-	WorkerCount    int    `json:"worker_count"`
-	BreakerState   string `json:"breaker_state"`
-	ConsecutiveFail int   `json:"consecutive_fail"`
+	Channel         string `json:"channel"`
+	WorkerCount     int    `json:"worker_count"`
+	BreakerState    string `json:"breaker_state"`
+	ConsecutiveFail int    `json:"consecutive_fail"`
 }
 
 // WorkerStatuses returns the health status of all worker channels.
@@ -625,9 +667,9 @@ func (s *CrawlQueueService) WorkerStatuses() []WorkerStatus {
 			cb.mu.Unlock()
 		}
 		statuses = append(statuses, WorkerStatus{
-			Channel:        ch,
-			WorkerCount:    count,
-			BreakerState:   state,
+			Channel:         ch,
+			WorkerCount:     count,
+			BreakerState:    state,
 			ConsecutiveFail: failCount,
 		})
 	}
@@ -650,14 +692,16 @@ func classifyCrawlError(err error) (string, string) {
 	switch {
 	case strings.Contains(lower, "timeout") || strings.Contains(lower, "deadline exceeded"):
 		return "timeout", msg
-	case strings.Contains(lower, "404") || strings.Contains(lower, "not found"):
-		return "4xx", msg
-	case strings.Contains(lower, "403") || strings.Contains(lower, "forbidden"):
-		return "4xx", msg
 	case strings.Contains(lower, "429"):
-		return "4xx", msg
-	case strings.Contains(lower, "500") || strings.Contains(lower, "502") || strings.Contains(lower, "503"):
-		return "5xx", msg
+		return "rate_limited", msg
+	case strings.Contains(lower, "404") || strings.Contains(lower, "410") || strings.Contains(lower, "not found"):
+		return "not_found", msg
+	case strings.Contains(lower, "403") || strings.Contains(lower, "forbidden"):
+		return "forbidden", msg
+	case strings.Contains(lower, "400") || strings.Contains(lower, "401") || strings.Contains(lower, "422"):
+		return "client_error", msg
+	case strings.Contains(lower, "500") || strings.Contains(lower, "502") || strings.Contains(lower, "503") || strings.Contains(lower, "504"):
+		return "server_error", msg
 	case strings.Contains(lower, "paywall") || strings.Contains(lower, "subscribe"):
 		return "paywall", msg
 	case strings.Contains(lower, "empty content") || strings.Contains(lower, "too short"):
@@ -667,6 +711,59 @@ func classifyCrawlError(err error) (string, string) {
 	default:
 		return "unknown", msg
 	}
+}
+
+func retryAfterFromError(err error, now time.Time) (time.Time, bool) {
+	if err == nil {
+		return time.Time{}, false
+	}
+	value := extractRetryAfterValue(err.Error())
+	if value == "" {
+		return time.Time{}, false
+	}
+	if seconds, parseErr := strconv.Atoi(value); parseErr == nil {
+		if seconds <= 0 {
+			return time.Time{}, false
+		}
+		if seconds > 86400 {
+			seconds = 86400
+		}
+		return now.Add(time.Duration(seconds) * time.Second), true
+	}
+	retryAt, parseErr := http.ParseTime(value)
+	if parseErr != nil || !retryAt.After(now) {
+		return time.Time{}, false
+	}
+	return retryAt, true
+}
+
+func extractRetryAfterValue(msg string) string {
+	for _, marker := range []string{"retry_after=", "retry-after=", "retry-after:", "retry after "} {
+		lower := strings.ToLower(msg)
+		idx := strings.Index(lower, marker)
+		if idx < 0 {
+			continue
+		}
+		rest := strings.TrimSpace(msg[idx+len(marker):])
+		if rest == "" {
+			continue
+		}
+		if strings.HasPrefix(rest, "\"") {
+			if end := strings.Index(rest[1:], "\""); end >= 0 {
+				return rest[1 : 1+end]
+			}
+		}
+		line := strings.TrimSpace(strings.SplitN(rest, "\n", 2)[0])
+		if _, err := http.ParseTime(line); err == nil {
+			return line
+		}
+		parts := strings.Fields(rest)
+		if len(parts) == 0 {
+			continue
+		}
+		return strings.Trim(parts[0], " ,;\"'")
+	}
+	return ""
 }
 
 // crawlExtractDomain extracts the domain from a URL.
