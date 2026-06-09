@@ -9,6 +9,18 @@ var tagSynonyms = map[string]string{
 	"large-language-model":  "llm",
 	"large-language-models": "llm",
 	"genai":                 "generative-ai",
+	"gen-ai":                "generative-ai",
+	"artificial-intelligence": "ai",
+	"machine-learning":      "ml",
+	"deep-learning":         "dl",
+	"natural-language-processing": "nlp",
+	"computer-vision":       "cv",
+	"cybersecurity":         "security",
+	"infosec":               "security",
+	"devops":                "dev-ops",
+	"web-dev":               "web-development",
+	"frontend":              "web-frontend",
+	"backend":               "web-backend",
 }
 
 var noisyAutoTags = map[string]struct{}{
@@ -16,6 +28,11 @@ var noisyAutoTags = map[string]struct{}{
 	"news":    {},
 	"post":    {},
 	"update":  {},
+	"blog":    {},
+	"report":  {},
+	"content": {},
+	"info":    {},
+	"general": {},
 }
 
 func normalizeTagList(tags []string) []string {

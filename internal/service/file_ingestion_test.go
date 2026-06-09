@@ -221,7 +221,7 @@ func TestFileIngestionService_escapeYAML(t *testing.T) {
 	}
 
 	// generateFrontmatter calls escapeYAML internally
-	frontmatter := svc.generateFrontmatter(req, &ExtractionResult{Extractor: "test"})
+	frontmatter := svc.generateFrontmatter(req, &ExtractionResult{Extractor: "test"}, "llm")
 
 	// Verify quotes are escaped (should not appear as unescaped quotes in the value)
 	// The frontmatter should have \" instead of raw "

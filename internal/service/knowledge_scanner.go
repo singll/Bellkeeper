@@ -134,7 +134,7 @@ func (p *MarkdownParser) ParseMarkdown(fileInfo *FileInfo) (*ParseResult, error)
 	result := &ParseResult{
 		Title:    fileInfo.Title,
 		Category: getStringFromMap(fm, "category"),
-		Tags:     getTagsFromMap(fm),
+		Tags:     normalizeTagList(getTagsFromMap(fm)),
 		Body:     body,
 	}
 

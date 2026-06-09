@@ -46,11 +46,12 @@ type ClassifyRequest struct {
 
 // ClassifyResponse represents the classification result
 type ClassifyResponse struct {
-	PrimaryDomain string   `json:"primary_domain"`
-	Tags          []string `json:"tags"`
-	DatasetID     string   `json:"dataset_id"`
-	Confidence    float64  `json:"confidence"`
-	Reasoning     string   `json:"reasoning"`
+	PrimaryDomain  string             `json:"primary_domain"`
+	Tags           []string           `json:"tags"`
+	TagConfidences map[string]float64 `json:"tag_confidences,omitempty"`
+	DatasetID      string             `json:"dataset_id"`
+	Confidence     float64            `json:"confidence"`
+	Reasoning      string             `json:"reasoning"`
 }
 
 const defaultClassifyPrompt = `你是一个内容分类专家。请分析以下文章，返回分类结果。
@@ -202,10 +203,11 @@ func (s *ClassifyService) parseClassifyResponse(content string) (*ClassifyRespon
 	}
 
 	return &ClassifyResponse{
-		PrimaryDomain: result.PrimaryDomain,
-		Tags:          normalizeAutoTagList(result.Tags),
-		DatasetID:     result.Dataset,
-		Confidence:    result.Confidence,
-		Reasoning:     result.Reasoning,
+		PrimaryDomain:  result.PrimaryDomain,
+		Tags:           normalizeAutoTagList(result.Tags),
+		TagConfidences: result.TagConfidences,
+		DatasetID:      result.Dataset,
+		Confidence:     result.Confidence,
+		Reasoning:      result.Reasoning,
 	}, nil
 }

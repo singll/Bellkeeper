@@ -170,7 +170,7 @@ func (s *FileIngestionService) IngestURL(req *IngestURLRequest) (*IngestURLRespo
 	}
 
 	// 5. 生成 frontmatter
-	frontmatter := s.generateFrontmatter(req, extraction)
+	frontmatter := s.generateFrontmatter(req, extraction, tagSource)
 
 	// 6. 生成文件名
 	filename := s.generateFilename(req.Title)
@@ -372,7 +372,7 @@ func (s *FileIngestionService) resolveLayerDir(layer string) (string, error) {
 }
 
 // generateFrontmatter generates YAML frontmatter for the file
-func (s *FileIngestionService) generateFrontmatter(req *IngestURLRequest, extraction *ExtractionResult) string {
+func (s *FileIngestionService) generateFrontmatter(req *IngestURLRequest, extraction *ExtractionResult, tagSource string) string {
 	var sb strings.Builder
 	sb.WriteString("---\n")
 	sb.WriteString(fmt.Sprintf("title: \"%s\"\n", escapeYAML(req.Title)))
@@ -392,6 +392,10 @@ func (s *FileIngestionService) generateFrontmatter(req *IngestURLRequest, extrac
 			sb.WriteString(tag)
 		}
 		sb.WriteString("]\n")
+	}
+
+	if tagSource != "" {
+		sb.WriteString(fmt.Sprintf("tag_source: %s\n", tagSource))
 	}
 
 	if req.Category != "" {
