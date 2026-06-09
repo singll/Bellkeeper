@@ -37,6 +37,7 @@
 ### 2.1 架构分层（单向调用）
 - 调用链严格单向：`Router → Handler → Service → Repository → Model`。
 - **禁止跨层**：Handler 不得直接调 Repository；Service 不得直接操作 HTTP 响应；Repository 不含业务逻辑。
+- 已知分层例外必须登记在 `doc/ARCHITECTURE-EXCEPTIONS.md`，新增例外需要写明范围、原因、护栏和退出计划。
 - **手动依赖注入**：构造函数注入（`NewXxx(...)`），无 DI 容器、**无全局可变状态**、无 `init()` 副作用。
 - 新增模块按 `model → db.go(AutoMigrate) → repository → repository.go → service → service.go → handler → handler.go → router` 全链路接好（详见开发指南「开发清单」）。
 

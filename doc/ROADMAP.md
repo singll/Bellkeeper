@@ -12,7 +12,7 @@
 
 | 优先级 | 类别 | 摘要 | 工期估算 |
 |--------|------|------|---------|
-| **P0 ⭐** | 个人知识库 | 知识库成熟化（核心闭环）：分层存储 `raw/archive/vault` + AI 三维加权打分分流 + 领域/标签可配置 + n8n 工作流目录纳管 → 见 §10 | 5.5 天 |
+| **P0 ⭐🔶** | 个人知识库 | **[MVP 开发完成·P0 总体验收未完成]** 三层存储 `raw/archive/vault` + `pkb-curate` AI 打分分流 + 高分原子化重构 + `config/pkb/` 领域/提示词可配置 + 自动调度 + n8n 工作流 JSON 纳管已落地；仍缺 `spool n8n export` 冷备进 Git/漂移检测、存量 `archive/` 批量重打分聚合、线上样本验证 → 见 §10 | MVP 约 2.75 天已落地；R2/R3 待排 |
 | **P0** | 代码清理 | Bellkeeper 删除 9 个 RAGFlow Go 文件 + 路由 + 前端调用 + 配置块 | 2 天 |
 | **P0** | n8n 清理 | M03 / K06 / K07 / K08 中的 RAGFlow 调用迁移或下线 | 2 天 |
 | **P0** | 配置清理 | `bundles/knowledge/` 整体下线；`bellkeeper-init.sh` 与 `.env` 移除 RAGFLOW_* 变量 | 0.5 天 |
@@ -112,6 +112,8 @@
 > 🔶 **待运行时验证（用户后续自验，对应 §2.8 验收标准）**：prompt cache 命中率 >80%、自适应限流学习曲线（30min/24h）、Kimi Code 403→5h 探测自恢复、各 provider 真实余额拉取、调用方 base_url 迁移。**停掉 new-api 容器暂缓**（用户仍在使用 new-api）。
 >
 > **补充实现（2026-06-08）**：新增通用 `internal/llmclient` + 持久化 `llm_jobs` / `LLMJobQueueService`。同步 OpenAI-compatible 代理仍由 `/api/llm/v1` 负责；内部批处理/可等待调用（PKB score/reconstruct/digest、classify、knowledge ask）统一可进入 `llm_jobs`，由 server worker 复用 LLM Proxy 的路由/计费/熔断能力并承担长时间 retry/backoff/stale recovery。
+>
+> **状态复核（2026-06-08）**：代码侧仍维持「开发完成」结论；本次复核未发现 §2.2–§2.7 的结构性缺口。仍不改为完全完成，因为 §2.8 的真实运行验收、调用方 `base_url` 迁移、new-api 停服 7 天观察尚未执行。
 
 ### 2.0 背景与目标
 
@@ -1216,6 +1218,10 @@ created_at, updated_at
 > 📐 **实施文档**：本章是需求与蓝图（做什么、为什么）；完整落地方案见 [PKB-IMPLEMENTATION.md](PKB-IMPLEMENTATION.md)。需求变更改本章，落地细节改实施文档。
 >
 > ⚠️ **实施方式已两次转向**（细节见实施文档「方向沿革」表）：v1「Bellkeeper 内置 Evaluator/Reconstruct 常驻 service」→ v2「Claude Agent + Skill」→ **现行 v3「Bellkeeper 一次性 CLI 子命令 `pkb-curate` + 外置提示词 `config/pkb/`」**（2026-06-05；用户决策不用 Claude Code 做自动化 agent，且任务本质是流程固定的 LLM 批处理、无需自主 agent 框架）。本章下文凡出现「拟新增 service / 表」等字样，**实现方式以实施文档为准**（搬入一次性 CLI + `config/pkb/` 提示词，不内置常驻 service）。需求（漏斗 → 重构 → 合成、三层存储、领域可配、n8n 纳管、体系化合成）不变。
+>
+> **实施状态（2026-06-08 核验）**：**MVP 开发完成**。已落地 `internal/pkb` 编排、`bellkeeper pkb-curate` / `pkb-curate digest`、`config/pkb/` 提示词包、`raw/archive/vault` 索引隔离、递归扫描、`llm_jobs` 队列接入、PKB 自动调度开关、`internal/n8n_workflows/` 仓库 JSON 事实源与工作流定义 Web/API 管理。`go test ./...` 已通过。
+>
+> 🔶 **P0 总体验收尚未完成**：§10.6 n8n 的 Bellkeeper 侧 JSON 事实源与 Web/API 管理已落地，但 `spool n8n export` 冷备进 Git、线上漂移检测与定期备份流程尚未完成；§10.9「新增领域后存量 `archive/` 批量重打分并聚合」尚缺专门命令/流程；线上还需用真实 raw 样本跑 `pkb-curate --dry-run` 与 live run，确认 LLM 输出、Obsidian LiveSync 同步范围和 Meili rebuild 结果。
 
 > **核心闭环**：把「n8n 无脑爬取 → 信息垃圾场」改造成「**漏斗筛选 + 深度重构 + 体系化合成**」三段式管线，复用已落地的 LLM Proxy（`pool-summary` 虚拟组）+ CrawlQueue + Meilisearch，产出**可检索、可整体取用、知识互联**的成熟 Obsidian Vault。当前最高优先级（P0 ⭐），§0 总览工期 5.5 天。
 
@@ -1364,6 +1370,8 @@ tags: [jwt, auth, poc]
 
 **收益**：工作流定义可 review、可回滚、可在 Bellkeeper Web 可见可管，不再散落。
 
+**实施状态（2026-06-08）**：Bellkeeper 侧已落地 `internal/n8n_workflows/` 目录事实源、`n8n.workflow_dir` 配置、`/api/workflows/definitions*` 增删改查/推送接口、Web 工作流定义视图，以及 Docker 镜像内定义目录复制。仍待 SilkSpool 侧补齐 `spool n8n export` 定期冷备进 Git、线上漂移检测与恢复演练。
+
 ### 10.7 体系化输出（P1 延伸）
 
 让碎片在**周/月维度被缝合成体系**，是漏斗+重构之上的合成层：
@@ -1392,21 +1400,21 @@ tags: [jwt, auth, poc]
 
 ### 10.9 验收标准
 
-- [ ] `raw/` 目录的任何内容**不会**出现在本地 Obsidian（同步范围仅 `vault/`）
-- [ ] 低质文章（`final_score < 4.0`）被丢弃，不进 `archive/`/`vault/`，仅 `raw/` 可溯源
-- [ ] 高分文章（`>=7.0`）在 `vault/` 生成**结构化笔记**（frontmatter + 核心洞察 + 关键要点 + 深度摘要 + wikilink）
-- [ ] 新增一个领域（如 `security`）后，存量 `archive/` 可批量重打分并聚合并入该领域
-- [ ] 整个 `vault/` 可被 Meili 全局检索（`/api/files/search`），也可 git/rsync **整体导出**为独立 Obsidian Vault
-- [ ] n8n 工作流定义在 Bellkeeper 可见可管，且 `spool n8n export` 冷备进 git
+- [ ] `raw/` 目录的任何内容**不会**出现在本地 Obsidian（代码侧已保证 `raw` 不进 Meili；LiveSync 同步范围需线上确认）
+- [x] 低质文章（`final_score < 4.0`）被丢弃，不进 `archive/`/`vault/`，仅 `raw/` 可溯源（`pkb-curate` 已实现；待真实样本抽验）
+- [x] 高分文章（`>=7.0`）在 `vault/` 生成**结构化笔记**（frontmatter + 核心洞察 + 关键要点 + 深度摘要 + wikilink；`pkb-curate` 已实现；待真实样本抽验）
+- [ ] 新增一个领域（如 `security`）后，存量 `archive/` 可批量重打分并聚合并入该领域（尚缺 archive 批量重打分/聚合流程）
+- [x] 整个 `vault/` 可被 Meili 全局检索（`/api/files/search`），也可 git/rsync **整体导出**为独立 Obsidian Vault（递归 scanner + `scan_dirs=archive/vault` 已实现；待线上 rebuild 抽验）
+- [ ] n8n 工作流定义在 Bellkeeper 可见可管，且 `spool n8n export` 冷备进 git（Bellkeeper 侧仓库 JSON 事实源 + Web/API 管理已落地；仍缺 SilkSpool 冷备进 Git、漂移检测与恢复演练）
 
 ---
 
 ## 11. 收敛与里程碑
 
 ### 一个月内（2026-06）
-- [ ] §10 个人知识库成熟化闭环（漏斗筛选 → 原子化重构 → n8n 纳管，**P0 ⭐ 5.5 天**；体系化输出 §10.7 属 P1 延伸）
+- [ ] §10 个人知识库成熟化闭环 — **MVP 开发完成，P0 总包未完成**（漏斗筛选/原子化重构/自动调度/n8n JSON 纳管已落地；还差 n8n 冷备与漂移检测、存量 `archive/` 批量重打分聚合、线上运行验收；体系化输出 §10.7 属 P1 延伸且 digest 已有初版）
 - [ ] §1 RAGFlow 全部退役（代码 + 工作流 + 配置）
-- [x] §2.2–§2.7 LLM Proxy 对标 new-api（Token + 定价 + Gemini + Rerank + Dashboard）— **开发完成 · 🔶 待运行时验证**（详见 §2 顶部清单）
+- [x] §2.2–§2.7 LLM Proxy 对标 new-api（Token + 定价 + Gemini + Rerank + Dashboard）— **开发完成 · 🔶 2026-06-08 复核仍待运行时验证**（详见 §2 顶部清单）
 - [ ] §2.8 停掉 new-api 容器 — **暂缓**（用户仍在使用，待调用方迁移并观察稳定后再停）
 - [ ] §3.1 §3.4 n8n 链路压缩 + 死代码回收
 - [ ] §5.1 §5.3 爬取队列前端 + 问答多轮 + 流式
