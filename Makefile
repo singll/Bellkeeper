@@ -1,4 +1,4 @@
-.PHONY: build build-backend build-frontend run test clean docker-build docker-up docker-down migrate dev dev-frontend
+.PHONY: build build-backend build-frontend run test test-migrations clean docker-build docker-up docker-down migrate dev dev-frontend
 
 # Variables
 BINARY_NAME=bellkeeper
@@ -31,6 +31,9 @@ dev-frontend:
 # Test
 test:
 	go test -v ./...
+
+test-migrations:
+	sh scripts/check_migrations.sh
 
 # Test with coverage
 test-coverage:
