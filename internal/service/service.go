@@ -91,7 +91,7 @@ func NewServices(repos *repository.Repositories, cfg *config.Config, version str
 	// Create crawl queue service (if enabled)
 	var crawlQueueSvc *CrawlQueueService
 	if cfg.CrawlQueue.Enabled {
-		crawlQueueSvc = NewCrawlQueueService(cfg.CrawlQueue, repos.CrawlJob, extractorSvc, fileIngestionSvc, activityLogSvc)
+		crawlQueueSvc = NewCrawlQueueService(cfg.CrawlQueue, repos.CrawlJob, repos.CrawlDomainProfile, extractorSvc, fileIngestionSvc, activityLogSvc)
 		rssFetcherSvc.SetCrawlQueueService(crawlQueueSvc)
 	}
 

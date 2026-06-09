@@ -249,19 +249,22 @@ type RSSFetcherConfig struct {
 
 // CrawlQueueConfig 爬取队列配置
 type CrawlQueueConfig struct {
-	Enabled                 bool     `mapstructure:"enabled"`
-	FirecrawlWorkers        int      `mapstructure:"firecrawl_workers"`
-	TrafilaturaWorkers      int      `mapstructure:"trafilatura_workers"`
-	AutoWorkers             int      `mapstructure:"auto_workers"`
-	PollInterval            int      `mapstructure:"poll_interval"` // 秒
-	MaxRetries              int      `mapstructure:"max_retries"`
-	RetryBackoffBase        int      `mapstructure:"retry_backoff_base"` // 秒
-	RetryBackoffMax         int      `mapstructure:"retry_backoff_max"`  // 秒
-	DeadLetterThreshold     int      `mapstructure:"dead_letter_threshold"`
-	PaywallThreshold        int      `mapstructure:"paywall_threshold"`         // 连续空内容次数
-	BlockedDomains          []string `mapstructure:"blocked_domains"`           // 预设付费墙域名
-	StaleTimeoutMinutes     int      `mapstructure:"stale_timeout_minutes"`     // 运行超过此分钟数视为卡死
-	RecoveryIntervalMinutes int      `mapstructure:"recovery_interval_minutes"` // 卡死回收检查间隔（分钟）
+	Enabled                  bool     `mapstructure:"enabled"`
+	FirecrawlWorkers         int      `mapstructure:"firecrawl_workers"`
+	TrafilaturaWorkers       int      `mapstructure:"trafilatura_workers"`
+	AutoWorkers              int      `mapstructure:"auto_workers"`
+	PollInterval             int      `mapstructure:"poll_interval"` // 秒
+	MaxRetries               int      `mapstructure:"max_retries"`
+	RetryBackoffBase         int      `mapstructure:"retry_backoff_base"` // 秒
+	RetryBackoffMax          int      `mapstructure:"retry_backoff_max"`  // 秒
+	DeadLetterThreshold      int      `mapstructure:"dead_letter_threshold"`
+	PaywallThreshold         int      `mapstructure:"paywall_threshold"`         // 连续空内容次数
+	BlockedDomains           []string `mapstructure:"blocked_domains"`           // 预设付费墙域名
+	StaleTimeoutMinutes      int      `mapstructure:"stale_timeout_minutes"`     // 运行超过此分钟数视为卡死
+	RecoveryIntervalMinutes  int      `mapstructure:"recovery_interval_minutes"` // 卡死回收检查间隔（分钟）
+	DomainThrottleEnabled    bool     `mapstructure:"domain_throttle_enabled"`
+	DomainDefaultDelay       int      `mapstructure:"domain_default_delay_seconds"`
+	DomainDefaultConcurrency int      `mapstructure:"domain_default_max_concurrency"`
 }
 
 // DailyReportConfig controls the n8n-backed daily report handoff and watchdog.
@@ -539,6 +542,9 @@ func setDefaults(v *viper.Viper) {
 	})
 	v.SetDefault("crawl_queue.stale_timeout_minutes", 10)
 	v.SetDefault("crawl_queue.recovery_interval_minutes", 5)
+	v.SetDefault("crawl_queue.domain_throttle_enabled", true)
+	v.SetDefault("crawl_queue.domain_default_delay_seconds", 60)
+	v.SetDefault("crawl_queue.domain_default_max_concurrency", 1)
 
 	// Daily report
 	v.SetDefault("daily_report.enabled", true)

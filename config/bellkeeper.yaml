@@ -250,6 +250,13 @@ rss_fetcher:
   enabled: true
   rsshub_base_url: "http://sp-rsshub:1200"  # RSSHub 实例地址，以 / 开头的 feed URL 会拼接此地址
 
+# 爬取队列配置
+crawl_queue:
+  enabled: true
+  domain_throttle_enabled: true
+  domain_default_delay_seconds: 60
+  domain_default_max_concurrency: 1
+
 # 知识库配置
 knowledge:
   enabled: true

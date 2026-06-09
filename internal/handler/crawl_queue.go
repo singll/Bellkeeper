@@ -63,6 +63,25 @@ func (h *CrawlQueueHandler) Audit(c *gin.Context) {
 	response.Success(c, stats)
 }
 
+// Domains handles GET /api/crawl/queue/domains
+func (h *CrawlQueueHandler) Domains(c *gin.Context) {
+	page, _ := strconv.Atoi(c.DefaultQuery("page", "1"))
+	limit, _ := strconv.Atoi(c.DefaultQuery("limit", "50"))
+	if page < 1 {
+		page = 1
+	}
+	if limit < 1 || limit > 200 {
+		limit = 50
+	}
+
+	profiles, total, err := h.svc.ListDomainProfiles(page, limit)
+	if err != nil {
+		response.InternalError(c, err.Error())
+		return
+	}
+	response.Page(c, profiles, total, page, limit)
+}
+
 func parseAuditWindow(raw string) (time.Duration, error) {
 	raw = strings.TrimSpace(strings.ToLower(raw))
 	if strings.HasSuffix(raw, "d") {

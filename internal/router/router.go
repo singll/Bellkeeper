@@ -338,6 +338,7 @@ func registerCrawlQueueRoutes(api *gin.RouterGroup, h *handler.CrawlQueueHandler
 	queue := api.Group("/crawl/queue")
 	queue.GET("/stats", h.Stats)
 	queue.GET("/audit", h.Audit)
+	queue.GET("/domains", h.Domains)
 	queue.GET("/jobs", h.ListJobs)
 	queue.POST("/jobs/:id/retry", h.RetryJob)
 	queue.GET("/workers", h.Workers)

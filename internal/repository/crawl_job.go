@@ -130,6 +130,17 @@ func (r *CrawlJobRepository) MarkRetry(id uint, nextRetryAt time.Time, errType, 
 	}).Error
 }
 
+// DelayJob requeues a claimed job without consuming retry budget.
+func (r *CrawlJobRepository) DelayJob(id uint, nextRetryAt time.Time, errType, errMsg string) error {
+	return r.db.Model(&model.CrawlJob{}).Where("id = ?", id).Updates(map[string]interface{}{
+		"status":        string(model.CrawlJobRetrying),
+		"next_retry_at": nextRetryAt,
+		"error_type":    errType,
+		"error_message": errMsg,
+		"started_at":    nil,
+	}).Error
+}
+
 // MarkBlocked sets status to 'blocked' and records the block reason.
 func (r *CrawlJobRepository) MarkBlocked(id uint, reason string) error {
 	return r.db.Model(&model.CrawlJob{}).Where("id = ?", id).Updates(map[string]interface{}{
@@ -370,6 +381,28 @@ func (r *CrawlJobRepository) CountByDomainAndStatus(domain string, status model.
 	var count int64
 	err := r.db.Model(&model.CrawlJob{}).
 		Where("source_domain = ? AND status = ? AND created_at >= ?", domain, status, since).
+		Count(&count).Error
+	return count, err
+}
+
+// CountRunningByDomain counts currently claimed jobs for a domain.
+func (r *CrawlJobRepository) CountRunningByDomain(domain string) (int64, error) {
+	var count int64
+	err := r.db.Model(&model.CrawlJob{}).
+		Where("source_domain = ? AND status = ?", domain, string(model.CrawlJobRunning)).
+		Count(&count).Error
+	return count, err
+}
+
+// CountRunningDomainRank returns this job's 1-based rank among running jobs for the domain.
+func (r *CrawlJobRepository) CountRunningDomainRank(domain string, jobID uint, startedAt *time.Time) (int64, error) {
+	if startedAt == nil {
+		return r.CountRunningByDomain(domain)
+	}
+	var count int64
+	err := r.db.Model(&model.CrawlJob{}).
+		Where("source_domain = ? AND status = ?", domain, string(model.CrawlJobRunning)).
+		Where("started_at < ? OR (started_at = ? AND id <= ?)", *startedAt, *startedAt, jobID).
 		Count(&count).Error
 	return count, err
 }

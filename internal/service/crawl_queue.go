@@ -23,6 +23,7 @@ import (
 type CrawlQueueService struct {
 	cfg          config.CrawlQueueConfig
 	repo         *repository.CrawlJobRepository
+	domainRepo   *repository.CrawlDomainProfileRepository
 	extractor    *ExtractorService
 	ingestion    *FileIngestionService
 	activityLog  *ActivityLogService
@@ -120,6 +121,7 @@ func (cb *circuitBreaker) status() string {
 func NewCrawlQueueService(
 	cfg config.CrawlQueueConfig,
 	repo *repository.CrawlJobRepository,
+	domainRepo *repository.CrawlDomainProfileRepository,
 	extractor *ExtractorService,
 	ingestion *FileIngestionService,
 	activityLog *ActivityLogService,
@@ -127,6 +129,7 @@ func NewCrawlQueueService(
 	svc := &CrawlQueueService{
 		cfg:            cfg,
 		repo:           repo,
+		domainRepo:     domainRepo,
 		extractor:      extractor,
 		ingestion:      ingestion,
 		activityLog:    activityLog,
@@ -305,8 +308,97 @@ func (s *CrawlQueueService) workerLoop(ctx context.Context, channelType string, 
 			continue
 		}
 
+		if retryAt, reason, ok := s.reserveDomainSlot(job); !ok {
+			if err := s.repo.DelayJob(job.ID, retryAt, "domain_throttled", reason); err != nil {
+				log.Printf("[CrawlQueue:%s:%d] failed to requeue domain-throttled job %d: %v", channelType, id, job.ID, err)
+			}
+			s.logActivity("job_throttled", "retrying",
+				fmt.Sprintf("Domain throttled: %s domain=%s next=%s reason=%s", job.URL, job.SourceDomain, retryAt.Format(time.RFC3339), reason),
+				job.SourceID)
+			continue
+		}
+
 		s.processJob(ctx, job, channelType, cb)
 	}
+}
+
+type domainThrottleDecision struct {
+	Allowed bool
+	RetryAt time.Time
+	Reason  string
+}
+
+func decideDomainThrottle(profile *model.CrawlDomainProfile, runningRank int64, now time.Time) domainThrottleDecision {
+	if profile == nil || profile.Domain == "" {
+		return domainThrottleDecision{Allowed: true}
+	}
+	delay := time.Duration(profile.DefaultDelaySeconds) * time.Second
+	if delay <= 0 {
+		delay = 60 * time.Second
+	}
+	maxConcurrency := profile.MaxConcurrency
+	if maxConcurrency <= 0 {
+		maxConcurrency = 1
+	}
+
+	if profile.NextAllowedAt != nil && profile.NextAllowedAt.After(now) {
+		return domainThrottleDecision{
+			Allowed: false,
+			RetryAt: *profile.NextAllowedAt,
+			Reason:  "next_allowed_at",
+		}
+	}
+	if runningRank > int64(maxConcurrency) {
+		return domainThrottleDecision{
+			Allowed: false,
+			RetryAt: now.Add(delay),
+			Reason:  "max_concurrency",
+		}
+	}
+	return domainThrottleDecision{Allowed: true}
+}
+
+func (s *CrawlQueueService) reserveDomainSlot(job *model.CrawlJob) (time.Time, string, bool) {
+	if job == nil || job.SourceDomain == "" || !s.cfg.DomainThrottleEnabled || s.domainRepo == nil {
+		return time.Time{}, "", true
+	}
+	now := time.Now()
+	profile, err := s.domainRepo.FindOrCreate(job.SourceDomain, s.domainDefaultDelaySeconds(), s.domainDefaultMaxConcurrency())
+	if err != nil {
+		log.Printf("[CrawlQueue] domain profile lookup failed for %s: %v", job.SourceDomain, err)
+		return time.Time{}, "", true
+	}
+	runningRank, err := s.repo.CountRunningDomainRank(job.SourceDomain, job.ID, job.StartedAt)
+	if err != nil {
+		log.Printf("[CrawlQueue] domain running rank failed for %s: %v", job.SourceDomain, err)
+		return time.Time{}, "", true
+	}
+
+	decision := decideDomainThrottle(profile, runningRank, now)
+	if !decision.Allowed {
+		return decision.RetryAt, decision.Reason, false
+	}
+
+	nextAllowed := now.Add(time.Duration(normalizePositive(profile.DefaultDelaySeconds, s.domainDefaultDelaySeconds())) * time.Second)
+	if err := s.domainRepo.RecordStart(job.SourceDomain, nextAllowed); err != nil {
+		log.Printf("[CrawlQueue] domain profile start update failed for %s: %v", job.SourceDomain, err)
+	}
+	return time.Time{}, "", true
+}
+
+func (s *CrawlQueueService) domainDefaultDelaySeconds() int {
+	return normalizePositive(s.cfg.DomainDefaultDelay, 60)
+}
+
+func (s *CrawlQueueService) domainDefaultMaxConcurrency() int {
+	return normalizePositive(s.cfg.DomainDefaultConcurrency, 1)
+}
+
+func normalizePositive(value, fallback int) int {
+	if value > 0 {
+		return value
+	}
+	return fallback
 }
 
 // processJob executes a single crawl job.
@@ -350,6 +442,7 @@ func (s *CrawlQueueService) processJob(ctx context.Context, job *model.CrawlJob,
 		s.logActivity("job_blocked", "blocked",
 			fmt.Sprintf("Paywall keywords detected: %s extractor=%s", job.URL, extractorUsed), job.SourceID)
 		s.notifyBlocked(job.URL, job.SourceDomain, "paywall_keywords")
+		s.recordDomainOutcome(job, string(model.CrawlJobBlocked), "paywall_keywords", "paywall keywords detected", nil)
 		if cb != nil {
 			cb.recordSuccess()
 		}
@@ -379,11 +472,13 @@ func (s *CrawlQueueService) processJob(ctx context.Context, job *model.CrawlJob,
 		s.repo.UpdateStatus(job.ID, model.CrawlJobSkipped, updates)
 		s.logActivity("job_skipped", "skipped",
 			fmt.Sprintf("Skipped (duplicate): %s", job.URL), job.SourceID)
+		s.recordDomainOutcome(job, string(model.CrawlJobSkipped), "", "duplicate", nil)
 	} else {
 		s.repo.UpdateStatus(job.ID, model.CrawlJobSuccess, updates)
 		s.logActivity("job_success", "success",
 			fmt.Sprintf("Success: %s extractor=%s len=%d", job.URL, extractorUsed, len(content)),
 			job.SourceID)
+		s.recordDomainOutcome(job, string(model.CrawlJobSuccess), "", "success", nil)
 	}
 
 	if cb != nil {
@@ -405,24 +500,28 @@ func (s *CrawlQueueService) handleExtractionFailure(job *model.CrawlJob, err err
 		s.repo.MarkDead(job.ID, errType, errMsg)
 		s.logActivity("job_dead", "dead",
 			fmt.Sprintf("Dead (%s): %s err=%s", errType, job.URL, errMsg), job.SourceID)
+		s.recordDomainOutcome(job, string(model.CrawlJobDead), errType, errMsg, nil)
 	case "forbidden":
 		if job.RetryCount >= 1 {
 			s.repo.MarkBlocked(job.ID, "forbidden")
 			s.logActivity("job_blocked", "blocked",
 				fmt.Sprintf("Blocked (forbidden after retry): %s err=%s", job.URL, errMsg), job.SourceID)
 			s.notifyBlocked(job.URL, job.SourceDomain, "forbidden")
+			s.recordDomainOutcome(job, string(model.CrawlJobBlocked), errType, errMsg, nil)
 		} else {
 			nextRetry := s.calculateBackoff(job.RetryCount, errType)
 			s.repo.MarkRetry(job.ID, nextRetry, errType, errMsg)
 			s.logActivity("job_retry", "retrying",
 				fmt.Sprintf("Retry (forbidden): %s attempt=%d next=%s err=%s", job.URL, job.RetryCount+1, nextRetry.Format(time.RFC3339), errMsg),
 				job.SourceID)
+			s.recordDomainOutcome(job, string(model.CrawlJobRetrying), errType, errMsg, &nextRetry)
 		}
 	case "rate_limited":
 		if job.RetryCount >= job.MaxRetries {
 			s.repo.MarkDead(job.ID, errType, errMsg)
 			s.logActivity("job_dead", "dead",
 				fmt.Sprintf("Dead (rate_limited max retries): %s retries=%d err=%s", job.URL, job.RetryCount, errMsg), job.SourceID)
+			s.recordDomainOutcome(job, string(model.CrawlJobDead), errType, errMsg, nil)
 		} else {
 			nextRetry := s.calculateBackoff(job.RetryCount, errType)
 			if retryAfter, ok := retryAfterFromError(err, time.Now()); ok && retryAfter.After(time.Now()) {
@@ -432,6 +531,7 @@ func (s *CrawlQueueService) handleExtractionFailure(job *model.CrawlJob, err err
 			s.logActivity("job_retry", "retrying",
 				fmt.Sprintf("Retry (rate_limited): %s attempt=%d next=%s err=%s", job.URL, job.RetryCount+1, nextRetry.Format(time.RFC3339), errMsg),
 				job.SourceID)
+			s.recordDomainOutcome(job, string(model.CrawlJobRetrying), errType, errMsg, &nextRetry)
 		}
 	case "paywall":
 		s.repo.MarkBlocked(job.ID, "paywall_detected")
@@ -439,18 +539,21 @@ func (s *CrawlQueueService) handleExtractionFailure(job *model.CrawlJob, err err
 			fmt.Sprintf("Blocked (paywall): %s", job.URL), job.SourceID)
 		s.notifyBlocked(job.URL, job.SourceDomain, "paywall_detected")
 		s.autoLearnDomain(job.SourceDomain)
+		s.recordDomainOutcome(job, string(model.CrawlJobBlocked), errType, errMsg, nil)
 	default:
 		// Retryable: timeout, server_error, network, empty_content, unknown
 		if job.RetryCount >= job.MaxRetries {
 			s.repo.MarkDead(job.ID, errType, errMsg)
 			s.logActivity("job_dead", "dead",
 				fmt.Sprintf("Dead (max retries): %s retries=%d err=%s", job.URL, job.RetryCount, errMsg), job.SourceID)
+			s.recordDomainOutcome(job, string(model.CrawlJobDead), errType, errMsg, nil)
 		} else {
 			nextRetry := s.calculateBackoff(job.RetryCount, errType)
 			s.repo.MarkRetry(job.ID, nextRetry, errType, errMsg)
 			s.logActivity("job_retry", "retrying",
 				fmt.Sprintf("Retry: %s attempt=%d next=%s err=%s", job.URL, job.RetryCount+1, nextRetry.Format(time.Kitchen), errMsg),
 				job.SourceID)
+			s.recordDomainOutcome(job, string(model.CrawlJobRetrying), errType, errMsg, &nextRetry)
 		}
 	}
 }
@@ -466,17 +569,20 @@ func (s *CrawlQueueService) handleEmptyContent(job *model.CrawlJob, extractor st
 			job.SourceID)
 		s.notifyBlocked(job.URL, job.SourceDomain, "empty_content_repeated")
 		s.autoLearnDomain(job.SourceDomain)
+		s.recordDomainOutcome(job, string(model.CrawlJobBlocked), "empty_content_repeated", "repeated empty content", nil)
 	} else {
 		// Retry once to confirm
 		if job.RetryCount >= 1 {
 			s.repo.MarkBlocked(job.ID, "empty_content")
 			s.logActivity("job_blocked", "blocked",
 				fmt.Sprintf("Blocked (empty content): %s", job.URL), job.SourceID)
+			s.recordDomainOutcome(job, string(model.CrawlJobBlocked), "empty_content", "content too short", nil)
 		} else {
 			nextRetry := time.Now().Add(30 * time.Second)
 			s.repo.MarkRetry(job.ID, nextRetry, "empty_content", "content too short")
 			s.logActivity("job_retry", "retrying",
 				fmt.Sprintf("Retry (empty content): %s", job.URL), job.SourceID)
+			s.recordDomainOutcome(job, string(model.CrawlJobRetrying), "empty_content", "content too short", &nextRetry)
 		}
 	}
 }
@@ -534,6 +640,63 @@ func (s *CrawlQueueService) calculateBackoff(attempt int, errType string) time.T
 	}
 
 	return time.Now().Add(delay)
+}
+
+func (s *CrawlQueueService) recordDomainOutcome(job *model.CrawlJob, status, errType, notes string, retryAt *time.Time) {
+	if job == nil || job.SourceDomain == "" || !s.cfg.DomainThrottleEnabled || s.domainRepo == nil {
+		return
+	}
+	profile, err := s.domainRepo.FindOrCreate(job.SourceDomain, s.domainDefaultDelaySeconds(), s.domainDefaultMaxConcurrency())
+	if err != nil {
+		log.Printf("[CrawlQueue] domain profile outcome lookup failed for %s: %v", job.SourceDomain, err)
+		return
+	}
+	nextAllowedAt := nextAllowedForDomainOutcome(profile, status, errType, time.Now(), retryAt)
+	if len(notes) > 1000 {
+		notes = notes[:1000]
+	}
+	if err := s.domainRepo.RecordOutcome(job.SourceDomain, status, notes, nextAllowedAt); err != nil {
+		log.Printf("[CrawlQueue] domain profile outcome update failed for %s: %v", job.SourceDomain, err)
+	}
+	if err := s.domainRepo.RefreshRates(job.SourceDomain, time.Now().Add(-24*time.Hour)); err != nil {
+		log.Printf("[CrawlQueue] domain profile rate refresh failed for %s: %v", job.SourceDomain, err)
+	}
+}
+
+func nextAllowedForDomainOutcome(profile *model.CrawlDomainProfile, status, errType string, now time.Time, retryAt *time.Time) *time.Time {
+	if retryAt != nil && retryAt.After(now) {
+		return retryAt
+	}
+	delay := 60 * time.Second
+	if profile != nil && profile.DefaultDelaySeconds > 0 {
+		delay = time.Duration(profile.DefaultDelaySeconds) * time.Second
+	}
+
+	switch errType {
+	case "rate_limited", "forbidden":
+		next := now.Add(maxDuration(5*time.Minute, 2*delay))
+		return &next
+	case "timeout", "network", "server_error", "empty_content", "empty_content_repeated":
+		next := now.Add(maxDuration(time.Minute, 2*delay))
+		return &next
+	}
+
+	switch status {
+	case string(model.CrawlJobSuccess), string(model.CrawlJobSkipped):
+		next := now.Add(delay)
+		return &next
+	case string(model.CrawlJobBlocked):
+		next := now.Add(maxDuration(10*time.Minute, 5*delay))
+		return &next
+	}
+	return nil
+}
+
+func maxDuration(a, b time.Duration) time.Duration {
+	if a > b {
+		return a
+	}
+	return b
 }
 
 // isBlockedDomain checks if a domain is in the blocked set.
@@ -609,6 +772,14 @@ func (s *CrawlQueueService) Stats() (*repository.CrawlQueueStats, error) {
 // Audit returns recent crawl failure and extractor aggregates.
 func (s *CrawlQueueService) Audit(since time.Time, limit int) (*repository.CrawlAuditStats, error) {
 	return s.repo.Audit(since, limit)
+}
+
+// ListDomainProfiles returns per-domain throttle and health profiles.
+func (s *CrawlQueueService) ListDomainProfiles(page, limit int) ([]model.CrawlDomainProfile, int64, error) {
+	if s.domainRepo == nil {
+		return nil, 0, fmt.Errorf("domain profile repository is not configured")
+	}
+	return s.domainRepo.List(page, limit)
 }
 
 // ListJobs returns filtered crawl jobs.
