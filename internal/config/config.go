@@ -138,6 +138,7 @@ type N8NConfig struct {
 	WebhookBaseURL string `mapstructure:"webhook_base_url"`
 	APIBaseURL     string `mapstructure:"api_base_url"`
 	APIKey         string `mapstructure:"api_key"`
+	WorkflowDir    string `mapstructure:"workflow_dir"`
 	Timeout        int    `mapstructure:"timeout"` // HTTP client timeout in seconds
 }
 
@@ -400,6 +401,7 @@ func setDefaults(v *viper.Viper) {
 	v.SetDefault("n8n.webhook_base_url", "")
 	v.SetDefault("n8n.api_base_url", "")
 	v.SetDefault("n8n.api_key", "")
+	v.SetDefault("n8n.workflow_dir", "internal/n8n_workflows")
 	v.SetDefault("n8n.timeout", 30)
 
 	// Logging

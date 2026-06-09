@@ -21,6 +21,7 @@ n8n:
   webhook_base_url: ${BELLKEEPER_N8N_WEBHOOK_BASE_URL}
   api_base_url: ${BELLKEEPER_N8N_API_BASE_URL}
   api_key: ${BELLKEEPER_N8N_API_KEY}
+  workflow_dir: ${BELLKEEPER_N8N_WORKFLOW_DIR}
   # timeout: 30  # HTTP 客户端超时（秒）
 
 logging:

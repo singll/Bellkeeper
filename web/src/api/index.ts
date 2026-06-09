@@ -6,6 +6,9 @@ import type {
   PaginatedResponse,
   HealthStatus,
   Workflow,
+  WorkflowDefinitionDetail,
+  WorkflowDefinitionInventory,
+  WorkflowDefinitionPushResult,
   WorkflowExecution,
   LLMChannelStatus,
   LLMGroupStatus,
@@ -163,6 +166,33 @@ export const systemApi = {
 // Workflows API
 export const workflowsApi = {
   list: () => request<{ data: Workflow[] }>('/workflows/status'),
+
+  definitions: () =>
+    request<{ data: WorkflowDefinitionInventory }>('/workflows/definitions'),
+
+  definition: (key: string) =>
+    request<{ data: WorkflowDefinitionDetail }>(`/workflows/definitions/${encodeURIComponent(key)}`),
+
+  saveDefinition: (key: string, payload: Record<string, unknown>) =>
+    request<{ data: WorkflowDefinitionDetail }>(`/workflows/definitions/${encodeURIComponent(key)}`, {
+      method: 'PUT',
+      body: JSON.stringify(payload),
+    }),
+
+  deleteDefinition: (key: string) =>
+    request<{ message: string }>(`/workflows/definitions/${encodeURIComponent(key)}`, {
+      method: 'DELETE',
+    }),
+
+  pushDefinition: (key: string) =>
+    request<{ data: WorkflowDefinitionPushResult }>(`/workflows/definitions/${encodeURIComponent(key)}/push`, {
+      method: 'POST',
+    }),
+
+  pushAllDefinitions: () =>
+    request<{ data: WorkflowDefinitionPushResult[] }>('/workflows/definitions/push-all', {
+      method: 'POST',
+    }),
 
   get: (id: string) => request<{ data: Workflow }>(`/workflows/${encodeURIComponent(id)}`),
 

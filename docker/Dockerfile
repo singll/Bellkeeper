@@ -61,6 +61,9 @@ COPY --from=backend-builder /app/web/dist ./web/dist
 # Copy trafilatura wrapper script (trafilatura 2.0 removed __main__.py)
 COPY scripts/trafilatura_extract.py /app/scripts/trafilatura_extract.py
 
+# Copy repository-owned n8n workflow definitions
+COPY internal/n8n_workflows/ ./internal/n8n_workflows/
+
 # Copy default config（含 config/pkb 提示词包/领域配置，pkb-curate 运行依赖）
 COPY config/ ./config/
 

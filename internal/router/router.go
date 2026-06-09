@@ -117,12 +117,18 @@ func registerSettingRoutes(api *gin.RouterGroup, h *handler.SettingHandler) {
 }
 
 func registerWorkflowRoutes(api *gin.RouterGroup, h *handler.WorkflowHandler) {
+	api.GET("/workflows/definitions", h.Definitions)
+	api.POST("/workflows/definitions/push-all", h.PushAllDefinitions)
+	api.GET("/workflows/definitions/:key", h.Definition)
+	api.PUT("/workflows/definitions/:key", h.SaveDefinition)
+	api.DELETE("/workflows/definitions/:key", h.DeleteDefinition)
+	api.POST("/workflows/definitions/:key/push", h.PushDefinition)
 	api.GET("/workflows/status", h.Status)
+	api.GET("/workflows/executions", h.Executions)
+	api.POST("/workflows/trigger/:name", h.Trigger)
 	api.GET("/workflows/:id", h.Get)
 	api.POST("/workflows/:id/activate", h.Activate)
 	api.POST("/workflows/:id/deactivate", h.Deactivate)
-	api.GET("/workflows/executions", h.Executions)
-	api.POST("/workflows/trigger/:name", h.Trigger)
 }
 
 func registerSystemRoutes(api *gin.RouterGroup, h *handler.SystemHandler) {

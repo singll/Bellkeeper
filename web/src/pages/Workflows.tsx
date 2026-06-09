@@ -2,7 +2,7 @@ import { Component, createSignal, createResource, For, Show } from 'solid-js'
 import { workflowsApi } from '@/api'
 import { useToast } from '@/components/Toast'
 import Modal from '@/components/Modal'
-import type { Workflow, WorkflowExecution } from '@/types'
+import type { Workflow, WorkflowDefinition, WorkflowExecution } from '@/types'
 
 const Workflows: Component = () => {
   const toast = useToast()
@@ -12,6 +12,15 @@ const Workflows: Component = () => {
   const [showTriggerModal, setShowTriggerModal] = createSignal(false)
   const [triggerResult, setTriggerResult] = createSignal<string | null>(null)
   const [triggering, setTriggering] = createSignal(false)
+  const [pushingDefinition, setPushingDefinition] = createSignal<string | null>(null)
+  const [pushAllRunning, setPushAllRunning] = createSignal(false)
+  const [showDefinitionModal, setShowDefinitionModal] = createSignal(false)
+  const [definitionJSON, setDefinitionJSON] = createSignal<string | null>(null)
+  const [definitionModalTitle, setDefinitionModalTitle] = createSignal('')
+
+  const [definitions, { refetch: refetchDefinitions }] = createResource(
+    () => workflowsApi.definitions()
+  )
 
   const [workflows, { refetch: refetchWorkflows }] = createResource(
     () => workflowsApi.list()
@@ -35,6 +44,47 @@ const Workflows: Component = () => {
       refetchWorkflows()
     } catch (err) {
       toast.error('操作失败: ' + (err as Error).message)
+    }
+  }
+
+  const handlePushDefinition = async (definition: WorkflowDefinition) => {
+    setPushingDefinition(definition.key)
+    try {
+      const result = await workflowsApi.pushDefinition(definition.key)
+      toast.success(`工作流"${definition.name}"已${result.data.action === 'created' ? '创建' : '更新'}到 n8n`)
+      refetchDefinitions()
+      refetchWorkflows()
+    } catch (err) {
+      toast.error('推送失败: ' + (err as Error).message)
+    } finally {
+      setPushingDefinition(null)
+    }
+  }
+
+  const handlePushAllDefinitions = async () => {
+    setPushAllRunning(true)
+    try {
+      const result = await workflowsApi.pushAllDefinitions()
+      const failed = result.data.filter((item) => item.error).length
+      toast.success(`批量推送完成，成功 ${result.data.length - failed}，失败 ${failed}`)
+      refetchDefinitions()
+      refetchWorkflows()
+    } catch (err) {
+      toast.error('批量推送失败: ' + (err as Error).message)
+    } finally {
+      setPushAllRunning(false)
+    }
+  }
+
+  const openDefinitionModal = async (definition: WorkflowDefinition) => {
+    setDefinitionModalTitle(definition.name)
+    setDefinitionJSON(null)
+    setShowDefinitionModal(true)
+    try {
+      const detail = await workflowsApi.definition(definition.key)
+      setDefinitionJSON(detail.data.raw_json)
+    } catch (err) {
+      setDefinitionJSON('加载失败: ' + (err as Error).message)
     }
   }
 
@@ -87,6 +137,36 @@ const Workflows: Component = () => {
     }
   }
 
+  const getDriftBadge = (status: string) => {
+    switch (status) {
+      case 'present':
+        return 'badge-success'
+      case 'missing_remote':
+        return 'badge-warning'
+      case 'invalid':
+        return 'badge-danger'
+      case 'runtime_unknown':
+        return 'badge-gray'
+      default:
+        return 'badge-gray'
+    }
+  }
+
+  const getDriftText = (status: string) => {
+    switch (status) {
+      case 'present':
+        return '已匹配'
+      case 'missing_remote':
+        return '远端缺失'
+      case 'invalid':
+        return '无效'
+      case 'runtime_unknown':
+        return '运行态未知'
+      default:
+        return '未比对'
+    }
+  }
+
   const formatDate = (dateStr: string) => {
     if (!dateStr) return '--'
     return new Date(dateStr).toLocaleString('zh-CN')
@@ -109,20 +189,150 @@ const Workflows: Component = () => {
         </button>
       </div>
 
-      {/* Info Card */}
-      <div class="card mb-6 bg-primary-500/10 border-primary-500/30">
-        <div class="flex items-start gap-3">
-          <svg class="w-5 h-5 text-primary-400 mt-0.5 flex-shrink-0" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-            <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M13 16h-1v-4h-1m1-4h.01M21 12a9 9 0 11-18 0 9 9 0 0118 0z" />
-          </svg>
-          <div class="text-sm">
-            <p class="text-primary-300 font-medium">配置说明</p>
-            <ul class="text-dark-400 mt-1 space-y-0.5">
-              <li>需要在设置中配置 <code class="code">n8n.api_key</code> 才能查看工作流详情</li>
-              <li>触发工作流使用 Webhook 方式，需要工作流中配置对应的 Webhook 节点</li>
-            </ul>
+      {/* Repository Definitions */}
+      <div class="card mb-6">
+        <div class="flex flex-col sm:flex-row sm:items-center justify-between gap-3 mb-4">
+          <div>
+            <h2 class="text-lg font-semibold text-white">仓库工作流定义</h2>
+            <Show when={definitions()?.data.workflow_dir}>
+              <div class="text-xs text-dark-500 font-mono mt-1 break-all">{definitions()?.data.workflow_dir}</div>
+            </Show>
+          </div>
+          <div class="flex items-center gap-2">
+            <button class="btn btn-ghost btn-sm" onClick={() => refetchDefinitions()}>
+              <svg class="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M4 4v5h.582m15.356 2A8.001 8.001 0 004.582 9m0 0H9m11 11v-5h-.581m0 0a8.003 8.003 0 01-15.357-2m15.357 2H15" />
+              </svg>
+            </button>
+            <button
+              class="btn btn-secondary btn-sm"
+              disabled={pushAllRunning() || !definitions()?.data.definitions?.length}
+              onClick={handlePushAllDefinitions}
+            >
+              {pushAllRunning() ? (
+                <>
+                  <div class="loading-spinner" />
+                  推送中...
+                </>
+              ) : '批量推送'}
+            </button>
           </div>
         </div>
+
+        <Show
+          when={!definitions.loading}
+          fallback={
+            <div class="flex items-center justify-center py-8">
+              <div class="loading-spinner" />
+              <span class="ml-3 text-dark-400">加载中...</span>
+            </div>
+          }
+        >
+          <Show
+            when={!definitions.error}
+            fallback={
+              <div class="empty-state py-8">
+                <svg class="empty-state-icon w-12 h-12 text-red-400" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                  <path stroke-linecap="round" stroke-linejoin="round" stroke-width="1.5" d="M12 8v4m0 4h.01M21 12a9 9 0 11-18 0 9 9 0 0118 0z" />
+                </svg>
+                <p class="empty-state-title">加载失败</p>
+                <p class="empty-state-description">{(definitions.error as Error)?.message}</p>
+              </div>
+            }
+          >
+            <Show when={definitions()?.data.local_error}>
+              <div class="mb-3 p-3 rounded-lg border border-red-500/30 bg-red-500/10 text-sm text-red-300">
+                {definitions()?.data.local_error}
+              </div>
+            </Show>
+            <Show when={definitions()?.data.runtime_error}>
+              <div class="mb-3 p-3 rounded-lg border border-amber-500/30 bg-amber-500/10 text-sm text-amber-300">
+                {definitions()?.data.runtime_error}
+              </div>
+            </Show>
+
+            <Show
+              when={definitions()?.data.definitions && definitions()!.data.definitions.length > 0}
+              fallback={
+                <div class="empty-state py-8">
+                  <svg class="empty-state-icon w-12 h-12" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                    <path stroke-linecap="round" stroke-linejoin="round" stroke-width="1.5" d="M9 5H7a2 2 0 00-2 2v12a2 2 0 002 2h10a2 2 0 002-2V7a2 2 0 00-2-2h-2M9 5a2 2 0 002 2h2a2 2 0 002-2M9 5a2 2 0 012-2h2a2 2 0 012 2" />
+                  </svg>
+                  <p class="empty-state-title">暂无仓库定义</p>
+                </div>
+              }
+            >
+              <div class="grid grid-cols-1 xl:grid-cols-2 gap-3">
+                <For each={definitions()?.data.definitions}>
+                  {(definition) => (
+                    <div class="p-4 bg-dark-700/50 rounded-xl border border-dark-600/50">
+                      <div class="flex items-start justify-between gap-3">
+                        <div class="min-w-0">
+                          <div class="font-medium text-white truncate">{definition.name}</div>
+                          <div class="text-xs text-dark-500 mt-1 font-mono truncate">{definition.file_name}</div>
+                          <div class="flex flex-wrap gap-1 mt-2">
+                            <span class={`badge ${getDriftBadge(definition.drift_status)}`}>
+                              {getDriftText(definition.drift_status)}
+                            </span>
+                            <span class="badge badge-gray">{definition.node_count} nodes</span>
+                            <Show when={definition.runtime}>
+                              <span class={definition.runtime!.active ? 'badge badge-success' : 'badge badge-gray'}>
+                                {definition.runtime!.active ? 'Active' : 'Inactive'}
+                              </span>
+                            </Show>
+                          </div>
+                          <Show when={definition.trigger_types && definition.trigger_types.length > 0}>
+                            <div class="flex flex-wrap gap-1 mt-2">
+                              <For each={definition.trigger_types}>
+                                {(triggerType) => <span class="badge badge-gray">{triggerType}</span>}
+                              </For>
+                            </div>
+                          </Show>
+                          <Show when={definition.error}>
+                            <div class="text-xs text-red-300 mt-2 break-words">{definition.error}</div>
+                          </Show>
+                        </div>
+                        <div class="flex items-center gap-2 shrink-0">
+                          <button class="btn btn-ghost btn-sm" onClick={() => openDefinitionModal(definition)}>
+                            JSON
+                          </button>
+                          <button
+                            class="btn btn-secondary btn-sm"
+                            disabled={!definition.valid || pushingDefinition() === definition.key}
+                            onClick={() => handlePushDefinition(definition)}
+                          >
+                            {pushingDefinition() === definition.key ? '推送中...' : '推送'}
+                          </button>
+                        </div>
+                      </div>
+                    </div>
+                  )}
+                </For>
+              </div>
+            </Show>
+
+            <Show when={definitions()?.data.remote_only && definitions()!.data.remote_only!.length > 0}>
+              <div class="mt-4 pt-4 border-t border-dark-700">
+                <div class="text-sm font-medium text-dark-300 mb-2">仅存在于 n8n</div>
+                <div class="flex flex-wrap gap-2">
+                  <For each={definitions()?.data.remote_only}>
+                    {(workflow) => (
+                      <button
+                        class="badge badge-warning"
+                        onClick={() => {
+                          setSelectedWorkflow(workflow.id)
+                          refetchExecutions()
+                        }}
+                      >
+                        {workflow.name}
+                      </button>
+                    )}
+                  </For>
+                </div>
+              </div>
+            </Show>
+          </Show>
+        </Show>
       </div>
 
       <div class="grid grid-cols-1 lg:grid-cols-2 gap-6">
@@ -310,6 +520,24 @@ const Workflows: Component = () => {
           </Show>
         </div>
       </div>
+
+      {/* Definition Modal */}
+      <Modal
+        open={showDefinitionModal()}
+        onClose={() => setShowDefinitionModal(false)}
+        title={definitionModalTitle()}
+        footer={
+          <button type="button" class="btn btn-secondary" onClick={() => setShowDefinitionModal(false)}>
+            关闭
+          </button>
+        }
+      >
+        <div class="p-4 bg-dark-700/50 rounded-xl border border-dark-600/50">
+          <pre class="text-sm font-mono text-dark-300 overflow-auto max-h-[60vh] whitespace-pre-wrap break-words">
+            {definitionJSON() || '加载中...'}
+          </pre>
+        </div>
+      </Modal>
 
       {/* Trigger Modal */}
       <Modal

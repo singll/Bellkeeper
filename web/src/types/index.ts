@@ -91,6 +91,44 @@ export interface WorkflowExecution {
   stopped_at?: string
 }
 
+export interface WorkflowDefinitionInventory {
+  workflow_dir: string
+  definitions: WorkflowDefinition[]
+  remote_only?: Workflow[]
+  local_error?: string
+  runtime_error?: string
+}
+
+export interface WorkflowDefinition {
+  key: string
+  file_name: string
+  path: string
+  name: string
+  valid: boolean
+  error?: string
+  node_count: number
+  trigger_types?: string[]
+  updated_at?: string
+  hash?: string
+  runtime?: Workflow
+  drift_status: string
+}
+
+export interface WorkflowDefinitionDetail {
+  definition: WorkflowDefinition
+  content: Record<string, unknown>
+  raw_json: string
+}
+
+export interface WorkflowDefinitionPushResult {
+  key: string
+  name: string
+  action: string
+  workflow_id?: string
+  runtime?: Workflow
+  error?: string
+}
+
 // LLM Proxy Types
 
 export interface LLMChannelHealth {

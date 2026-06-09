@@ -1,0 +1,87 @@
+{
+  "name": "B02-工作流错误告警",
+  "nodes": [
+    {
+      "parameters": {},
+      "id": "error-trigger",
+      "name": "Error Trigger",
+      "type": "n8n-nodes-base.errorTrigger",
+      "typeVersion": 1,
+      "position": [
+        240,
+        300
+      ]
+    },
+    {
+      "parameters": {
+        "jsCode": "const workflow = $json.workflow || {};\nconst execution = $json.execution || {};\nconst error = $json.error || {};\nconst lastNode = execution.lastNodeExecuted || error.node?.name || 'unknown';\nconst workflowName = workflow.name || workflow.id || 'unknown workflow';\nconst executionId = execution.id || 'unknown';\nconst message = error.message || error.description || JSON.stringify(error);\nconst stack = (error.stack || '').split('\\n').slice(0, 6).join('\\n');\nlet md = `### n8n 工作流失败告警\\n\\n`;\nmd += `- 工作流: ${workflowName}\\n`;\nmd += `- 执行 ID: ${executionId}\\n`;\nmd += `- 失败节点: ${lastNode}\\n`;\nmd += `- 错误: ${message}\\n`;\nif (stack) {\n  md += `\\n\\`\\`\\`\\n${stack}\\n\\`\\`\\`\\n`;\n}\nreturn [{ json: { room: 'alerts', markdown: md } }];"
+      },
+      "id": "format-error-alert",
+      "name": "格式化错误告警",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        500,
+        300
+      ]
+    },
+    {
+      "parameters": {
+        "method": "POST",
+        "url": "http://localhost:5678/webhook/notify",
+        "sendHeaders": true,
+        "headerParameters": {
+          "parameters": [
+            {
+              "name": "Content-Type",
+              "value": "application/json"
+            }
+          ]
+        },
+        "sendBody": true,
+        "specifyBody": "json",
+        "jsonBody": "={{ JSON.stringify({ room: $json.room, markdown: $json.markdown }) }}",
+        "options": {
+          "timeout": 30000
+        }
+      },
+      "id": "send-error-alert",
+      "name": "发送错误告警",
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4.2,
+      "position": [
+        760,
+        300
+      ]
+    }
+  ],
+  "connections": {
+    "Error Trigger": {
+      "main": [
+        [
+          {
+            "node": "格式化错误告警",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "格式化错误告警": {
+      "main": [
+        [
+          {
+            "node": "发送错误告警",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    }
+  },
+  "settings": {
+    "executionOrder": "v1",
+    "saveManualExecutions": true,
+    "callerPolicy": "workflowsFromSameOwner"
+  }
+}

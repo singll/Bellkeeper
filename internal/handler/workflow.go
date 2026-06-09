@@ -2,6 +2,7 @@ package handler
 
 import (
 	"net/http"
+	"os"
 	"strconv"
 
 	"github.com/gin-gonic/gin"
@@ -25,6 +26,87 @@ func (h *WorkflowHandler) Status(c *gin.Context) {
 	}
 
 	response.Success(c, status)
+}
+
+func (h *WorkflowHandler) Definitions(c *gin.Context) {
+	definitions, err := h.svc.ListWorkflowDefinitions()
+	if err != nil {
+		response.InternalError(c, err.Error())
+		return
+	}
+
+	response.Success(c, definitions)
+}
+
+func (h *WorkflowHandler) Definition(c *gin.Context) {
+	key := c.Param("key")
+
+	definition, err := h.svc.GetWorkflowDefinition(key)
+	if err != nil {
+		if os.IsNotExist(err) {
+			response.NotFound(c, "workflow definition not found")
+			return
+		}
+		response.BadRequest(c, err.Error())
+		return
+	}
+
+	response.Success(c, definition)
+}
+
+func (h *WorkflowHandler) SaveDefinition(c *gin.Context) {
+	key := c.Param("key")
+
+	var payload map[string]interface{}
+	if err := c.ShouldBindJSON(&payload); err != nil {
+		response.BadRequest(c, "invalid workflow definition JSON: "+err.Error())
+		return
+	}
+
+	definition, err := h.svc.SaveWorkflowDefinition(key, payload)
+	if err != nil {
+		response.BadRequest(c, err.Error())
+		return
+	}
+
+	response.Success(c, definition)
+}
+
+func (h *WorkflowHandler) DeleteDefinition(c *gin.Context) {
+	key := c.Param("key")
+
+	if err := h.svc.DeleteWorkflowDefinition(key); err != nil {
+		if os.IsNotExist(err) {
+			response.NotFound(c, "workflow definition not found")
+			return
+		}
+		response.BadRequest(c, err.Error())
+		return
+	}
+
+	response.Message(c, "workflow definition deleted")
+}
+
+func (h *WorkflowHandler) PushDefinition(c *gin.Context) {
+	key := c.Param("key")
+
+	result, err := h.svc.PushWorkflowDefinition(key)
+	if err != nil {
+		response.InternalError(c, err.Error())
+		return
+	}
+
+	response.Success(c, result)
+}
+
+func (h *WorkflowHandler) PushAllDefinitions(c *gin.Context) {
+	results, err := h.svc.PushAllWorkflowDefinitions()
+	if err != nil {
+		response.InternalError(c, err.Error())
+		return
+	}
+
+	response.Success(c, results)
 }
 
 func (h *WorkflowHandler) Get(c *gin.Context) {
