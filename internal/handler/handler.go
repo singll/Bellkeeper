@@ -8,26 +8,27 @@ import (
 
 // Handlers holds all handler instances
 type Handlers struct {
-	Tag           *TagHandler
-	RSS           *RSSHandler
-	Dataset       *DatasetHandler
-	Setting       *SettingHandler
-	Health        *HealthHandler
-	Workflow      *WorkflowHandler
-	System        *SystemHandler
-	LLMProxy      *LLMProxyHandler
-	Classify      *ClassifyHandler
-	ActivityLog   *ActivityLogHandler
-	LogCenter     *LogCenterHandler
-	FileIngestion *FileIngestionHandler
-	LogLevel      *LogLevelHandler
-	Config        *ConfigHandler
-	TodoTxt       *TodoTxtHandler
-	Search        *SearchHandler
-	Report        *ReportHandler
-	PKBReport     *PKBReportHandler
-	Crawler       *CrawlerHandler
-	CrawlQueue    *CrawlQueueHandler
+	Tag            *TagHandler
+	RSS            *RSSHandler
+	Dataset        *DatasetHandler
+	Setting        *SettingHandler
+	Health         *HealthHandler
+	Workflow       *WorkflowHandler
+	System         *SystemHandler
+	LLMProxy       *LLMProxyHandler
+	Classify       *ClassifyHandler
+	ActivityLog    *ActivityLogHandler
+	LogCenter      *LogCenterHandler
+	FileIngestion  *FileIngestionHandler
+	LogLevel       *LogLevelHandler
+	Config         *ConfigHandler
+	TodoTxt        *TodoTxtHandler
+	Search         *SearchHandler
+	Report         *ReportHandler
+	PKBReport      *PKBReportHandler
+	Dashboard      *DashboardHandler
+	Crawler        *CrawlerHandler
+	CrawlQueue     *CrawlQueueHandler
 	ExtractionRule *ExtractionRuleHandler
 	// Optional handlers
 	MatrixNotify *MatrixNotifyHandler
@@ -58,6 +59,7 @@ func NewHandlers(services *service.Services, repos *repository.Repositories, shu
 		Search:        NewSearchHandler(services.Search),
 		Report:        NewReportHandler(services.Report),
 		PKBReport:     NewPKBReportHandler(services.PKBReport),
+		Dashboard:     NewDashboardHandler(services.Dashboard),
 		Crawler:       NewCrawlerHandler(services.Crawler),
 	}
 

@@ -34,6 +34,7 @@ import type {
   MatrixEvent,
   MatrixCommandLog,
   MatrixStats,
+  DashboardStats,
 } from '@/types'
 
 const API_BASE = '/api'
@@ -157,6 +158,11 @@ export const settingsApi = {
 export const healthApi = {
   check: () => request<HealthStatus>('/health'),
   detailed: () => request<HealthStatus>('/health/detailed'),
+}
+
+// Dashboard API (aggregated home stats)
+export const dashboardApi = {
+  getStats: () => request<{ data: DashboardStats }>('/dashboard/stats'),
 }
 
 // System API

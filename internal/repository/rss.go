@@ -42,6 +42,33 @@ func (r *RSSRepository) List(page, perPage int, category, keyword string, isActi
 	return feeds, total, nil
 }
 
+// FeedCounts holds aggregate RSS feed counts by state.
+type FeedCounts struct {
+	Total  int64 `json:"total"`
+	Active int64 `json:"active"`
+	Paused int64 `json:"paused"`
+}
+
+// Counts returns aggregate feed counts: total, active (enabled and not paused),
+// and paused (enabled but auto-paused by health tracking).
+func (r *RSSRepository) Counts() (*FeedCounts, error) {
+	counts := &FeedCounts{}
+	if err := r.db.Model(&model.RSSFeed{}).Count(&counts.Total).Error; err != nil {
+		return nil, err
+	}
+	if err := r.db.Model(&model.RSSFeed{}).
+		Where("is_active = ? AND is_paused = ?", true, false).
+		Count(&counts.Active).Error; err != nil {
+		return nil, err
+	}
+	if err := r.db.Model(&model.RSSFeed{}).
+		Where("is_active = ? AND is_paused = ?", true, true).
+		Count(&counts.Paused).Error; err != nil {
+		return nil, err
+	}
+	return counts, nil
+}
+
 func (r *RSSRepository) GetByID(id uint) (*model.RSSFeed, error) {
 	var feed model.RSSFeed
 	if err := r.db.Preload("Tags").First(&feed, id).Error; err != nil {

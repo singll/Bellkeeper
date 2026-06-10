@@ -167,6 +167,72 @@ func (s *PKBReportService) VaultCardsByDate(date string, limit int) ([]PKBCardSu
 	return cards, nil
 }
 
+// PKBVaultStats holds aggregate counts of the PKB vault.
+type PKBVaultStats struct {
+	Trees      int   `json:"trees"`       // top-level knowledge trees (domains) under vault/
+	Cards      int64 `json:"cards"`       // knowledge cards (markdown files, excluding daily/digest/maps/topics)
+	CardsToday int64 `json:"cards_today"` // cards modified today
+	Digests    int64 `json:"digests"`     // digest documents across all domains
+}
+
+// VaultStats walks the vault directory and returns aggregate counts.
+func (s *PKBReportService) VaultStats() (*PKBVaultStats, error) {
+	stats := &PKBVaultStats{}
+	root := filepath.Join(s.basePath, "vault")
+	entries, err := os.ReadDir(root)
+	if err != nil {
+		if os.IsNotExist(err) {
+			return stats, nil
+		}
+		return nil, fmt.Errorf("read vault root: %w", err)
+	}
+
+	now := time.Now().In(s.loc)
+	dayStart := time.Date(now.Year(), now.Month(), now.Day(), 0, 0, 0, 0, s.loc)
+
+	for _, entry := range entries {
+		if !entry.IsDir() || strings.HasPrefix(entry.Name(), ".") ||
+			strings.HasPrefix(entry.Name(), "_") || entry.Name() == "daily" {
+			continue
+		}
+		stats.Trees++
+		digestDir := filepath.Join(root, entry.Name(), "digest")
+		digestEntries, err := os.ReadDir(digestDir)
+		if err != nil {
+			continue
+		}
+		for _, de := range digestEntries {
+			if !de.IsDir() && isMarkdownFile(de.Name()) {
+				stats.Digests++
+			}
+		}
+	}
+
+	walkErr := filepath.WalkDir(root, func(path string, d os.DirEntry, err error) error {
+		if err != nil {
+			return nil
+		}
+		if d.IsDir() {
+			if shouldSkipPKBReportDir(path, root, d.Name()) {
+				return filepath.SkipDir
+			}
+			return nil
+		}
+		if !isMarkdownFile(d.Name()) || strings.HasPrefix(d.Name(), "_") {
+			return nil
+		}
+		stats.Cards++
+		if info, infoErr := d.Info(); infoErr == nil && !info.ModTime().Before(dayStart) {
+			stats.CardsToday++
+		}
+		return nil
+	})
+	if walkErr != nil {
+		return nil, fmt.Errorf("walk vault stats: %w", walkErr)
+	}
+	return stats, nil
+}
+
 func (s *PKBReportService) LatestDigests() ([]PKBDigestSummary, error) {
 	root := filepath.Join(s.basePath, "vault")
 	entries, err := os.ReadDir(root)

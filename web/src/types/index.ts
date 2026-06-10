@@ -345,6 +345,48 @@ export interface MatrixStats {
   active_rooms: number
 }
 
+// Dashboard aggregated stats (GET /api/dashboard/stats)
+
+export interface CrawlDashboardStats {
+  total_urls: number
+  success: number
+  failed: number
+  pending: number
+  running: number
+  success_rate: number
+  today_new: number
+  today_success: number
+  today_failed: number
+  today_rate: number
+  feeds_total: number
+  feeds_active: number
+  feeds_paused: number
+  last_crawl_at?: string
+}
+
+export interface PKBDashboardStats {
+  trees: number
+  cards: number
+  cards_today: number
+  digests: number
+}
+
+export interface LLMDashboardStats {
+  requests_24h: number
+  errors_24h: number
+  rate_limits_24h: number
+  success_rate: number
+  tokens_24h: number
+  cost_cents_24h: number
+  avg_duration_ms: number
+}
+
+export interface DashboardStats {
+  crawl: CrawlDashboardStats
+  pkb: PKBDashboardStats
+  llm: LLMDashboardStats
+}
+
 // Knowledge Files Types
 
 export interface TreeNode {

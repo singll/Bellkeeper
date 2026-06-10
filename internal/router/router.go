@@ -72,6 +72,10 @@ func Setup(r *gin.Engine, handlers *handler.Handlers, mode string, apiKey string
 	if handlers.PKBReport != nil {
 		registerPKBReportRoutes(api, handlers.PKBReport)
 	}
+	// Dashboard aggregated stats
+	if handlers.Dashboard != nil {
+		registerDashboardRoutes(api, handlers.Dashboard)
+	}
 }
 
 func registerTagRoutes(api *gin.RouterGroup, h *handler.TagHandler) {
@@ -306,6 +310,10 @@ func registerPKBReportRoutes(api *gin.RouterGroup, h *handler.PKBReportHandler) 
 	pkb.GET("/daily", h.Daily)
 	pkb.GET("/vault-cards", h.VaultCards)
 	pkb.GET("/digests/latest", h.LatestDigests)
+}
+
+func registerDashboardRoutes(api *gin.RouterGroup, h *handler.DashboardHandler) {
+	api.GET("/dashboard/stats", h.Stats)
 }
 
 func registerKnowledgeRoutes(api *gin.RouterGroup, h *handler.KnowledgeHandler) {

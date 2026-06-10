@@ -283,6 +283,57 @@ func (r *CrawlJobRepository) Stats() (*CrawlQueueStats, error) {
 	return &stats, nil
 }
 
+// CrawlActivityStats holds crawl counts within a time window.
+type CrawlActivityStats struct {
+	Created int64 `json:"created"`
+	Success int64 `json:"success"`
+	Failed  int64 `json:"failed"`
+}
+
+// ActivitySince returns crawl activity counts since the given time.
+// Success counts jobs completed in the window; Failed counts jobs that
+// entered a failure state (failed/blocked/dead) in the window.
+func (r *CrawlJobRepository) ActivitySince(since time.Time) (*CrawlActivityStats, error) {
+	stats := &CrawlActivityStats{}
+	if err := r.db.Model(&model.CrawlJob{}).
+		Where("created_at >= ?", since).
+		Count(&stats.Created).Error; err != nil {
+		return nil, fmt.Errorf("count created jobs: %w", err)
+	}
+	if err := r.db.Model(&model.CrawlJob{}).
+		Where("status = ? AND completed_at >= ?", model.CrawlJobSuccess, since).
+		Count(&stats.Success).Error; err != nil {
+		return nil, fmt.Errorf("count success jobs: %w", err)
+	}
+	failureStatuses := []string{
+		string(model.CrawlJobFailed),
+		string(model.CrawlJobBlocked),
+		string(model.CrawlJobDead),
+	}
+	if err := r.db.Model(&model.CrawlJob{}).
+		Where("status IN ? AND updated_at >= ?", failureStatuses, since).
+		Count(&stats.Failed).Error; err != nil {
+		return nil, fmt.Errorf("count failed jobs: %w", err)
+	}
+	return stats, nil
+}
+
+// LastSuccessAt returns the completion time of the most recent successful job.
+func (r *CrawlJobRepository) LastSuccessAt() (*time.Time, error) {
+	var job model.CrawlJob
+	err := r.db.Model(&model.CrawlJob{}).
+		Where("status = ? AND completed_at IS NOT NULL", model.CrawlJobSuccess).
+		Order("completed_at DESC").
+		First(&job).Error
+	if errors.Is(err, gorm.ErrRecordNotFound) {
+		return nil, nil
+	}
+	if err != nil {
+		return nil, fmt.Errorf("query last success: %w", err)
+	}
+	return job.CompletedAt, nil
+}
+
 // Audit returns grouped recent crawl failures and extractor success rates.
 func (r *CrawlJobRepository) Audit(since time.Time, limit int) (*CrawlAuditStats, error) {
 	if limit <= 0 {

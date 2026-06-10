@@ -24,6 +24,7 @@ type Services struct {
 	Search        *SearchService
 	Report        *ReportService
 	PKBReport     *PKBReportService
+	Dashboard     *DashboardService
 	CrawlQueue    *CrawlQueueService
 	RuleOptimizer *RuleOptimizerService
 	// Optional services (initialized in main.go with infra dependencies)
@@ -109,6 +110,9 @@ func NewServices(repos *repository.Repositories, cfg *config.Config, version str
 	reportSvc := NewReportService(cfg.FileIngestion.BasePath)
 	reportSvc.SetDailyReportPath(cfg.DailyReport.Path)
 
+	pkbReportSvc := NewPKBReportService(cfg.Knowledge, cfg.DailyReport, activityLogSvc)
+	dashboardSvc := NewDashboardService(repos.CrawlJob, repos.RSS, repos.LLMProxy, pkbReportSvc, cfg.DailyReport)
+
 	return &Services{
 		Tag:           NewTagService(repos.Tag),
 		RSS:           NewRSSService(repos.RSS, repos.Tag),
@@ -126,7 +130,8 @@ func NewServices(repos *repository.Repositories, cfg *config.Config, version str
 		FileIngestion: fileIngestionSvc,
 		Search:        NewSearchService(repos.Tag, repos.ArticleTag, repos.RSS),
 		Report:        reportSvc,
-		PKBReport:     NewPKBReportService(cfg.Knowledge, cfg.DailyReport, activityLogSvc),
+		PKBReport:     pkbReportSvc,
+		Dashboard:     dashboardSvc,
 		CrawlQueue:    crawlQueueSvc,
 		RuleOptimizer: ruleOptimizerSvc,
 	}

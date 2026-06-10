@@ -52,6 +52,37 @@ type ChannelStat struct {
 	TotalRetries   int64   `json:"total_retries"`
 }
 
+// UsageSummary holds aggregated proxy usage over a time window.
+type UsageSummary struct {
+	TotalRequests int64   `json:"total_requests"`
+	ErrorCount    int64   `json:"error_count"`
+	RateLimits    int64   `json:"rate_limits"`
+	PromptTokens  int64   `json:"prompt_tokens"`
+	CompTokens    int64   `json:"comp_tokens"`
+	CostCents     int64   `json:"cost_cents"`
+	AvgDurationMs float64 `json:"avg_duration_ms"`
+}
+
+// SummarySince aggregates request counts, errors, tokens and cost across all
+// channels since the given time.
+func (r *LLMProxyRepository) SummarySince(since time.Time) (*UsageSummary, error) {
+	var summary UsageSummary
+	err := r.db.Model(&model.LLMProxyLog{}).
+		Select("COUNT(*) as total_requests, "+
+			"COALESCE(SUM(CASE WHEN status_code >= 400 THEN 1 ELSE 0 END), 0) as error_count, "+
+			"COALESCE(SUM(CASE WHEN is_rate_limit THEN 1 ELSE 0 END), 0) as rate_limits, "+
+			"COALESCE(SUM(prompt_tokens), 0) as prompt_tokens, "+
+			"COALESCE(SUM(comp_tokens), 0) as comp_tokens, "+
+			"COALESCE(SUM(cost_micro_cents), 0) / 1000 as cost_cents, "+
+			"COALESCE(AVG(duration_ms), 0) as avg_duration_ms").
+		Where("created_at > ?", since).
+		Scan(&summary).Error
+	if err != nil {
+		return nil, err
+	}
+	return &summary, nil
+}
+
 func (r *LLMProxyRepository) GetStats(since time.Time) ([]ChannelStat, error) {
 	var stats []ChannelStat
 	err := r.db.Model(&model.LLMProxyLog{}).
