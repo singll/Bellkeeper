@@ -104,7 +104,8 @@ func (c *Client) ListRaw(perPage int, excludeProcessed bool) ([]ArticleMeta, err
 	return out.Data, nil
 }
 
-// SearchTitles 检索指定层的卡片标题（供 vault 重构的 wikilink 候选）。
+// SearchTitles 检索指定层的卡片概念名（供 vault 重构的 wikilink 候选）。
+// 优先返回 atomic_concept（稳定身份锚），无则回退 title。
 func (c *Client) SearchTitles(query string, layers []string, limit int) ([]string, error) {
 	reqBody := map[string]interface{}{
 		"query":  query,
@@ -128,7 +129,8 @@ func (c *Client) SearchTitles(query string, layers []string, limit int) ([]strin
 	var out struct {
 		Data struct {
 			Files []struct {
-				Title string `json:"title"`
+				Title         string `json:"title"`
+				AtomicConcept string `json:"atomic_concept"`
 			} `json:"files"`
 		} `json:"data"`
 	}
@@ -137,11 +139,71 @@ func (c *Client) SearchTitles(query string, layers []string, limit int) ([]strin
 	}
 	titles := make([]string, 0, len(out.Data.Files))
 	for _, f := range out.Data.Files {
-		if f.Title != "" {
-			titles = append(titles, f.Title)
+		name := f.AtomicConcept
+		if name == "" {
+			name = f.Title
+		}
+		if name != "" {
+			titles = append(titles, name)
 		}
 	}
 	return titles, nil
+}
+
+// SearchContent 检索指定层的内容级匹配（供语义去重）。
+// 返回每张匹配卡的 atomic_concept（无则回退标题）+ 摘要（前 200 字）。
+func (c *Client) SearchContent(query string, layers []string, limit int) ([]ContentMatch, error) {
+	reqBody := map[string]interface{}{
+		"query":  query,
+		"layers": layers,
+		"limit":  limit,
+	}
+	jsonData, _ := json.Marshal(reqBody)
+	req, err := c.newReq(http.MethodPost, c.apiBase+"/api/files/search", bytes.NewReader(jsonData))
+	if err != nil {
+		return nil, err
+	}
+	resp, err := c.httpClient.Do(req)
+	if err != nil {
+		return nil, fmt.Errorf("search content: %w", err)
+	}
+	defer resp.Body.Close()
+	raw, _ := io.ReadAll(resp.Body)
+	if resp.StatusCode >= 400 {
+		return nil, fmt.Errorf("search content returned %d: %s", resp.StatusCode, string(raw))
+	}
+	var out struct {
+		Data struct {
+			Files []struct {
+				Title         string `json:"title"`
+				AtomicConcept string `json:"atomic_concept"`
+				Excerpt       string `json:"excerpt"`
+			} `json:"files"`
+		} `json:"data"`
+	}
+	if err := json.Unmarshal(raw, &out); err != nil {
+		return nil, fmt.Errorf("decode search content response: %w", err)
+	}
+	matches := make([]ContentMatch, 0, len(out.Data.Files))
+	for _, f := range out.Data.Files {
+		concept := f.AtomicConcept
+		if concept == "" {
+			concept = f.Title
+		}
+		if concept != "" {
+			matches = append(matches, ContentMatch{
+				Concept: concept,
+				Excerpt: truncateRunes(f.Excerpt, 200),
+			})
+		}
+	}
+	return matches, nil
+}
+
+// ContentMatch 内容级搜索结果
+type ContentMatch struct {
+	Concept string
+	Excerpt string
 }
 
 // Rebuild 触发全量重建索引（POST /api/files/rebuild）。

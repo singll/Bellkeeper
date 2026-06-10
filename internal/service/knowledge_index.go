@@ -193,20 +193,21 @@ func (s *KnowledgeIndexService) indexFile(ctx context.Context, file *FileInfo) e
 	docs := make([]map[string]interface{}, 0, len(chunks))
 	for i, chunk := range chunks {
 		doc := map[string]interface{}{
-			"id":            fmt.Sprintf("%s_%d", safeID, i),
-			"file_path":     file.RelPath,
-			"file_id":       file.RelPath,
-			"chunk_index":   i,
-			"heading":       chunk.Heading,
-			"content":       chunk.Content,
-			"title":         parsed.Title,
-			"layer":         file.Layer,
-			"category":      parsed.Category,
-			"tags":          parsed.Tags,
-			"source_url":    parsed.SourceURL,
-			"source_domain": parsed.SourceDomain,
-			"content_hash":  file.ContentHash,
-			"updated_at":    time.Now().Unix(),
+			"id":             fmt.Sprintf("%s_%d", safeID, i),
+			"file_path":      file.RelPath,
+			"file_id":        file.RelPath,
+			"chunk_index":    i,
+			"heading":        chunk.Heading,
+			"content":        chunk.Content,
+			"title":          parsed.Title,
+			"atomic_concept": parsed.AtomicConcept,
+			"layer":          file.Layer,
+			"category":       parsed.Category,
+			"tags":           parsed.Tags,
+			"source_url":     parsed.SourceURL,
+			"source_domain":  parsed.SourceDomain,
+			"content_hash":   file.ContentHash,
+			"updated_at":     time.Now().Unix(),
 		}
 		docs = append(docs, doc)
 	}

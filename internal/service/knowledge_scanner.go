@@ -105,13 +105,14 @@ func NewMarkdownParser() *MarkdownParser {
 
 // ParseResult 解析结果
 type ParseResult struct {
-	Title        string
-	SourceURL    string
-	SourceDomain string
-	Category     string
-	Tags         []string
-	Body         string
-	Headings     []Heading
+	Title         string
+	SourceURL     string
+	SourceDomain  string
+	Category      string
+	Tags          []string
+	AtomicConcept string
+	Body          string
+	Headings      []Heading
 }
 
 // Heading 标题结构
@@ -132,10 +133,11 @@ func (p *MarkdownParser) ParseMarkdown(fileInfo *FileInfo) (*ParseResult, error)
 	}
 
 	result := &ParseResult{
-		Title:    fileInfo.Title,
-		Category: getStringFromMap(fm, "category"),
-		Tags:     normalizeTagList(getTagsFromMap(fm)),
-		Body:     body,
+		Title:         fileInfo.Title,
+		Category:      getStringFromMap(fm, "category"),
+		Tags:          normalizeTagList(getTagsFromMap(fm)),
+		AtomicConcept: getStringFromMap(fm, "atomic_concept"),
+		Body:          body,
 	}
 
 	// 提取 source URL

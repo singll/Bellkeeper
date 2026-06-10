@@ -6,6 +6,7 @@ import (
 	"os"
 	"path/filepath"
 	"regexp"
+	"strconv"
 	"strings"
 	"time"
 
@@ -26,25 +27,27 @@ type Options struct {
 
 // Curator 知识库维护编排器（一次性 CLI，跑完即退，无后台 goroutine）。
 type Curator struct {
-	client            *Client
-	articleRepo       *repository.ArticleTagRepository
-	domains           *DomainsConfig
-	basePath          string // /mnt/knowledge
-	scorePrompt       string
-	reconstructPrompt string
-	digestPrompt      string
-	scorePromptName   string
-	reconstructName   string
-	digestPromptName  string
-	dryRun            bool
-	rescan            bool
-	perRun            int
-	ctx               context.Context
-	scoreCalls        int
-	reconstructCalls  int
-	digestCalls       int
-	lastSummary       runSummary
-	llmJobs           *service.LLMJobQueueService
+	client                *Client
+	articleRepo           *repository.ArticleTagRepository
+	domains               *DomainsConfig
+	basePath              string // /mnt/knowledge
+	scorePrompt           string
+	reconstructPrompt     string
+	digestPrompt          string
+	digestTopicPrompt     string
+	scorePromptName       string
+	reconstructName       string
+	digestPromptName      string
+	digestTopicPromptName string
+	dryRun                bool
+	rescan                bool
+	perRun                int
+	ctx                   context.Context
+	scoreCalls            int
+	reconstructCalls      int
+	digestCalls           int
+	lastSummary           runSummary
+	llmJobs               *service.LLMJobQueueService
 }
 
 // NewCurator 装配 Curator：加载 config/pkb + 构造 HTTP 客户端 + 注入 ArticleTag 仓库（幂等账本）。
@@ -67,6 +70,10 @@ func NewCurator(cfg *config.Config, opts Options, articleRepo *repository.Articl
 		return nil, err
 	}
 	digestPrompt, err := loadPromptFile(opts.ConfigDir, registry.Active.Digest)
+	if err != nil {
+		return nil, err
+	}
+	digestTopicPrompt, err := loadPromptFile(opts.ConfigDir, registry.Active.DigestTopic)
 	if err != nil {
 		return nil, err
 	}
@@ -95,21 +102,23 @@ func NewCurator(cfg *config.Config, opts Options, articleRepo *repository.Articl
 	}
 
 	return &Curator{
-		client:            client,
-		articleRepo:       articleRepo,
-		domains:           domains,
-		basePath:          cfg.Knowledge.BasePath,
-		scorePrompt:       scorePrompt,
-		reconstructPrompt: reconstructPrompt,
-		digestPrompt:      digestPrompt,
-		scorePromptName:   registry.Active.Score,
-		reconstructName:   registry.Active.Reconstruct,
-		digestPromptName:  registry.Active.Digest,
-		dryRun:            opts.DryRun,
-		rescan:            opts.Rescan,
-		perRun:            perRun,
-		ctx:               ctx,
-		llmJobs:           opts.LLMJobs,
+		client:                client,
+		articleRepo:           articleRepo,
+		domains:               domains,
+		basePath:              cfg.Knowledge.BasePath,
+		scorePrompt:           scorePrompt,
+		reconstructPrompt:     reconstructPrompt,
+		digestPrompt:          digestPrompt,
+		digestTopicPrompt:     digestTopicPrompt,
+		scorePromptName:       registry.Active.Score,
+		reconstructName:       registry.Active.Reconstruct,
+		digestPromptName:      registry.Active.Digest,
+		digestTopicPromptName: registry.Active.DigestTopic,
+		dryRun:                opts.DryRun,
+		rescan:                opts.Rescan,
+		perRun:                perRun,
+		ctx:                   ctx,
+		llmJobs:               opts.LLMJobs,
 	}, nil
 }
 
@@ -145,7 +154,7 @@ func (c *Curator) Run() error {
 		c.domains.Defaults.Retry.MaxAttempts,
 		c.domains.Defaults.Retry.InitialBackoffSeconds,
 		c.domains.Defaults.Retry.MaxBackoffSeconds,
-		c.domains.Defaults.Retry.StopRunOnRateLimit)
+		c.domains.Defaults.Retry.GetStopRunOnRateLimit())
 
 	articles, err := c.client.ListRaw(c.perRun, !c.rescan)
 	if err != nil {
@@ -157,7 +166,7 @@ func (c *Curator) Run() error {
 	for i, art := range articles {
 		fmt.Printf("\n[%d/%d] %s\n", i+1, len(articles), art.Title)
 		if err := c.processOne(art, &sum); err != nil {
-			if c.domains.Defaults.Retry.StopRunOnRateLimit && isRetryableLLMError(err) {
+			if c.domains.Defaults.Retry.GetStopRunOnRateLimit() && isRetryableLLMError(err) {
 				sum.deferred = len(articles) - i
 				fmt.Printf("    ↷ LLM 免费池/上游仍在限流，本轮停止；当前及后续 %d 篇保留在 raw 队列，下轮继续: %v\n", sum.deferred, err)
 				break
@@ -182,6 +191,9 @@ func (c *Curator) Run() error {
 	c.lastSummary = sum
 	fmt.Printf("\n[pkb-curate] 本轮完成：处理 %d / vault %d / archive %d / discard %d / 失败 %d / 延期 %d\n",
 		sum.processed, sum.vault, sum.archive, sum.discard, sum.failed, sum.deferred)
+	if c.domains.Defaults.GetAuditOnRun() && !c.dryRun {
+		fmt.Printf("[pkb-audit] 网健康度摘要: %s\n", c.AuditSummary())
+	}
 	return nil
 }
 
@@ -284,7 +296,7 @@ func (c *Curator) moveToArchive(art ArticleMeta, body string, score *ScoreResult
 	return nil
 }
 
-// reconstructToVault 高分：检索 wikilink 候选 → 重构成卡片 → 写入 vault 子目录（raw 原文留底）。
+// reconstructToVault 高分：检索 wikilink 候选 → 重构成多张原子卡片 → 写入 vault 子目录。
 func (c *Curator) reconstructToVault(art ArticleMeta, body string, score *ScoreResult, final float64, domain Domain) error {
 	if c.dryRun {
 		fmt.Printf("    (dry-run) 跳过重构与写盘；将写入 %s/\n", domain.VaultSubpath)
@@ -292,13 +304,26 @@ func (c *Curator) reconstructToVault(art ArticleMeta, body string, score *ScoreR
 	}
 	date := time.Now().Format("20060102")
 
-	candidates, err := c.client.SearchTitles(art.Title+" "+domain.Display, []string{"vault"}, 8)
+	candidates, err := c.client.SearchTitles(art.Title+" "+domain.Display, []string{"vault"}, 15)
 	if err != nil {
 		fmt.Printf("    ⚠ 检索 wikilink 候选失败（继续，无候选）: %v\n", err)
 		candidates = nil
 	}
 
-	card, err := c.reconstructCard(art, body, score, domain, candidates, date)
+	var contentCandidates []ContentMatch
+	if c.domains.Defaults.GetEnableSemanticDedup() {
+		coreExcerpt := truncateRunes(stripFrontmatter(body), 200)
+		cc, cerr := c.client.SearchContent(coreExcerpt, []string{"vault"}, 5)
+		if cerr != nil {
+			fmt.Printf("    ⚠ 语义查重失败（继续）: %v\n", cerr)
+		} else {
+			contentCandidates = cc
+		}
+	}
+
+	mergedCandidates, mergedDisplayCandidates := mergeCandidates(candidates, contentCandidates)
+
+	cards, reconStats, err := c.reconstructCard(art, body, score, domain, mergedCandidates, mergedDisplayCandidates, date)
 	if err != nil {
 		return err
 	}
@@ -307,17 +332,70 @@ func (c *Curator) reconstructToVault(art ArticleMeta, body string, score *ScoreR
 	if err := os.MkdirAll(dir, 0755); err != nil {
 		return fmt.Errorf("mkdir vault subpath: %w", err)
 	}
-	dst := filepath.Join(dir, fmt.Sprintf("%s_%s.md", date, sanitizeFilename(art.Title)))
-	if err := os.WriteFile(dst, []byte(card), 0644); err != nil {
-		return fmt.Errorf("write vault card: %w", err)
+
+	written := 0
+	skipped := 0
+	var errors []string
+
+	for _, card := range cards {
+		concept := frontmatterValue(card, "atomic_concept")
+		if concept == "" {
+			title := frontmatterValue(card, "title")
+			if title == "" {
+				title = art.Title
+			}
+			concept = title
+		}
+		slug := sanitizeFilename(concept)
+		dst := filepath.Join(dir, slug+".md")
+
+		if _, statErr := os.Stat(dst); statErr == nil {
+			for n := 2; n <= 100; n++ {
+				alt := fmt.Sprintf("%s-%d.md", slug, n)
+				altPath := filepath.Join(dir, alt)
+				if _, statErr2 := os.Stat(altPath); statErr2 != nil {
+					dst = altPath
+					card = appendAlias(card, slug)
+					break
+				}
+			}
+		}
+
+		tmpPath := dst + ".tmp.md"
+		if err := os.WriteFile(tmpPath, []byte(card), 0644); err != nil {
+			errors = append(errors, fmt.Sprintf("write tmp %s: %v", tmpPath, err))
+			skipped++
+			continue
+		}
+		if err := os.Rename(tmpPath, dst); err != nil {
+			os.Remove(tmpPath)
+			errors = append(errors, fmt.Sprintf("rename %s→%s: %v", tmpPath, dst, err))
+			skipped++
+			continue
+		}
+		fmt.Printf("    → %s\n", dst)
+		written++
 	}
-	fmt.Printf("    → %s\n", dst)
-	// raw 原文留底：补写 pkb_decision=vault，使其下次被自愈跳过（DB + frontmatter 双保险）
+
 	if rawBody, rerr := os.ReadFile(art.FilePath); rerr == nil {
-		updated := upsertFrontmatter(string(rawBody), c.scoreFields(score, final, domain, "vault"))
+		extraFields := c.scoreFields(score, final, domain, "vault")
+		extraFields["pkb_cards_written"] = strconv.Itoa(written)
+		extraFields["pkb_cards_skipped"] = strconv.Itoa(skipped)
+		if reconStats.FailedValidate > 0 {
+			errors = append(errors, fmt.Sprintf("validate_failed=%d", reconStats.FailedValidate))
+		}
+		if reconStats.Truncated > 0 {
+			errors = append(errors, fmt.Sprintf("truncated_by_max_cards=%d", reconStats.Truncated))
+		}
+		if len(errors) > 0 {
+			extraFields["pkb_reconstruct_errors"] = strings.Join(errors, "; ")
+		}
+		updated := upsertFrontmatter(string(rawBody), extraFields)
 		if werr := os.WriteFile(art.FilePath, []byte(updated), 0644); werr != nil {
 			fmt.Printf("    ⚠ 回写 raw frontmatter 失败（不影响 vault 卡片）: %v\n", werr)
 		}
+	} else if rerr != nil && !os.IsNotExist(rerr) {
+		fmt.Printf("    ⚠ 读取 raw 回写失败: %v\n", rerr)
 	}
 	c.markProcessedDB(art.ID, "vault", final, "", "")
 	return nil
@@ -423,4 +501,56 @@ func sanitizeFilename(s string) string {
 		s = "untitled"
 	}
 	return s
+}
+
+// mergeCandidates 合并标题级候选与内容级候选，去重后返回两个列表：
+// - 第一个只含裸 concept（供 buildValidLinkSet 做 prune 有效集）
+// - 第二个含带摘要的展示串（供提示词渲染，让 LLM 看到上下文）
+func mergeCandidates(titleCandidates []string, contentCandidates []ContentMatch) ([]string, []string) {
+	seen := make(map[string]bool)
+	var concepts []string
+	var display []string
+	addConcept := func(s string) {
+		s = strings.TrimSpace(s)
+		if s != "" && !seen[s] {
+			seen[s] = true
+			concepts = append(concepts, s)
+		}
+	}
+	addDisplay := func(s string) {
+		s = strings.TrimSpace(s)
+		if s != "" {
+			display = append(display, s)
+		}
+	}
+	for _, t := range titleCandidates {
+		addConcept(t)
+		addDisplay(t)
+	}
+	for _, cc := range contentCandidates {
+		addConcept(cc.Concept)
+		if cc.Excerpt != "" {
+			addDisplay(fmt.Sprintf("%s（%s）", cc.Concept, cc.Excerpt))
+		} else {
+			addDisplay(cc.Concept)
+		}
+	}
+	return concepts, display
+}
+
+// appendAlias 在 frontmatter 的 aliases 中追加一个值（不覆盖已有 aliases）。
+func appendAlias(card string, alias string) string {
+	existing := frontmatterValue(card, "aliases")
+	if existing == "" || existing == "[]" {
+		return upsertFrontmatter(card, map[string]string{"aliases": "[" + alias + "]"})
+	}
+	existing = strings.Trim(existing, "[]")
+	parts := strings.Split(existing, ",")
+	for _, p := range parts {
+		if strings.TrimSpace(strings.Trim(p, `"'`)) == alias {
+			return card
+		}
+	}
+	merged := "[" + strings.TrimSpace(existing) + ", " + alias + "]"
+	return upsertFrontmatter(card, map[string]string{"aliases": merged})
 }

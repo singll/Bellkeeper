@@ -21,14 +21,15 @@ type FileSearchRequest struct {
 
 // FileHit 搜索命中结果
 type FileHit struct {
-	FileID    string   `json:"file_id"`
-	FilePath  string   `json:"file_path"`
-	Title     string   `json:"title"`
-	Layer     string   `json:"layer"`
-	Category  string   `json:"category"`
-	Tags      []string `json:"tags"`
-	SourceURL string   `json:"source_url,omitempty"`
-	Snippets  []string `json:"snippets"`
+	FileID        string   `json:"file_id"`
+	FilePath      string   `json:"file_path"`
+	Title         string   `json:"title"`
+	AtomicConcept string   `json:"atomic_concept,omitempty"`
+	Layer         string   `json:"layer"`
+	Category      string   `json:"category"`
+	Tags          []string `json:"tags"`
+	SourceURL     string   `json:"source_url,omitempty"`
+	Snippets      []string `json:"snippets"`
 }
 
 // FileSearchResult 搜索结果
@@ -99,14 +100,15 @@ func (s *FileSearchService) Search(ctx context.Context, req FileSearchRequest) (
 		}
 
 		h := FileHit{
-			FileID:    filePath,
-			FilePath:  filePath,
-			Title:     title,
-			Layer:     getStringValue(hit, "layer"),
-			Category:  getStringValue(hit, "category"),
-			Tags:      tags,
-			SourceURL: getStringValue(hit, "source_url"),
-			Snippets:  snippets,
+			FileID:        filePath,
+			FilePath:      filePath,
+			Title:         title,
+			AtomicConcept: getStringValue(hit, "atomic_concept"),
+			Layer:         getStringValue(hit, "layer"),
+			Category:      getStringValue(hit, "category"),
+			Tags:          tags,
+			SourceURL:     getStringValue(hit, "source_url"),
+			Snippets:      snippets,
 		}
 		hits = append(hits, h)
 	}

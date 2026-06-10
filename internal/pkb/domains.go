@@ -25,12 +25,18 @@ type Defaults struct {
 	ScoreModel             string  `yaml:"score_model"`
 	ReconstructModel       string  `yaml:"reconstruct_model"`
 	DigestModel            string  `yaml:"digest_model"`
-	ScoreTemperature       float64 `yaml:"score_temperature"`       // 0=用默认 0.2；kimi-k2.6 等推理模型须设 1.0
-	ReconstructTemperature float64 `yaml:"reconstruct_temperature"` // 0=用默认 0.4；kimi-k2.6 等推理模型须设 1.0
+	ScoreTemperature       float64 `yaml:"score_temperature"`
+	ReconstructTemperature float64 `yaml:"reconstruct_temperature"`
 	DigestTemperature      float64 `yaml:"digest_temperature"`
 	PerRun                 int     `yaml:"per_run"`
 	ContentTruncate        int     `yaml:"content_truncate"`
-	LLMTokenEnv            string  `yaml:"llm_token_env"` // 可选：专用 LLM token 环境变量名，便于 PKB 独立配额/成本控制
+	LLMTokenEnv            string  `yaml:"llm_token_env"`
+	MaxCardsPerArticle     int     `yaml:"max_cards_per_article"`
+	EnableSemanticDedup    *bool   `yaml:"enable_semantic_dedup"`
+	MapSnapshotOnRefresh   *bool   `yaml:"map_snapshot_on_refresh"`
+	TopicMocEnabled        *bool   `yaml:"topic_moc_enabled"`
+	TopicMinCards          int     `yaml:"topic_min_cards"`
+	AuditOnRun             *bool   `yaml:"audit_on_run"`
 	Budget                 Budget  `yaml:"budget"`
 	Retry                  Retry   `yaml:"retry"`
 }
@@ -44,10 +50,10 @@ type Budget struct {
 
 // Retry controls PKB-level backoff for low-throughput/free LLM pools.
 type Retry struct {
-	MaxAttempts           int  `yaml:"max_attempts"`
-	InitialBackoffSeconds int  `yaml:"initial_backoff_seconds"`
-	MaxBackoffSeconds     int  `yaml:"max_backoff_seconds"`
-	StopRunOnRateLimit    bool `yaml:"stop_run_on_rate_limit"`
+	MaxAttempts           int   `yaml:"max_attempts"`
+	InitialBackoffSeconds int   `yaml:"initial_backoff_seconds"`
+	MaxBackoffSeconds     int   `yaml:"max_backoff_seconds"`
+	StopRunOnRateLimit    *bool `yaml:"stop_run_on_rate_limit"`
 }
 
 // Domain 单个领域
@@ -90,7 +96,7 @@ func LoadDomains(path string) (*DomainsConfig, error) {
 		d.ArchiveThreshold = 4.0
 	}
 	if d.Weights == (Weights{}) {
-		d.Weights = Weights{Relevance: 0.35, Depth: 0.25, Actionability: 0.25, Durability: 0.15}
+		d.Weights = Weights{Relevance: 0.30, Depth: 0.25, Actionability: 0.20, Durability: 0.10, Novelty: 0.15}
 	}
 	if d.ScoreModel == "" {
 		d.ScoreModel = "pool-summary"
@@ -114,7 +120,25 @@ func LoadDomains(path string) (*DomainsConfig, error) {
 		d.PerRun = 5
 	}
 	if d.ContentTruncate <= 0 {
-		d.ContentTruncate = 8000
+		d.ContentTruncate = 12000
+	}
+	if d.MaxCardsPerArticle <= 0 {
+		d.MaxCardsPerArticle = 5
+	}
+	if d.EnableSemanticDedup == nil {
+		d.EnableSemanticDedup = boolPtr(true)
+	}
+	if d.MapSnapshotOnRefresh == nil {
+		d.MapSnapshotOnRefresh = boolPtr(true)
+	}
+	if d.TopicMocEnabled == nil {
+		d.TopicMocEnabled = boolPtr(true)
+	}
+	if d.TopicMinCards <= 0 {
+		d.TopicMinCards = 5
+	}
+	if d.AuditOnRun == nil {
+		d.AuditOnRun = boolPtr(true)
 	}
 	if d.Retry.MaxAttempts <= 0 {
 		d.Retry.MaxAttempts = 4
@@ -125,7 +149,9 @@ func LoadDomains(path string) (*DomainsConfig, error) {
 	if d.Retry.MaxBackoffSeconds <= 0 {
 		d.Retry.MaxBackoffSeconds = 300
 	}
-	d.Retry.StopRunOnRateLimit = true
+	if d.Retry.StopRunOnRateLimit == nil {
+		d.Retry.StopRunOnRateLimit = boolPtr(true)
+	}
 
 	return &dc, nil
 }
@@ -189,4 +215,41 @@ func (dc *DomainsConfig) DomainsPromptBlock() string {
 		b.WriteString(fmt.Sprintf("- %s（%s）：%s\n", d.Name, d.Display, kw))
 	}
 	return b.String()
+}
+
+func boolPtr(v bool) *bool { return &v }
+
+func (d *Defaults) GetEnableSemanticDedup() bool {
+	if d.EnableSemanticDedup != nil {
+		return *d.EnableSemanticDedup
+	}
+	return true
+}
+
+func (d *Defaults) GetMapSnapshotOnRefresh() bool {
+	if d.MapSnapshotOnRefresh != nil {
+		return *d.MapSnapshotOnRefresh
+	}
+	return true
+}
+
+func (d *Defaults) GetTopicMocEnabled() bool {
+	if d.TopicMocEnabled != nil {
+		return *d.TopicMocEnabled
+	}
+	return true
+}
+
+func (d *Defaults) GetAuditOnRun() bool {
+	if d.AuditOnRun != nil {
+		return *d.AuditOnRun
+	}
+	return true
+}
+
+func (r *Retry) GetStopRunOnRateLimit() bool {
+	if r.StopRunOnRateLimit != nil {
+		return *r.StopRunOnRateLimit
+	}
+	return true
 }

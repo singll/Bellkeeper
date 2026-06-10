@@ -2,6 +2,7 @@
 # 调 prompt 时建议新增 score.v2.md / reconstruct.v2.md / digest.v2.md，
 # 再在这里切换，避免覆盖旧版本。
 active:
-  score: score.md
-  reconstruct: reconstruct.md
-  digest: digest.md
+  score: score.v2.md
+  reconstruct: reconstruct.v2.md
+  digest: digest.v2.md
+  digest_topic: digest.topic.md

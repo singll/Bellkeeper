@@ -21,16 +21,27 @@ type DigestOptions struct {
 }
 
 type digestCard struct {
-	Title    string
-	RelPath  string
-	Score    float64
-	Tags     string
-	Date     time.Time
-	Excerpt  string
-	FilePath string
+	Title         string
+	AtomicConcept string
+	CardType      string
+	RelPath       string
+	Score         float64
+	Tags          string
+	Date          time.Time
+	Excerpt       string
+	Relations     string
+	FilePath      string
 }
 
-// RunDigest builds a domain-level digest note from existing high-value vault cards.
+// digestWriteMode 控制写入模式
+type digestWriteMode string
+
+const (
+	digestModeRoot  digestWriteMode = "root"
+	digestModeTopic digestWriteMode = "topic"
+)
+
+// RunDigest builds a domain-level knowledge map from existing high-value vault cards.
 func (c *Curator) RunDigest(opts DigestOptions) error {
 	period := opts.Period
 	if period == "" {
@@ -58,9 +69,9 @@ func (c *Curator) RunDigest(opts DigestOptions) error {
 		return err
 	}
 
-	fmt.Printf("[pkb-digest] 模式=%s period=%s since=%s max_cards=%d model=%s prompt=%s\n",
+	fmt.Printf("[pkb-digest] 模式=%s period=%s since=%s max_cards=%d model=%s prompt=%s topic_moc=%v\n",
 		digestMode(opts.DryRun), period, since.Format("2006-01-02"), maxCards,
-		c.domains.Defaults.DigestModel, c.digestPromptName)
+		c.domains.Defaults.DigestModel, c.digestPromptName, c.domains.Defaults.GetTopicMocEnabled())
 
 	var generated int
 	for _, domain := range domains {
@@ -76,12 +87,21 @@ func (c *Curator) RunDigest(opts DigestOptions) error {
 		fmt.Printf("[pkb-digest] %s 候选卡片=%d\n", domain.Name, len(cards))
 		if opts.DryRun {
 			for _, card := range cards {
-				fmt.Printf("  - %.1f %s (%s)\n", card.Score, card.Title, card.RelPath)
+				fmt.Printf("  - %.1f %s (%s)\n", card.Score, card.AtomicConcept, card.RelPath)
 			}
 			continue
 		}
-		if err := c.writeDigest(domain, period, cards); err != nil {
-			if c.domains.Defaults.Retry.StopRunOnRateLimit && isRetryableLLMError(err) {
+
+		existingMap := c.loadExistingIndex(domain)
+
+		if c.domains.Defaults.GetMapSnapshotOnRefresh() && existingMap != "" {
+			if err := c.snapshotIndex(domain); err != nil {
+				fmt.Printf("[pkb-digest] ⚠ 快照旧版失败（继续）: %v\n", err)
+			}
+		}
+
+		if err := c.writeDigestRoot(domain, period, cards, existingMap); err != nil {
+			if c.domains.Defaults.Retry.GetStopRunOnRateLimit() && isRetryableLLMError(err) {
 				fmt.Printf("[pkb-digest] ↷ LLM 免费池/上游仍在限流，本轮停止；剩余领域下轮继续: %v\n", err)
 				break
 			}
@@ -89,10 +109,29 @@ func (c *Curator) RunDigest(opts DigestOptions) error {
 				fmt.Printf("[pkb-digest] ↷ 本轮 digest 预算已用尽；剩余领域下轮继续: %v\n", err)
 				break
 			}
-			fmt.Printf("[pkb-digest] ⚠ %s 生成失败: %v\n", domain.Name, err)
+			fmt.Printf("[pkb-digest] ⚠ %s 生成根索引失败: %v\n", domain.Name, err)
 			continue
 		}
 		generated++
+
+		if c.domains.Defaults.GetTopicMocEnabled() {
+			topics := c.extractRootTopics(domain)
+			for _, topic := range topics {
+				topicCards := c.collectTopicCards(domain, topic, cards)
+				minCards := c.domains.Defaults.TopicMinCards
+				if minCards <= 0 {
+					minCards = 5
+				}
+				if len(topicCards) < minCards {
+					continue
+				}
+				if err := c.writeDigestTopic(domain, topic, topicCards); err != nil {
+					fmt.Printf("[pkb-digest] ⚠ 主题 MOC %q 生成失败: %v\n", topic, err)
+					continue
+				}
+				generated++
+			}
+		}
 	}
 
 	if !opts.DryRun && generated > 0 {
@@ -101,7 +140,7 @@ func (c *Curator) RunDigest(opts DigestOptions) error {
 			fmt.Printf("[pkb-digest] ⚠ rebuild 失败（digest 已写盘，可稍后手动 rebuild）: %v\n", err)
 		}
 	}
-	fmt.Printf("[pkb-digest] 完成：生成 %d 篇 digest\n", generated)
+	fmt.Printf("[pkb-digest] 完成：生成 %d 篇\n", generated)
 	return nil
 }
 
@@ -201,18 +240,25 @@ func (c *Curator) readDigestCard(path string, since time.Time) (digestCard, bool
 		rel = path
 	}
 	title := firstNonEmpty(fm["title"], strings.TrimSuffix(filepath.Base(path), filepath.Ext(path)))
+	atomicConcept := fm["atomic_concept"]
+	cardType := firstNonEmpty(fm["card_type"], fm["type"])
+	body := stripFrontmatter(content)
+	relations := extractRelationsSection(body)
 	return digestCard{
-		Title:    strings.Trim(title, `"'`),
-		RelPath:  rel,
-		Score:    score,
-		Tags:     fm["tags"],
-		Date:     cardDate,
-		Excerpt:  digestExcerpt(stripFrontmatter(content), 360),
-		FilePath: path,
+		Title:         strings.Trim(title, `"'`),
+		AtomicConcept: strings.Trim(atomicConcept, `"'`),
+		CardType:      strings.Trim(cardType, `"'`),
+		RelPath:       rel,
+		Score:         score,
+		Tags:          fm["tags"],
+		Date:          cardDate,
+		Excerpt:       digestExcerpt(body, 360),
+		Relations:     relations,
+		FilePath:      path,
 	}, true
 }
 
-func (c *Curator) writeDigest(domain Domain, period string, cards []digestCard) error {
+func (c *Curator) writeDigestRoot(domain Domain, period string, cards []digestCard, existingMap string) error {
 	if max := c.domains.Defaults.Budget.MaxDigestCallsPerRun; max > 0 && c.digestCalls >= max {
 		return fmt.Errorf("digest budget exhausted: %d/%d", c.digestCalls, max)
 	}
@@ -225,6 +271,10 @@ func (c *Curator) writeDigest(domain Domain, period string, cards []digestCard) 
 	prompt = strings.ReplaceAll(prompt, "{{generated_at}}", now.Format(time.RFC3339))
 	prompt = strings.ReplaceAll(prompt, "{{card_count}}", strconv.Itoa(len(cards)))
 	prompt = strings.ReplaceAll(prompt, "{{cards}}", renderDigestCards(cards))
+	prompt = strings.ReplaceAll(prompt, "{{existing_map}}", existingMap)
+	if existingMap == "" {
+		prompt = removeEmptySection(prompt, "## 已有体系结构")
+	}
 
 	out, err := c.chatCompletionWithRetry(c.domains.Defaults.DigestModel, "", prompt, c.domains.Defaults.DigestTemperature, "long_context")
 	if err != nil {
@@ -232,79 +282,251 @@ func (c *Curator) writeDigest(domain Domain, period string, cards []digestCard) 
 	}
 	card := stripCardFence(out)
 	card = pruneWikilinks(card, digestTitles(cards))
-	if err := validateDigest(card); err != nil {
+	if err := validateDigestWithMode(card, digestModeRoot); err != nil {
 		return err
 	}
-	dir := filepath.Join(c.basePath, domain.VaultSubpath, "digest")
+
+	dir := filepath.Join(c.basePath, domain.VaultSubpath)
 	if err := os.MkdirAll(dir, 0755); err != nil {
-		return fmt.Errorf("mkdir digest dir: %w", err)
+		return fmt.Errorf("mkdir vault dir: %w", err)
 	}
-	dst := filepath.Join(dir, digestFilename(period, domain.Display, now))
+
+	nextPath := filepath.Join(dir, "_index.next.md")
+	if err := os.WriteFile(nextPath, []byte(card+"\n"), 0644); err != nil {
+		return fmt.Errorf("write _index.next.md: %w", err)
+	}
+
+	indexPath := filepath.Join(dir, "_index.md")
+	if err := os.Rename(nextPath, indexPath); err != nil {
+		os.Remove(nextPath)
+		return fmt.Errorf("rename _index.next.md→_index.md: %w", err)
+	}
+	fmt.Printf("[pkb-digest] → %s\n", indexPath)
+	return nil
+}
+
+func (c *Curator) writeDigestTopic(domain Domain, topic string, cards []digestCard) error {
+	if max := c.domains.Defaults.Budget.MaxDigestCallsPerRun; max > 0 && c.digestCalls >= max {
+		return fmt.Errorf("digest budget exhausted: %d/%d", c.digestCalls, max)
+	}
+	c.digestCalls++
+	now := time.Now()
+	prompt := c.digestTopicPrompt
+	prompt = strings.ReplaceAll(prompt, "{{domain_display}}", domain.Display)
+	prompt = strings.ReplaceAll(prompt, "{{domain_name}}", domain.Name)
+	prompt = strings.ReplaceAll(prompt, "{{period}}", "")
+	prompt = strings.ReplaceAll(prompt, "{{generated_at}}", now.Format(time.RFC3339))
+	prompt = strings.ReplaceAll(prompt, "{{card_count}}", strconv.Itoa(len(cards)))
+	prompt = strings.ReplaceAll(prompt, "{{cards}}", renderDigestCards(cards))
+	prompt = strings.ReplaceAll(prompt, "{{existing_map}}", "")
+
+	out, err := c.chatCompletionWithRetry(c.domains.Defaults.DigestModel, "", prompt, c.domains.Defaults.DigestTemperature, "long_context")
+	if err != nil {
+		return fmt.Errorf("topic moc llm: %w", err)
+	}
+	card := stripCardFence(out)
+	card = pruneWikilinks(card, digestTitles(cards))
+	if err := validateDigestWithMode(card, digestModeTopic); err != nil {
+		return err
+	}
+
+	topicsDir := filepath.Join(c.basePath, domain.VaultSubpath, "topics")
+	if err := os.MkdirAll(topicsDir, 0755); err != nil {
+		return fmt.Errorf("mkdir topics dir: %w", err)
+	}
+	dst := filepath.Join(topicsDir, sanitizeFilename(topic)+".md")
 	if err := os.WriteFile(dst, []byte(card+"\n"), 0644); err != nil {
-		return fmt.Errorf("write digest: %w", err)
+		return fmt.Errorf("write topic moc: %w", err)
 	}
 	fmt.Printf("[pkb-digest] → %s\n", dst)
+	return nil
+}
+
+// loadExistingIndex 读取已有的 _index.md 作为增量更新上下文。
+func (c *Curator) loadExistingIndex(domain Domain) string {
+	path := filepath.Join(c.basePath, domain.VaultSubpath, "_index.md")
+	data, err := os.ReadFile(path)
+	if err != nil {
+		return ""
+	}
+	return strings.TrimSpace(string(data))
+}
+
+// snapshotIndex 将当前 _index.md 快照到 digest/ 子目录。
+func (c *Curator) snapshotIndex(domain Domain) error {
+	src := filepath.Join(c.basePath, domain.VaultSubpath, "_index.md")
+	data, err := os.ReadFile(src)
+	if err != nil {
+		if os.IsNotExist(err) {
+			return nil
+		}
+		return fmt.Errorf("read index for snapshot: %w", err)
+	}
+	digestDir := filepath.Join(c.basePath, domain.VaultSubpath, "digest")
+	if err := os.MkdirAll(digestDir, 0755); err != nil {
+		return fmt.Errorf("mkdir digest for snapshot: %w", err)
+	}
+	snapName := fmt.Sprintf("%s_快照.md", time.Now().Format("20060102_1504"))
+	dst := filepath.Join(digestDir, snapName)
+	return os.WriteFile(dst, data, 0644)
+}
+
+// extractRootTopics 从已生成的 _index.md 的 frontmatter root_concepts 提取顶层主题列表。
+func (c *Curator) extractRootTopics(domain Domain) []string {
+	path := filepath.Join(c.basePath, domain.VaultSubpath, "_index.md")
+	data, err := os.ReadFile(path)
+	if err != nil {
+		return nil
+	}
+	fm := parseFrontmatterMap(string(data))
+	raw := fm["root_concepts"]
+	if raw == "" {
+		return nil
+	}
+	raw = strings.Trim(raw, "[]")
+	parts := strings.Split(raw, ",")
+	var topics []string
+	for _, p := range parts {
+		p = strings.TrimSpace(strings.Trim(p, `"'`))
+		if p != "" {
+			topics = append(topics, p)
+		}
+	}
+	return topics
+}
+
+// collectTopicCards 从全部卡片中筛选属于指定主题的卡片（按 atomic_concept 前缀/包含匹配）。
+// 匹配 0 张时返回空（调用方应跳过该主题，不生成伪主题 MOC）。
+func (c *Curator) collectTopicCards(domain Domain, topic string, allCards []digestCard) []digestCard {
+	var matched []digestCard
+	for _, card := range allCards {
+		concept := card.AtomicConcept
+		if concept == "" {
+			concept = card.Title
+		}
+		if strings.Contains(concept, topic) || strings.Contains(card.Tags, topic) {
+			matched = append(matched, card)
+		}
+	}
+	return matched
+}
+
+// validateDigestWithMode 按 mode 校验 digest 输出。
+func validateDigestWithMode(card string, mode digestWriteMode) error {
+	trimmed := strings.TrimSpace(card)
+	if !strings.HasPrefix(trimmed, "---\n") {
+		return fmt.Errorf("generated digest missing YAML frontmatter")
+	}
+	requiredKeys := []string{"title:", "type:", "domain:", "generated_at:"}
+	for _, key := range requiredKeys {
+		if !strings.Contains(trimmed, "\n"+key) {
+			return fmt.Errorf("generated digest missing frontmatter key %s", strings.TrimSuffix(key, ":"))
+		}
+	}
+	switch mode {
+	case digestModeRoot:
+		v2Sections := []string{
+			"## 体系概览",
+			"## 知识树",
+			"## 核心脉络",
+			"## 新增与变化",
+			"## 缺口与探索方向",
+		}
+		for _, section := range v2Sections {
+			if !strings.Contains(trimmed, section) {
+				return fmt.Errorf("generated root index missing section %s", section)
+			}
+		}
+	case digestModeTopic:
+		topicRequiredKeys := []string{"type: pkb_topic", "parent:", "member_concepts:"}
+		for _, key := range topicRequiredKeys {
+			if !strings.Contains(trimmed, "\n"+key) && !strings.HasPrefix(trimmed, key) {
+				return fmt.Errorf("generated topic moc missing or incorrect: %s", strings.TrimSuffix(key, ":"))
+			}
+		}
+		requiredSections := []string{
+			"## 知识树",
+			"## 核心脉络",
+		}
+		for _, section := range requiredSections {
+			if !strings.Contains(trimmed, section) {
+				return fmt.Errorf("generated topic moc missing section %s", section)
+			}
+		}
+	default:
+		v1Sections := []string{
+			"## 本期核心变化",
+			"## 主题簇",
+			"## 值得沉淀的知识",
+			"## 缺口与后续问题",
+			"## 关联卡片",
+		}
+		v2Sections := []string{
+			"## 体系概览",
+			"## 知识树",
+			"## 核心脉络",
+			"## 新增与变化",
+			"## 缺口与探索方向",
+		}
+		v1Ok := true
+		for _, section := range v1Sections {
+			if !strings.Contains(trimmed, section) {
+				v1Ok = false
+				break
+			}
+		}
+		v2Ok := true
+		for _, section := range v2Sections {
+			if !strings.Contains(trimmed, section) {
+				v2Ok = false
+				break
+			}
+		}
+		if !v1Ok && !v2Ok {
+			return fmt.Errorf("generated digest missing required sections (neither v1 nor v2 format)")
+		}
+	}
 	return nil
 }
 
 func renderDigestCards(cards []digestCard) string {
 	var b strings.Builder
 	for i, card := range cards {
-		b.WriteString(fmt.Sprintf("%d. 标题：%s\n", i+1, card.Title))
-		b.WriteString(fmt.Sprintf("   路径：%s\n", card.RelPath))
+		concept := card.AtomicConcept
+		if concept == "" {
+			concept = card.Title
+		}
+		b.WriteString(fmt.Sprintf("%d. atomic_concept: %s\n", i+1, concept))
+		b.WriteString(fmt.Sprintf("   title: %s\n", card.Title))
+		if card.CardType != "" {
+			b.WriteString(fmt.Sprintf("   card_type: %s\n", card.CardType))
+		} else {
+			b.WriteString("   card_type: pkb_card\n")
+		}
 		b.WriteString(fmt.Sprintf("   分数：%.1f\n", card.Score))
 		if card.Tags != "" {
 			b.WriteString(fmt.Sprintf("   标签：%s\n", card.Tags))
 		}
-		b.WriteString(fmt.Sprintf("   摘要：%s\n\n", card.Excerpt))
+		b.WriteString(fmt.Sprintf("   摘要：%s\n", card.Excerpt))
+		if card.Relations != "" {
+			b.WriteString(fmt.Sprintf("   关系：%s\n", card.Relations))
+		}
+		b.WriteString("\n")
 	}
 	return strings.TrimSpace(b.String())
 }
 
-func digestFilename(period, domainDisplay string, t time.Time) string {
-	switch period {
-	case "monthly":
-		return fmt.Sprintf("%s_%s月综述.md", t.Format("2006-01"), sanitizeFilename(domainDisplay))
-	default:
-		year, week := t.ISOWeek()
-		return fmt.Sprintf("%04d-W%02d_%s周综述.md", year, week, sanitizeFilename(domainDisplay))
-	}
-}
-
 func digestTitles(cards []digestCard) []string {
-	titles := make([]string, 0, len(cards))
+	titles := make([]string, 0, len(cards)*2)
 	for _, card := range cards {
+		if card.AtomicConcept != "" {
+			titles = append(titles, card.AtomicConcept)
+		}
 		if card.Title != "" {
 			titles = append(titles, card.Title)
 		}
 	}
 	return titles
-}
-
-func validateDigest(card string) error {
-	trimmed := strings.TrimSpace(card)
-	if !strings.HasPrefix(trimmed, "---\n") {
-		return fmt.Errorf("generated digest missing YAML frontmatter")
-	}
-	requiredKeys := []string{"title:", "type:", "domain:", "period:", "generated_at:", "source_cards:"}
-	for _, key := range requiredKeys {
-		if !strings.Contains(trimmed, "\n"+key) {
-			return fmt.Errorf("generated digest missing frontmatter key %s", strings.TrimSuffix(key, ":"))
-		}
-	}
-	requiredSections := []string{
-		"## 本期核心变化",
-		"## 主题簇",
-		"## 值得沉淀的知识",
-		"## 缺口与后续问题",
-		"## 关联卡片",
-	}
-	for _, section := range requiredSections {
-		if !strings.Contains(trimmed, section) {
-			return fmt.Errorf("generated digest missing section %s", section)
-		}
-	}
-	return nil
 }
 
 func parseFrontmatterMap(content string) map[string]string {
@@ -377,4 +599,58 @@ func firstNonEmpty(values ...string) string {
 func digestExcerpt(s string, n int) string {
 	s = strings.Join(strings.Fields(s), " ")
 	return truncateRunes(s, n)
+}
+
+var relationsHeaderRe = regexp.MustCompile(`(?i)^## (?:与其他知识的关系|关联)\s*$`)
+
+// extractRelationsSection 从卡片正文中提取"与其他知识的关系"章节内容。
+func extractRelationsSection(body string) string {
+	lines := strings.Split(body, "\n")
+	inSection := false
+	var sectionLines []string
+	for _, line := range lines {
+		if relationsHeaderRe.MatchString(strings.TrimSpace(line)) {
+			inSection = true
+			continue
+		}
+		if inSection {
+			if strings.HasPrefix(strings.TrimSpace(line), "## ") {
+				break
+			}
+			sectionLines = append(sectionLines, line)
+		}
+	}
+	result := strings.TrimSpace(strings.Join(sectionLines, "\n"))
+	if result == "" || result == "（暂无关联）" {
+		return ""
+	}
+	return result
+}
+
+// removeEmptySection 移除提示词中标题后紧跟空内容的章节（标题行 + 后续空白行直到下一个 ## 或文末）。
+func removeEmptySection(prompt, sectionTitle string) string {
+	lines := strings.Split(prompt, "\n")
+	var out []string
+	skip := false
+	for _, line := range lines {
+		if !skip && strings.HasPrefix(strings.TrimSpace(line), sectionTitle) {
+			skip = true
+			continue
+		}
+		if skip {
+			if strings.HasPrefix(strings.TrimSpace(line), "## ") {
+				skip = false
+				out = append(out, line)
+				continue
+			}
+			if strings.TrimSpace(line) == "" {
+				continue
+			}
+			skip = false
+			out = append(out, line)
+			continue
+		}
+		out = append(out, line)
+	}
+	return strings.Join(out, "\n")
 }

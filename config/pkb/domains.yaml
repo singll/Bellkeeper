@@ -6,11 +6,11 @@ defaults:
   vault_threshold: 7.0       # final_score >= 此值 → 进 vault（原子化重构）
   archive_threshold: 4.0     # final_score >= 此值且 < vault_threshold → 进 archive；< 此值 → discard
   weights:                   # 长期知识价值加权（和建议为 1.0）
-    relevance: 0.35
+    relevance: 0.30
     depth: 0.25
-    actionability: 0.25
-    durability: 0.15
-    novelty: 0.0
+    actionability: 0.20
+    durability: 0.10
+    novelty: 0.15
   score_model: pool-summary    # 打分用快模型组（deepseek/qwen，便宜快，适合批量打分）
   reconstruct_model: pool-pkb  # 重构用 kimi-k2.6（moonshot，推理强；仅 >=7 高分文章触发，量少）
   digest_model: pool-pkb       # 体系化综述用强模型，低频触发
@@ -18,7 +18,13 @@ defaults:
   reconstruct_temperature: 1.0     # kimi-k2.6 是推理模型，仅接受 temperature=1
   digest_temperature: 1.0          # 与 pool-pkb 默认模型兼容
   per_run: 5                       # 单轮处理量上限（护栏，可被 --per-run 覆盖）
-  content_truncate: 8000           # 喂给 LLM 的正文截断长度（rune 字符）
+  content_truncate: 12000          # 喂给 LLM 的正文截断长度（rune 字符）
+  max_cards_per_article: 5         # 单篇文章最多产出几张原子卡片
+  enable_semantic_dedup: true      # 是否启用语义去重（SearchContent 步骤）
+  map_snapshot_on_refresh: true    # refresh 模式下是否在刷新前保存快照
+  topic_moc_enabled: true          # 是否生成主题 MOC（topics/<主题>.md 中间层）
+  topic_min_cards: 5               # 一个主题至少含几张卡才单独生成主题 MOC
+  audit_on_run: true               # 每轮 pkb-curate 结束附带网健康度摘要
   llm_token_env: PKB_LLM_TOKEN     # 可选：配置专用 LLM Token 后，PKB 可独立限额/计费；未设置则回退 server.api_key
   budget:
     max_score_calls_per_run: 50

@@ -51,7 +51,7 @@ func (c *Client) ConfigureIndex(ctx context.Context) error {
 	index := c.Index()
 
 	// 设置可搜索属性
-	searchableAttrs := []string{"heading", "content", "title"}
+	searchableAttrs := []string{"heading", "content", "title", "atomic_concept"}
 	taskInfo, err := index.UpdateSearchableAttributes(&searchableAttrs)
 	if err != nil {
 		return fmt.Errorf("update searchable attributes: %w", err)
