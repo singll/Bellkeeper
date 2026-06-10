@@ -73,7 +73,7 @@ func (r *LLMProxyRepository) SummarySince(since time.Time) (*UsageSummary, error
 			"COALESCE(SUM(CASE WHEN is_rate_limit THEN 1 ELSE 0 END), 0) as rate_limits, "+
 			"COALESCE(SUM(prompt_tokens), 0) as prompt_tokens, "+
 			"COALESCE(SUM(comp_tokens), 0) as comp_tokens, "+
-			"COALESCE(SUM(cost_micro_cents), 0) / 1000 as cost_cents, "+
+			"CAST(COALESCE(SUM(cost_micro_cents), 0) / 1000 AS BIGINT) as cost_cents, "+
 			"COALESCE(AVG(duration_ms), 0) as avg_duration_ms").
 		Where("created_at > ?", since).
 		Scan(&summary).Error
