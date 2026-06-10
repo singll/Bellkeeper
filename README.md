@@ -39,19 +39,22 @@ To restart, check status, or view logs:
 - **文件入库** — Trafilatura 主提取 + Firecrawl 兜底，统一落地为带 YAML frontmatter 的 Markdown 写入 `/mnt/knowledge/raw|working`
 - **爬取队列 (CrawlQueue)** — 持久化任务队列 + Worker 池 + 熔断 + 反爬，承接 K01/K02 工作流的入库请求
 - **URL 去重** — DB 内三级匹配（精确/归一化/模糊），不再依赖 RAGFlow
-- **分类与标签** — LLM 驱动分类（SiliconFlow Qwen3-8B），标签作为分区元数据
-- **Meilisearch 检索** — 文件内容索引 → `/api/files/search|ask` 提供搜索与 RAG 问答
+- **分类与标签** — LLM 驱动分类，标签置信度/规范化/来源记录，frontmatter + Meilisearch + DB 三处持久化
+- **个人知识库 PKB** — `bellkeeper pkb-curate` CLI：raw 层 AI 打分分流（vault/archive/discard）→ 高分原子化重构成 Obsidian 卡片 → 领域 digest 综述；提示词外置 `config/pkb/`（详见 `doc/PKB-IMPLEMENTATION.md`）
+- **Meilisearch 检索** — archive/vault 层索引 → `/api/files/search|ask` 提供搜索与 RAG 问答（raw 层不进索引）
 - **文件浏览** — `/api/knowledge/files/tree|list|read` 为前端提供 Obsidian Vault 只读视图
 
 ### LLM 代理池
 
-- **多渠道路由** — 7+ 预配置渠道（SiliconFlow、DashScope、DeepSeek、Kimi、Qwen、new-api 等）
-- **虚拟模型组** — `pool-chat-free` / `pool-chat-balanced` / `pool-summary`，跨渠道智能选路
-- **协议双栈** — OpenAI 兼容 + Anthropic 协议（流式），单点对接两套 SDK 生态
-- **令牌桶限速** — 每渠道 RPM/RPD 限制
-- **熔断器** — 连续 5 次失败自动熔断，120 秒冷却后半开探测
-- **粘性路由** — `X-Task-Key` / `X-Caller-ID` 绑定同一渠道
-- **DB 动态配置** — 渠道/模型组 CRUD + 热重载，运行态健康/限速不丢失
+- **多渠道路由** — SiliconFlow、DashScope、DeepSeek、Moonshot、Kimi Code、new-api 系、Gemini 等，DB 动态配置 + 热重载
+- **虚拟模型组** — `pool-chat-free` / `pool-chat-balanced` / `pool-summary` / `pool-pkb` 等，任务感知分层路由（coding 按复杂度选 tier）、`least_latency` / `balance_aware` 多策略
+- **协议转换** — OpenAI 兼容入口，渠道侧转换 Anthropic（含 tool use 与流式）/ Gemini；`/v1/rerank` 端点
+- **Token 体系与计费** — 调用方专用 Token（模型白名单 + 配额）、定价表 + cached tokens 折扣计费、用量聚合
+- **真实余额同步** — DeepSeek / Moonshot / new-api 系 / 阿里云 BSS 余额拉取，估算 vs 真实对比
+- **限速与熔断** — 令牌桶 RPM/RPD + 429 自适应限流学习；错误码语义化熔断（配额/认证/限流分类）
+- **会话粘性** — `X-Conversation-ID` 绑定渠道保护 prompt cache；`X-Task-Key` 任务级粘性
+- **持久任务队列** — `llm_jobs` 表 + worker，内部批处理（PKB/分类/问答）统一排队与长退避重试
+- **告警聚合** — 5min 合并 + 1h 去重 → Matrix ops 频道
 
 ### Matrix 控制平面
 
@@ -69,7 +72,7 @@ To restart, check status, or view logs:
 - **Prometheus Metrics** — `/metrics` 端点
 - **n8n 工作流集成** — 列表/激活/触发/执行历史的统一 API
 
-> **遗留 RAGFlow 兼容层**：`handler/ragflow.go` + `service/ragflow_*.go` 还在编译，主链已不调用，等待二阶段清理。详见 `../SilkSpool/doc/ROADMAP.md`。
+> **遗留 RAGFlow 兼容层**：约 8 个文件仍含 RAGFlow 引用（handler/service/前端），主链已不调用，待清理。详见 `doc/ROADMAP.md` §RAGFlow 退役。
 
 ## 技术栈
 
@@ -96,14 +99,17 @@ To restart, check status, or view logs:
 ```
 bellkeeper/
 ├── cmd/bellkeeper/                 # Go 后端入口
-│   └── main.go                     #   serve / migrate / version 子命令
+│   └── main.go                     #   serve / migrate / pkb-curate / version 子命令
 │
 ├── internal/                       # Go 内部代码（不允许外部项目导入）
 │   ├── app/                        # 应用装配 (DB → repo → service → handler → matrix → 后台任务)
-│   ├── auth/                       # 认证相关（Authelia Forward Auth 解析、API Key 校验）
+│   ├── auth/                       # 认证相关（Authelia Forward Auth 解析、API Key、LLM Token 校验）
 │   ├── config/                     # Viper 配置加载与结构定义
 │   ├── handler/                    # HTTP 处理器（按业务域拆分）
-│   ├── llm/                        # LLM Proxy 子系统（路由、渠道、模型组、协议转换）
+│   ├── llm/                        # LLM Proxy 子系统（余额 provider、协议转换、错误分类）
+│   ├── llmclient/                  # 内部统一 LLM 调用 SDK（CallerID/TaskType/重试）
+│   ├── pkb/                        # PKB 编排（curator / score / reconstruct / digest / scheduler）
+│   ├── n8n_workflows/              # n8n 工作流 JSON 事实源
 │   ├── matrix/                     # Matrix 集成模块
 │   │   ├── command/                #   命令 parser / router / handlers
 │   │   ├── gateway/                #   mautrix-go sync 客户端
@@ -143,7 +149,8 @@ bellkeeper/
 │   └── index.html
 │
 ├── config/                         # 配置文件
-│   └── bellkeeper.yaml             #   默认配置（可被 .env / .local.yaml 覆盖）
+│   ├── bellkeeper.yaml             #   默认配置（可被 .env / .local.yaml 覆盖；LLM 渠道清单仅作首次 seed）
+│   └── pkb/                        #   PKB 领域配置 + 提示词包（domains.yaml + prompts/ + registry.yaml）
 │
 ├── docker/                         # Docker 构建与编排
 │   ├── Dockerfile                  #   多阶段构建（生产用）
@@ -168,11 +175,11 @@ bellkeeper/
 
 ## 前端导航 (web/)
 
-四大核心系统域 (2026-04 重构后):
+四大核心系统域（LLM 域 2026-06 重设计后收敛为 5 页）:
 
 - **Knowledge**: `/knowledge/files` (Vault 浏览) / `/knowledge/search` / `/knowledge/ask` (RAG 问答) + `/rss` `/tags` `/datasets`
-- **LLM**: `/llm` 仪表盘 + `/llm/channels|groups|config|logs`
-- **Logs**: `/logs` + `/logs/dashboard|sources|alerts|parse-tasks`
+- **LLM**: `/llm` 总览 + `/llm/channels` 渠道管理 + `/llm/groups-routing` 模型组与路由 + `/llm/usage-billing` 用量与计费 + `/llm/logs-alerts` 日志与告警
+- **Logs**: `/logs` + `/logs/dashboard|sources|alerts`
 - **Matrix**: `/matrix` + `rooms|channels|commands|notifications|events|command-logs`
 
 ## 外部依赖
@@ -226,11 +233,12 @@ Caddy (反向代理) + Authelia (Forward Auth)
 
 | 方法 | 路径 | 说明 |
 |------|------|------|
-| ANY | `/api/llm/v1/*` | OpenAI 兼容代理 |
-| ANY | `/api/llm/anthropic/*` | Anthropic 协议代理 |
+| ANY | `/api/llm/v1/*` | OpenAI 兼容代理（LLM Token 鉴权；含 `/v1/rerank`；Anthropic/Gemini 为渠道侧转换） |
 | GET | `/api/llm/health` | 渠道健康状态 |
 | GET | `/api/llm/groups/status` | 模型组状态 |
-| CRUD | `/api/llm/channels` `/api/llm/groups` | 配置管理 |
+| CRUD | `/api/llm/config/channels` `/api/llm/config/groups` | 渠道/模型组配置（DB，热重载） |
+| CRUD | `/api/llm/tokens` `/api/llm/pricing` | Token 与定价管理 |
+| GET | `/api/llm/usage` `/api/llm/balances` `/api/llm/rate-limits` `/api/llm/alerts` | 用量/余额/限流学习/告警 |
 
 ### Matrix
 

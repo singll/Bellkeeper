@@ -1,1452 +1,229 @@
 # SilkSpool & Bellkeeper 演进规划
 
-> 编写日期: 2026-05-26
+> 重新规划日期: 2026-06-10(上一版 2026-05-26,其中 LLM Proxy §2 与 PKB §10 两大 P0/P1 已基本落地,本版将其收缩为「已完成」并重排剩余优先级)
 >
-> 本文档是当前优化方向的汇总，承接 [STATUS.md](STATUS.md)（现状）→ ROADMAP（演进）→ git commit（实施）→ STATUS（回写）这个反馈环。
->
-> 范围覆盖：① 代码清理（RAGFlow 退役）② LLM 代理 ③ n8n 工作流 ④ 日志中心 ⑤ Bellkeeper 前端 ⑥ Bellkeeper 后端功能 ⑦ 知识库与问答 ⑧ 运维与可观测性。
+> 反馈环:[STATUS.md](STATUS.md)(现状)→ ROADMAP(演进)→ git commit(实施)→ STATUS(回写)。已完成计划的原始文档在 [archive/](archive/)。
 
 ---
 
 ## 0. 优先级总览
 
-| 优先级 | 类别 | 摘要 | 工期估算 |
-|--------|------|------|---------|
-| **P0 ⭐🔶** | 个人知识库 | **[MVP 开发完成·P0 总体验收未完成]** 三层存储 `raw/archive/vault` + `pkb-curate` AI 打分分流 + 高分原子化重构 + `config/pkb/` 领域/提示词可配置 + 自动调度 + n8n 工作流 JSON 纳管已落地；仍缺 `spool n8n export` 冷备进 Git/漂移检测、存量 `archive/` 批量重打分聚合、线上样本验证 → 见 §10 | MVP 约 2.75 天已落地；R2/R3 待排 |
-| **P0** | 代码清理 | Bellkeeper 删除 9 个 RAGFlow Go 文件 + 路由 + 前端调用 + 配置块 | 2 天 |
-| **P0** | n8n 清理 | M03 / K06 / K07 / K08 中的 RAGFlow 调用迁移或下线 | 2 天 |
-| **P0** | 配置清理 | `bundles/knowledge/` 整体下线；`bellkeeper-init.sh` 与 `.env` 移除 RAGFLOW_* 变量 | 0.5 天 |
-| P1 ✅🔶 | LLM Proxy | **[开发完成·运行时待验证]** 对标 new-api：Token + 定价 + **真实余额** + **任务感知池子分层（Coding 三策略）** + **会话粘性** + **自适应限流学习** + 错误码熔断 + 告警聚合 + Kimi Code 接入 + Dashboard 重做（停 new-api **暂缓**，仍在使用） | 26.5 天 |
-| P1 | n8n 编排 | K02 RSS 解析下沉到 Bellkeeper，移除 K02→K01 间接调用 | 2 天 |
-| P1 | 日志中心 | Meilisearch 索引日志全文 + 仪表盘 + 告警规则 | 4 天 |
-| P1 | 前端 | 爬取队列可视化页 + Worker 健康详情 + Vault 内联预览 | 3 天 |
-| P2 | 问答 | Rerank + 引用展示 + 上下文压缩 + 历史会话 | 3 天 |
-| P2 | 后端 | Bellkeeper 单元/集成测试覆盖到 60% | 5 天 |
-| P2 | 可观测性 | Prometheus 抓取 + Grafana 看板 + n8n 工作流 SLA 指标 | 3 天 |
-| P3 | 知识库 | K07 端到端验证 + 文件级权限标签 + 智能归档建议 | 5 天 |
-| P3 | 前端 | Vault 文件在线编辑 + 元数据批量编辑 + 模板插入 | 5 天 |
+| 优先级 | 类别 | 摘要 | 估算 |
+|--------|------|------|------|
+| **P0** | PKB 运行收尾 | 存量 ~308 篇 raw 分批跑完 + cron 固化 + 线上验收(§2.1) | 0.5 天 + 观察 |
+| **P0** | 提示词 P0 修复 | LLM-PROMPT-AGENT-REVIEW §5.1 六个具体 bug(任务路由死逻辑/字节截断/硬编码模型等)(§4.1) | 0.5–1 天 |
+| **P0** | 代码清理 | RAGFlow 退役:剩余 ~8 文件 + n8n 工作流 + bundles 配置(§5) | 2 天 |
+| **P1 ⭐** | PKB 原子知识网 | [PKB-ATOMIC-KNOWLEDGE-PLAN.md](PKB-ATOMIC-KNOWLEDGE-PLAN.md) Phase A–E(原子卡/语义去重/分层 MOC/audit)(§2.2) | ~4.75 天 |
+| **P1** | 提示词基础设施 | response_format + 模板校验 + 自修复重试 + golden set eval(§4.2) | 1.5–2 天 |
+| **P1** | LLM Proxy 验收 | 运行时验证清单 + 调用方迁移 + new-api 停服评估(§3) | 0.5 天 + 7 天观察 |
+| **P1** | 爬虫运营验收 | 新源批量导入(20–40 个)+ 7 天成功率指标 + 周健康报告(§6) | 持续迭代 |
+| **P1** | 日志中心 | Meili 全文检索 + 告警增强 + trace_id 关联(§7) | 4 天 |
+| **P1** | 前端 | 爬取队列可视化页 + Vault 预览增强 + 问答多轮/流式(§8) | 3 天 |
+| **P2** | 工程质量 | 测试覆盖 60% + API 契约测试 + golang-migrate(§9) | 5 天 |
+| **P2** | 问答优化 | knowledge_ask 接 Rerank + 引用跳转 + 上下文压缩 + 历史会话(§10) | 3 天 |
+| **P2** | 可观测性 | Prometheus 抓取 + Grafana 看板(§11) | 3 天 |
+| **P3** | 知识库延伸 | K07 验证、权限标签、存量批量导入(§12) | 按需 |
+| **P3** | 前端远期 | Vault 在线编辑 + 元数据批量操作(§12) | 5 天 |
 
 ---
 
-## 1. 代码清理：RAGFlow 退役 (P0)
+## 已完成里程碑(2026-05-30 ~ 2026-06-09,详见 STATUS.md)
 
-### 1.1 Bellkeeper Go 代码
+本版从规划中移除以下已落地大项,残留收尾项整合进下文对应章节:
 
-**需删除的文件**（核心 9 个）：
-
-- [internal/handler/ragflow.go](../../../Bellkeeper/internal/handler/ragflow.go) — 478 行，26 个 API 端点
-- [internal/service/ragflow_upload.go](../../../Bellkeeper/internal/service/ragflow_upload.go)
-- [internal/service/ragflow_http.go](../../../Bellkeeper/internal/service/ragflow_http.go)
-- [internal/service/ragflow_dataset_sync.go](../../../Bellkeeper/internal/service/ragflow_dataset_sync.go)
-- [internal/service/ragflow_parse_queue.go](../../../Bellkeeper/internal/service/ragflow_parse_queue.go)
-- [internal/service/ragflow_api.go](../../../Bellkeeper/internal/service/ragflow_api.go)
-- [internal/service/ragflow_obsidian.go](../../../Bellkeeper/internal/service/ragflow_obsidian.go)
-
-**需检视并部分清理的文件**：
-
-| 文件 | 处理方式 |
-|------|---------|
-| `internal/router/router.go` | 删除 `/api/ragflow/*` 路由组（约 27 行）|
-| `internal/service/service.go` | 移除 `Services.RagFlow` 字段及其装配 |
-| `internal/handler/handler.go` | 移除 RagFlow handler 实例化 |
-| `internal/app/app.go` | 移除 RagFlow service 注入 |
-| `internal/config/config.go` | 移除 `RagFlowConfig` 结构体 + 默认值 |
-| `internal/model/dataset.go` | 删除 `RagFlowID` / `DatasetMapping.RagFlowDatasetID` 等字段（DB AutoMigrate 自动处理）|
-| `internal/model/db.go` | 移除 DatasetMapping migrate 中残留 |
-| `internal/model/matrix.go` | 检查并移除 ragflow_upload 等模块名常量 |
-| `internal/matrix/command/router.go` | 移除 `ragflow_*` 命令分类 |
-| `internal/metrics/metrics.go` | 移除 `ragflow_*` 指标 |
-| `internal/pkg/defaults/defaults.go` | 移除 RAGFlow 相关默认值 |
-| `internal/pkg/errors/errors.go` | 移除 RAGFlow 错误码 |
-| `internal/service/dataset.go` | 重命名/重设 `RagFlowID` 概念（保留为 Meilisearch 索引分区）|
-| `internal/service/health.go` | 移除 RAGFlow 健康检查 |
-| `internal/service/report_test.go` | 更新测试中的 ragflow 期望 |
-| `config/bellkeeper.yaml` | 删除 `ragflow:` 配置块 |
-
-**前端清理（Bellkeeper web/）**：
-
-| 文件 | 处理方式 |
-|------|---------|
-| `web/src/pages/Documents.tsx` | 整页删除或重写为 Meilisearch 文档列表 |
-| `web/src/pages/Datasets.tsx` | 重写：Dataset 改为 Meilisearch 索引分区/标签分组 |
-| `web/src/api/index.ts` | 删除 `ragflow*` API 客户端方法 |
-| `web/src/pages/logs/shared.ts` | 模块筛选下拉移除 `ragflow_*` 选项 |
-| `web/src/pages/logs/LogParseTasks.tsx` | 整页删除（解析任务概念随 RAGFlow 退役）|
-| `web/src/pages/logs/LogBrowser.tsx` `LogAlerts.tsx` | 移除 ragflow 模块过滤项 |
-
-**验收标准**：
-- `grep -ri ragflow internal/ web/src/ config/` 无输出
-- `go build ./cmd/bellkeeper` 通过
-- 前端 `pnpm build` 通过
-- Bellkeeper 启动日志无 "RAGFlow" 相关行
-
-### 1.2 SilkSpool 工作流
-
-| 工作流 | 当前状态 | 处理 |
-|--------|---------|------|
-| `M03-qa-handler.json` | 文件中仍调 RAGFlow API；远程实际版本可能已切到 Bellkeeper | **核对线上**：从远程 n8n 导出当前版本，覆盖本地；如果远程还是 RAGFlow，则重写为调 `/api/files/search` + `/api/files/ask` |
-| `K06-parse-fallback.json` | RAGFlow 解析队列兜底，已无用 | **删除** |
-| `K07-obsidian-sync.json` | `active: false`，调 `/api/ragflow/ingest/obsidian` | **重写**：写文件而非走 RAGFlow，目标是 `/api/files/ingest/file`；或保持 active: false 并标注废弃 |
-| `K08-daily-digest.json` | `active: false`，查询 ragflow_upload 日志生成 AI 摘要 | **重写**：日志模块改成 `crawl` / `ingest_url`，AI 摘要从 working/ 文件提取，或直接 **删除**（功能已被 O01 吸收）|
-| `O01-daily-report.json` | 活跃，引用 RagFlow 服务状态 + ragflow_upload 日志 | **修改**：移除 RagFlow 服务卡片；活动日志模块改为 `ingest` / `crawl` / `classify` |
-| `O02-daily-summary.json` | 活跃，引用 RagFlow 服务状态 | **修改**：服务状态卡片只保留 Bellkeeper / n8n / Meilisearch |
-
-**验收标准**：
-- `grep -ri ragflow hosts/keeper/n8n-workflows/` 仅剩 K07（如保留为已停用适配器）或全清
-- 远程 n8n 实例对应工作流导入更新版本后日报 / 问答仍正常
-
-### 1.3 SilkSpool 配置层
-
-- `bundles/knowledge/` — **整体目录删除**（含 `00-base.yaml`、`10-infra.yaml`、`20-ragflow.yaml`、`30-firecrawl.yaml`、`remote.sh`、`defaults.sh`）
-- `bundles/keeper/defaults.sh` — 移除 `RAGFLOW_API_KEY=your-ragflow-api-key` 默认值行
-- `bundles/keeper/templates/bellkeeper-init.sh` — 移除 `BELLKEEPER_RAGFLOW_BASE_URL` / `BELLKEEPER_RAGFLOW_API_KEY` 两行 export
-- `hosts/keeper/.env`（gitignored）— 删除 `RAGFLOW_API_KEY` / `RAGFLOW_API_URL` / `RAGFLOW_CHAT_ASSISTANT_ID` / `RAGFLOW_DATASET_IDS` 四行（用户在本地清理）
-- 远程 `/opt/silkspool/keeper/.env` 同步清理（通过 `./spool.sh sync push keeper`）
+| 原章节 | 内容 | 落地 | 归档 |
+|--------|------|------|------|
+| 旧 §2(26.5 天) | LLM Proxy 对标 new-api:Token 体系、定价/计费、真实余额、任务感知分层路由、Coding 三策略、会话粘性、自适应限流学习、错误码熔断、告警聚合、Gemini/Rerank、Kimi Code 接入 | 9 轮迭代 + Tier 0–9 审计修复(05-30~06-01) | 设计细节见 git 历史与 [LLM_PROXY_GUIDE.md](LLM_PROXY_GUIDE.md) |
+| 旧 §2.7 + UI 重设计 | LLM 前端 10 页 → 5 页收敛 + 统一凭证模型(消灭凭证表死代码) | 06-07 | [archive/LLM-UI-REDESIGN.md](archive/LLM-UI-REDESIGN.md) |
+| 旧 §10(P0 ⭐) | PKB MVP:三层存储隔离、`pkb-curate` 打分分流 + 原子化重构 + digest、提示词外置 config/pkb + registry、llm_jobs 队列、自动调度、n8n 工作流 JSON 纳管 | 06-06~06-09 | [PKB-IMPLEMENTATION.md](PKB-IMPLEMENTATION.md)(保留为活跃实施文档) |
+| —(05-26 后新增) | 爬取/标签/RSSHub 优化 P0–P4:域名级限速与健康画像、LLM 规则优化闭环、标签置信度/规范化/tag_source、feed 验证 + RSSHub 参数 | 06-09 五连提交 | [archive/CRAWL-TAGGING-...md](archive/CRAWL-TAGGING-RSSHUB-OPTIMIZATION-PLAN-2026-06-09.md) |
+| —(05-26 后新增) | 架构审查 P0/P1 整改:token 权限、路径逃逸、CrawlQueue 原子抢占、Matrix 并发、契约修复、显式迁移、lint 工具链、分层例外登记 | 06-08 审查 → 06-09 整改 | [archive/ARCHITECTURE-REVIEW-2026-06-08.md](archive/ARCHITECTURE-REVIEW-2026-06-08.md) |
+| 旧 §3.1 部分 | K02 RSS 解析下沉:RSSFetcher 已内置 Bellkeeper(按源 fetch_interval 调度),CrawlQueue 确立为爬取主链路,n8n 只触发/汇报 | 06-09 | — |
 
 ---
 
-## 2. LLM 代理优化 (P1) — 对标 new-api 合并方案
+## 1. 安全:认证层(✅ 已完成关闭,2026-06-10)
 
-> **实施状态（2026-06-03 核验）**：9-tier 审计修复（Tier 0–9）全部 commit 落地于分支 `fix/llm-proxy-p1-audit`；`go build ./...` / `go vet ./internal/...` / 前端 `pnpm build`（70 模块）全绿；关键能力均有真实调用方（Token 鉴权挂 proxy 组、micro-cent 计费、429→限流学习 `Record429`、错误码 `Classify`、`proxyRerank`、会话粘性 `Upsert`、告警聚合接 Matrix `alerts`、Gemini 转换）；7 张新表 `AutoMigrate` + 默认 token auto-seed；前端 10 页注册 + 导航四分组；单测断言真实行为（如「1000 deepseek tokens=14 微分而非 0」「classify 永不路由到 coding-only 成员」）。
->
-> 🔶 **待运行时验证（用户后续自验，对应 §2.8 验收标准）**：prompt cache 命中率 >80%、自适应限流学习曲线（30min/24h）、Kimi Code 403→5h 探测自恢复、各 provider 真实余额拉取、调用方 base_url 迁移。**停掉 new-api 容器暂缓**（用户仍在使用 new-api）。
->
-> **补充实现（2026-06-08）**：新增通用 `internal/llmclient` + 持久化 `llm_jobs` / `LLMJobQueueService`。同步 OpenAI-compatible 代理仍由 `/api/llm/v1` 负责；内部批处理/可等待调用（PKB score/reconstruct/digest、classify、knowledge ask）统一可进入 `llm_jobs`，由 server worker 复用 LLM Proxy 的路由/计费/熔断能力并承担长时间 retry/backoff/stale recovery。
->
-> **状态复核（2026-06-08）**：代码侧仍维持「开发完成」结论；本次复核未发现 §2.2–§2.7 的结构性缺口。仍不改为完全完成，因为 §2.8 的真实运行验收、调用方 `base_url` 迁移、new-api 停服 7 天观察尚未执行。
-
-### 2.0 背景与目标
-
-**现状**：同时运行 `new-api` 容器（独立 Token/计费/UI）和 Bellkeeper LLM Proxy（DB 渠道、熔断、粘性、双协议）。
-- new-api 的优势：Token 体系、模型定价、多协议（Gemini/Rerank/Embedding/Realtime）、完整 Dashboard
-- new-api 的劣势：不可改造（Go + Vue，AGPL，业务接进去要 fork 维护成本高，且与 Bellkeeper 配置/日志/Matrix 通知体系完全脱节）
-- Bellkeeper 的优势：可深度定制、与 Matrix/ActivityLog/LogCenter/熔断/粘性融为一体
-- Bellkeeper 的劣势：缺 Token 管理、缺成本核算、缺协议广度、Dashboard 表层
-
-**目标**：让 Bellkeeper LLM Proxy 在 **关键差距功能** 上达到 new-api 替代水平，1 个迭代内停掉 new-api 容器。
-
-**不做范围（明确收敛）**：
-- ❌ 多用户/OAuth（单租户场景，Authelia 已做认证层）
-- ❌ Top-up / 支付（自用，不需要给自己计费）
-- ❌ Midjourney / Suno / Realtime（当前业务无需求）
-- ❌ 多机部署（单机够用）
-
-**差异化战略**（new-api 不具备的）：
-- ✨ 接入**真实余额**（DeepSeek/Moonshot/anyrouter/百炼 BSS）— 见 §2.3.5
-- ✨ **任务感知 + 池子分层路由**（任务类型 → 候选池子 → 免费优先 → 付费降级，Coding 三策略可选 A/B/C，默认 C）— 见 §2.6.5
-- ✨ **会话粘性保 Prompt Cache**（X-Conversation-ID 绑定 channel，禁止会话内切换）— 见 §2.6.7
-- ✨ **自适应限流学习**（observe 429 → 学习真实上限，持久化 + 周期识别 + 自我修正）— 见 §2.6.8
-- ✨ **错误码语义化熔断**（Kimi Code 订阅 403/402、anyrouter session 失效等智能识别）— 见 §2.6.4
-- ✨ **告警聚合**（凭证过期、配额耗尽、熔断升级合并通知，避免轰炸）— 见 §2.6.6
-
-**路由总原则**（按重要性排序）：
-1. **任务类型决定候选**：Kimi Code 只有 `coding` 类任务才进候选；`summary`/`classify` 跳过它
-2. **免费模型优先**：限流不是问题，只要 token bucket 还有余量就用；耗尽才降级
-3. **会话内绝不切换**：同一 `X-Conversation-ID` 从头到尾绑定单 channel，跨切换会废掉 prompt cache（损失最多 90% 折扣）
+**结论**:生产环境运行在**纯内网**中——虽配有域名但仅内网解析、不出外网,不存在公网暴露面。纯内网环境无需认证,`noauth` 模式即为预期的最终状态,原「恢复认证层」任务不再需要,就此关闭。LLM Token 鉴权(`/api/llm/v1/*`)保持独立不受影响。
 
 ---
 
-### 2.1 功能差距矩阵
+## 2. PKB:运行收尾 + 原子知识网(P0 收尾 / P1 主线 ⭐)
 
-| 能力 | new-api | Bellkeeper | 需补建 | 优先级 |
-|------|---------|------------|--------|--------|
-| 渠道 CRUD | ✅ | ✅ | — | — |
-| 渠道熔断 | ❌ | ✅ | — | — |
-| 模型组/粘性路由 | 弱（仅 weighted random） | ✅ | — | — |
-| **API Key (Token) 体系** | ✅ 多 Token、模型白名单、配额 | ❌ 仅 server-level | ✅ 必做 | P1 |
-| **模型定价表** | ✅ DB 配置 input/output 单价 | ❌ | ✅ 必做 | P1 |
-| **成本/消费统计** | ✅ 按 Token/渠道/模型聚合 | ❌ 仅 token 计数 | ✅ 必做 | P1 |
-| **缓存命中计费** | ✅ Claude/DeepSeek/OpenAI | ❌ 不解析 cached_tokens | ✅ 必做 | P1 |
-| **上游真实余额拉取**（new-api **不具备**） | ❌ 仅本地估算 | ❌ | ✅ 差异化能力 | P1 |
-| **池子分层路由**（沉没成本→免费→付费） | ⚠ 仅 weighted | ❌ | ✅ 差异化能力（充分利用 Kimi Code 订阅） | P1 |
-| **任务感知路由**（coding/summary/classify 各走不同候选） | ❌ | ❌ | ✅ 差异化能力（不无脑用 Kimi Code）| P1 |
-| **会话粘性保 Prompt Cache**（X-Conversation-ID 绑定 channel） | ❌ | ⚠ 仅 caller 级粘性，不防跨会话切换 | ✅ 差异化能力 | P1 |
-| **Model 级 RPM 桶**（SiliconFlow 每模型 500 RPM 分桶） | ❌ | ⚠ 仅 channel 级 | ✅ 必做（免费池才能跑满）| P1 |
-| **自适应限流学习**（observe 429 → 学习真实上限，持久化 + 自我修正） | ❌ | ❌ | ✅ 差异化能力（免费池关键）| P1 |
-| **Coding 路由可选策略**（free_first / quality_first / complexity_aware） | ❌ | ❌ | ✅ 必做 | P1 |
-| **错误码语义化熔断**（403 周配额 ≠ 429 限流） | ❌ | ❌ | ✅ 差异化能力 | P1 |
-| **告警聚合**（5min 合并、1h 去重） | ❌ | ❌ | ✅ 必做（避免轰炸） | P1 |
-| **Kimi Code 订阅接入**（`api.kimi.com/coding/`） | ❌（无 base_url 配置） | ❌ | ✅ 必做 | P1 |
-| 协议转换 OpenAI↔Anthropic | ✅ | ✅ | — | — |
-| **协议转换 Gemini↔OpenAI** | ✅ | ❌ | ✅ 必做（K05 总结链路用） | P1 |
-| **reasoning effort 后缀**（`-high/-medium/-low`） | ✅ | ❌ | ✅ 应做 | P1 |
-| **thinking 后缀**（`-thinking-128`） | ✅ | ❌ | ✅ 应做 | P1 |
-| **Rerank 端点**（Cohere/Jina 兼容） | ✅ | ❌ | ✅ 必做（合并 ROADMAP §7.1） | P1 |
-| **Embedding 端点** | ✅ | ❌（外部调用裸 API） | ✅ 应做 | P2 |
-| 图像/语音 | ✅ | ❌ | 暂不做 | P3 |
-| **请求日志独立表 + 归档** | ✅ | 部分（`llm_proxy_logs` 存在） | ⚠ 完善归档 | P1 |
-| **趋势/排行 Dashboard** | ✅ 强 | ⚠ 当前 Overview 偏弱 | ✅ 必做 | P1 |
-| 配额告警 | ✅ | ❌ | ✅ 应做 | P1 |
-| Prometheus 指标 | ⚠ | ⚠ `/metrics` 已暴露但无 LLM 直方图 | 合并 §8.1 | P2 |
-| 测试连接 / 模型自动探测 | ✅ | ❌ | ✅ 必做（UI 体验） | P1 |
-| i18n | ✅ | ❌ | 暂不做（自用） | — |
+### 2.1 MVP 运行收尾(P0)
+
+- [ ] 存量 ~308 篇 raw 按预算分批跑完(`pkb-curate`,经 llm_jobs 队列)
+- [ ] cron / 调度参数固化(当前自动调度开关已有,确认间隔与预算配置合理)
+- [ ] 线上验收:真实样本抽验打分合理性、Obsidian LiveSync 同步范围(raw 不进)、Meili rebuild 结果
+- [ ] 新增领域后存量 `archive/` 批量重打分聚合(缺专门命令/流程)
+- [ ] `spool n8n export` 冷备进 Git + 线上漂移检测(SilkSpool 侧)
+
+### 2.2 原子知识网升级(P1 ⭐,实施中)
+
+按 [PKB-ATOMIC-KNOWLEDGE-PLAN.md](PKB-ATOMIC-KNOWLEDGE-PLAN.md) 执行,该文档是唯一事实源:
+
+- [ ] Phase A:Tier 1 提示词 v2(原子提取/体系地图/atomic_potential)+ Tier 5 权重(novelty 0→0.15)+ validateCard 双栈(0.5 天)— **已开始**:工作区有未提交实施(score/reconstruct/digest.go + digest.v2.md 等)
+- [ ] Phase B:Tier 3 一文多卡 + 同源双向链接 + concept slug 身份(1 天)
+- [ ] Phase C:Tier 2 语义去重 + supplement 归并(1 天)
+- [ ] Phase D:Tier 4 分层 MOC(`_index.md` + `topics/`)(1.5 天)
+- [ ] Phase E:Tier 6 网健康度 audit + Dataview 模板(0.75 天)
 
 ---
 
-### 2.2 后端：API Key (Token) 体系
+## 3. LLM Proxy:运行时验收与 new-api 停服(P1)
 
-**目标**：用 Bellkeeper 自己的 Token 替换「server.api_key 单 key + X-Caller-ID 弱标识」，做到每个调用方一把 key、独立配额、可吊销。
+开发已完成(见已完成里程碑),剩余为**运行时验证**(用户自验)与迁移:
 
-**实施**：
-
-新增表 `llm_tokens`：
-```
-id, name, key_hash (sha256), key_prefix (前 8 位用于展示), caller_id (= name slug),
-allowed_models (JSON 数组, 空=全部), allowed_groups (JSON, 空=全部),
-quota_requests_daily, quota_tokens_daily, quota_cost_monthly_cents,
-expires_at (nullable), enabled, last_used_at, created_at, deleted_at
-```
-
-新增表 `llm_token_usage_daily`（按天聚合 token 维度用量）：
-```
-token_id, date, requests, prompt_tokens, completion_tokens, cached_tokens,
-cost_cents, error_count
-```
-
-中间件 `LLMTokenAuth`：
-- 优先从 `Authorization: Bearer sk-bk-xxx` 解析
-- 命中后将 `caller_id` 注入 ctx（替代现有 X-Caller-ID）
-- 校验 `allowed_models`：请求 model 不在白名单 → 403
-- 校验日配额：超 quota_requests_daily → 429（携带 `X-Quota-Reset` 头）
-- 旁路：内部调用（classify/qa）走 server.api_key，保留现有逻辑
-
-handler 接口：
-- `GET/POST/PUT/DELETE /api/llm/tokens` — CRUD
-- `POST /api/llm/tokens/:id/regenerate` — 重置 key（旧 key 失效）
-- `GET /api/llm/tokens/:id/usage?range=7d` — 用量明细
-
-**迁移**：
-- 启动时若 `llm_tokens` 为空，从 `server.api_key` 自动 seed 一条 `default` token（不破坏现有调用方）
-- 文档更新告知用户改用 Bellkeeper Web UI 创建专用 token
+- [ ] prompt cache 命中率:带 `X-Conversation-ID` 连续请求绑定同一渠道,Anthropic cache hit > 80%
+- [ ] 自适应限流学习曲线:虚高配置 30min 内回落 / 虚低配置 24h 内上调;学习历史图可见
+- [ ] Kimi Code 订阅:403 → 长熔断 → 5h 探测自恢复;配额告警聚合到 Matrix
+- [ ] 各 provider 真实余额拉取正常(DeepSeek / Moonshot / new-api 系 / 阿里云 BSS)
+- [ ] 调用方 base_url 迁移(Open WebUI 等 → `https://<host>/api/llm/v1` + 专用 Token)
+- [ ] 观察 7 天稳定后停 new-api 容器(**暂缓中**,用户仍在使用)+ 清理 bundles 模板
 
 ---
 
-### 2.3 后端：模型定价与成本核算（本地估算）
+## 4. LLM / PKB 提示词工程(P0 修复 + P1 基础设施,新增)
 
-**目标**：每条请求 → 计算 cost（美分），按 token/渠道/模型聚合。注意这是**本地估算**，用于无真实余额接口的渠道；有真实余额接口的渠道（见 §2.3.5）以上游为准。
+来源:[LLM-PROMPT-AGENT-REVIEW.md](LLM-PROMPT-AGENT-REVIEW.md)(2026-06-10 审查)。
 
-**实施**：
+### 4.1 P0 具体修复(§5.1,互相独立可小步提交)
 
-新增表 `llm_model_pricing`:
-```
-id, channel_name, model, input_price_per_1m_cents, output_price_per_1m_cents,
-cached_input_price_per_1m_cents (nullable, 默认 input * 0.1), currency, effective_from,
-notes
-```
+- [ ] 任务路由 token 启发式死逻辑:`DetectTaskType/DetectComplexity` 的 promptTokens 恒传 0(llm_proxy.go:1087/1241/1871),长上下文与复杂度分档永不触发 → 入口粗估 token 传入
+- [ ] knowledge_ask `buildContext` 按字节截断中文(knowledge_ask.go:136-150)→ 改 rune,截断长度进配置
+- [ ] digest 入选阈值硬编码 7.0(pkb/digest.go:183)→ 用领域 `vault_threshold`
+- [ ] rule_optimizer 硬编码 "gpt-4o-mini" + 未注册 TaskType(rule_optimizer.go:223/226)→ 模型/温度进 config,规则优化闭环可能一直静默 400,修复后验证
+- [ ] OpenAI→Anthropic 转换丢 `tool_choice`(llm_anthropic.go:66-70)→ 补转换
+- [ ] Anthropic 缺省 max_tokens=4096 偏小 → 提高缺省;`stripJSONFence` 双实现去重
 
-种子数据（从 ROADMAP 已知模型清单初始化）：
-- `deepseek-chat`: 14 / 28 / cached 1.4 美分/1M
-- `qwen3.5-plus`: 40 / 120 美分/1M
-- `claude-sonnet-4-6`: 300 / 1500 / cached 30
-- Qwen3-8B / Qwen2.5-7B-Instruct (SiliconFlow 免费): 0 / 0
+### 4.2 P1 基础设施(配合 PKB Phase A 落地)
 
-成本计算流程（`service/llm_pricing.go`）：
-1. handler 异步阶段（已有 `logRequest()`）→ 调用 `Pricer.Calc(channel, model, usage)`
-2. 解析 `response.usage.prompt_tokens_details.cached_tokens`（OpenAI/Claude/DeepSeek 通用字段）
-3. cost = uncached_input × input_price + cached_input × cached_price + output × output_price
-4. 写入 `llm_proxy_logs.cost_cents`（新增列）+ `llm_token_usage_daily` 累加
-
-新增接口：
-- `GET /api/llm/usage?group_by=token|channel|model|date&from=&to=`
-- `GET /api/llm/pricing` / `POST` / `PUT` / `DELETE`
-- `POST /api/llm/pricing/reload` — 热重载
+- [ ] llmclient 支持 `max_tokens` / `response_format: json_object` 并在 proxy 透传(JSON 任务解析失败的主治方案)
+- [ ] 提示词模板渲染校验:渲染后残留 `{{...}}` 报错;registry 加载时校验必需占位符
+- [ ] 内容级自修复重试:JSON/结构校验失败时带错误回喂一次(优先 reconstruct——最贵调用)
+- [ ] 提示词 golden set 评估:10–20 篇带预期样本 + `pkb-curate eval`,支撑 v2 提示词切换验收
+- [ ] system/user 角色分离(PKB 三提示词规则段放 system,利用上游 prompt cache)
+- [ ] 提示词管理统一(P2):knowledge_ask / rule_optimizer / classify 提示词外置 + `{{var}}` 统一 + registry 模式推广
 
 ---
 
-### 2.3.5 后端：上游真实余额同步（new-api 不具备的差异化能力）
+## 5. 代码清理:RAGFlow 退役(P0,延续)
 
-**问题**：本地估算成本（§2.3）依赖人工配置的 `llm_model_pricing`，与上游真实计费可能漂移；中转站价格不公开时尤其失真。引入「真实余额拉取」让 Dashboard 显示**估算消费 vs 上游真实余额**两栏对比，并支持「按剩余余额路由」。
+**现状校准(2026-06-10)**:`grep -ri ragflow internal/ web/src/ config/` 仍有 **8 个文件**命中。
 
-**调研结论**（截至 2026-05）：
-
-| 渠道类型 | 真实余额接口 | 鉴权 | 是否复用 sk-key |
-|----------|------------|------|---------------|
-| DeepSeek 直连 | `GET api.deepseek.com/user/balance` | Bearer sk-key | ✅ |
-| Kimi/Moonshot 开放平台 | `GET api.moonshot.cn/v1/users/me/balance` | Bearer sk-key | ✅ |
-| **Kimi Code 订阅** (`api.kimi.com/coding/`) | **❌ 无公开接口**（用量仅网页可见） | `sk-kimi-*` | — 依赖错误码熔断（见 §2.6.4） |
-| anyrouter / new-api 系中转 | `GET <site>/api/user/self` | Cookie session + `new-api-user` 头 | ❌ 另存登录态 |
-| 阿里云百炼 (DashScope) | 阿里云 BSS `QueryAccountBalance` | AccessKey + AccessSecret | ❌ 需额外 AK |
-| Anthropic 直连 | `/v1/organizations/usage_report/messages` | `sk-ant-admin-*` | ❌ Admin key（无直连账号，跳过） |
-| SiliconFlow / 其它中转 | 同 new-api 系（多数兼容） | session | ❌ |
-| Claude Pro/Max 订阅 | 无 | — | — |
-
-**实施**：
-
-新增表 `llm_channel_credentials`（用于存「非 API 调用用」的额外凭证）：
-```
-id, channel_id, provider_type (deepseek_native|moonshot_native|new_api_session|aliyun_bss|anthropic_admin),
-credential_json (加密), -- 例: {"session":"xxx","new_api_user":"12345"} 或 {"ak_id":"","ak_secret":""}
-last_refreshed_at, status (active|expired|error), error_message
-```
-
-新增表 `llm_channel_balance_snapshots`:
-```
-id, channel_id, balance_usd, balance_raw (JSON), provider_currency,
-fetched_at, latency_ms
-```
-
-**BalanceProvider 抽象**（`internal/llm/balance/`）：
-```go
-type BalanceProvider interface {
-    Name() string
-    Fetch(ctx, channel, cred) (Snapshot, error)
-}
-```
-
-初期实现 5 个 provider：
-- `DeepSeekNative` — 直接调 `/user/balance`，复用渠道 sk-key
-- `MoonshotNative` — 直接调 `/v1/users/me/balance`（**仅 Moonshot 开放平台**，不适用于 Kimi Code 订阅）
-- `NewAPISession` — 通用 new-api 系（anyrouter / DoneHub / Veloera 等）
-  - 配置项：`base_url`, `user_info_path`（默认 `/api/user/self`）, `api_user_key`（默认 `new-api-user`）
-  - `quota` 字段除以 500000 换算为美元（new-api 标准）
-- `AliyunBSS` — 阿里云 BSS OpenAPI，调用 `QueryAccountBalance`，需 AccessKey + AccessSecret（百炼必做）
-  - 注意：返回的是**整个阿里云账户余额**，非百炼专项；如百炼是子账号 RAM 用户，可绑定 RAM 权限策略 `bssapi:QueryAccountBalance`
-- `AnthropicAdmin` — Admin API（仅当用户有直连账号，当前**不实现**）
-
-**调度**：
-- 后台任务每 30 分钟拉一次（Bellkeeper Scheduler 注册）
-- 失败重试 + 状态写入 `llm_channel_credentials.status`
-- session 过期检测：连续 401 / 余额连续 N 次为 0 → 标记 `expired`，发 Matrix 告警提醒用户重登录
-
-**路由增强**：模型组新增策略 `balance_aware`
-- 选择候选时：`score = (latency_ewma × (1 + error_rate)) / max(remaining_usd, 1)`
-- 余额 < `min_balance_usd` 阈值时降权（不熔断，避免完全切断）
-- 余额接口 24h 未刷新（凭证可能过期）→ 退化为 `priority_health` 策略
-
-**安全**：
-- `credential_json` 用 `N8N_ENCRYPTION_KEY` 同款 AES-GCM 加密落库（key 来自 `BELLKEEPER_CREDENTIAL_KEY` 新环境变量）
-- 前端展示时永远不返回明文，只返回 masked 预览
+- [ ] 删除 RAGFlow handler/service 文件与路由注册、`Services.RagFlow` 装配、`RagFlowConfig`、模型字段、指标、错误码、默认值
+- [ ] 前端:Datasets 页解耦 RAGFlow 概念(改为索引分区/Collection 语义)、api 客户端方法、日志模块筛选项
+- [ ] n8n 工作流:K06 删除;K07/K08 重写或删除;O01/O02 移除 RagFlow 服务卡片(先 `spool n8n export` 核对线上版本)
+- [ ] SilkSpool 配置:`bundles/knowledge/` 整体下线;`bellkeeper-init.sh` 与 `.env` 移除 `RAGFLOW_*`
+- 验收:`grep -ri ragflow internal/ web/src/ config/ hosts/keeper/n8n-workflows/` 无输出;构建全绿;启动日志无 RAGFlow
 
 ---
 
-### 2.4 后端：协议转换扩展
+## 6. 爬虫运营验收(P1,代码已落地)
 
-#### 2.4.1 Gemini ↔ OpenAI
-- 实现 `internal/llm/converter/gemini.go`
-- 入参 OpenAI `chat/completions` 格式 → 转 Gemini `generateContent`
-- 出参 Gemini 流式 → OpenAI SSE 块
-- 触发条件：渠道 `provider_type = "gemini"`
-- 模型映射：`gemini-2.5-pro` → Gemini API 实际模型名
+代码侧 P0–P4 已完成(归档计划),剩余为运营动作与指标验证:
 
-#### 2.4.2 Reasoning Effort 后缀
-- 解析 model 名：`o4-mini-high` → 上游 `o4-mini` + `reasoning.effort=high`
-- 配置项：`pricing.surcharge_high = 1.2`（高 effort 价格倍率）
-
-#### 2.4.3 Thinking 模式后缀
-- `claude-sonnet-4-6-thinking-2048` → Anthropic `thinking.budget_tokens=2048`
-- `gemini-2.5-pro-thinking-128` → Gemini `thinkingConfig.thinkingBudget=128`
-- 输出阶段：将上游 thinking 块转为 OpenAI `reasoning_content` 字段（new-api 一致）
+- [ ] 用 `/api/rss/validate` 批量验证候选源池,导入第一批 20–40 个高成功率源
+- [ ] 7 天观察:RSS 拉取成功率 > 90%、正文提取成功率按域名可见
+- [ ] 周源健康报告 + 低质量源自动暂停的实际效果确认
+- [ ] LLM 规则优化闭环实跑验证:至少 3 个失败域名自动生成 candidate rule 并通过 trial(依赖 §4.1 rule_optimizer 修复)
+- [ ] 标签质量抽样:50 篇平均标签数 3–8,噪声 < 10%
 
 ---
 
-### 2.5 后端：新端点（Rerank / Embedding）
+## 7. 日志中心优化(P1,延续)
 
-#### 2.5.1 Rerank（合并 §7.1）
-- 端点：`POST /api/llm/v1/rerank`（Cohere/Jina 兼容 schema）
-- 渠道 `provider_type = "rerank"`，初期接 SiliconFlow `BAAI/bge-reranker-v2-m3`
-- 复用熔断/粘性/计费基建
-- 同步在 ROADMAP §7.1 改写为「调用 Bellkeeper Rerank 端点」
-
-#### 2.5.2 Embedding
-- 端点：`POST /api/llm/v1/embeddings`（OpenAI 兼容）
-- 用于 Meilisearch 向量字段（可选，当前 Meili 主用全文，预留）
-- 优先级 P2
+- [ ] **全文检索**:复用 Meilisearch 建 `logs` 索引,LogCenter 双写,`/api/logs/search` + 前端搜索框
+- [ ] **保留与归档**:`retention_days` + 每日归档 `/mnt/knowledge/logs-archive/`(LLM proxy 日志归档已有,推广到 activity/LogCenter)
+- [ ] **实时日志流**:`/api/logs/stream` SSE + 前端实时模式
+- [ ] **告警规则增强**:threshold / pattern / silence 三类 + 去重 + 规则编辑器
+- [ ] **trace_id 跨服务关联**:n8n 起始生成 → Bellkeeper → LLM Proxy 全链路,前端按 trace 聚合视图
 
 ---
 
-### 2.6 后端：日志归档 + 配额告警 + 路由策略 + 错误码分类 + 池子分层 + 告警聚合
-
-#### 2.6.1 `llm_proxy_logs` 归档
-- 后台任务每天清理 30 天前记录 → 归档 `/mnt/knowledge/logs-archive/llm/YYYY-MM.jsonl.gz`
-- 配置项 `llm_proxy.log_retention_days = 30`
-
-#### 2.6.2 配额告警
-- `llm_token_usage_daily` 与 `llm_tokens.quota_*` 实时对比
-- 每小时后台任务：超 80% / 95% / 100% 三档告警 → 走 §2.6.6 聚合器，最终发到 Matrix `ops` 频道
-- 同时支持渠道级月度配额：`llm_channels.quota_monthly_cost_cents`
-
-#### 2.6.3 路由策略增强（原 §2.5）
-- 模型组新增 `strategy = "least_latency"`（EWMA 评分）
-- 模型组新增 `strategy = "balance_aware"`（结合 §2.3.5 真实余额）
-- 模型组新增 `strategy = "task_aware_tiered"`（结合 §2.6.5 任务感知 + 池子分层，**主力策略**）
-- 配置项保存到 `llm_model_groups.strategy_params`（JSON）
-
-#### 2.6.4 错误码语义化熔断
-
-**问题**：当前熔断器只看「请求是否成功」一刀切，但不同上游对失败的语义差别巨大——Kimi Code 订阅 403（周配额耗尽，要等到下次刷新）和 SiliconFlow 429（限流，几秒后可重试）应该走完全不同的熔断时长。
-
-**实施**：新增 `internal/llm/errors/classifier.go`，把响应映射为分类标签：
-
-| 上游 | 状态码 / Body 模式 | 分类 | 熔断时长 |
-|------|-------------------|------|---------|
-| 全部 | 200 + `success: false` 或 body 含 "insufficient quota" | `quota_exhausted` | 长熔断（到下个刷新周期）|
-| Kimi Code | 401 | `auth_failed` | 立即熔断 + 告警「Key 失效」|
-| Kimi Code | 402 | `subscription_invalid` | 1h 熔断 + 告警「订阅验证失败」|
-| Kimi Code | 403 + body `usage limit` | `quota_exhausted` | 熔断到 5h 窗口或 7d 周期末 |
-| Kimi Code | 429 + body `engine overload` | `rate_limited_retry` | 5-30s 短熔断，自动重试 |
-| Kimi Code | 429 + body `quota` | `quota_exhausted` | 同 403 |
-| DeepSeek | `is_available: false` from 余额接口 | `balance_zero` | 长熔断 + 告警「请充值」|
-| anyrouter | 401 + new-api 错误 | `session_expired` | 长熔断 + 告警「重新导入 Cookie」|
-| 通用 | 429 RateLimit-Reset 头 | `rate_limited_retry` | 按 header 时长熔断 |
-| 通用 | 5xx | `server_error` | 标准指数退避 |
-
-数据结构：渠道熔断状态机增加 `breakdown_until_ts`（明确的恢复时间，而非固定 cooldown）+ `breakdown_reason`（分类标签，前端展示）。
-
-**Kimi Code 订阅专项**：因为没有余额接口，配额耗尽只能靠 403/429 检测。同时引入「探测请求」策略：长熔断期间，每 5h 末尾发一个最小成本探测（say "ping"，模型回 1 token），成功 → 解除熔断。
-
-#### 2.6.5 任务感知 × 池子分层路由（核心差异化）
-
-**问题**：上一版方案默认「Kimi Code 沉没成本最优先」，但实际上 Kimi Code 只对 coding 任务有效，对 summary/classify 反而浪费；且当前模型组是平铺的「member 列表 + 优先级数字」，无法表达「按任务类型选不同池子，免费优先，限流时降级」的语义。
-
-**新设计**：路由是**任务类型 × 池子分层**的二维决策。
-
-##### 步骤 1: 任务分类
-
-调用方通过 HTTP 头声明任务类型；未声明时按规则自动归类：
-
-| 任务类型 | 显式声明 | 自动归类规则 |
-|---------|---------|------------|
-| `coding` | `X-Task-Type: coding` | model 名含 `coding`/`code`/`kimi-for-coding`，或 caller_id 来自 Claude Code/Cursor |
-| `classify` | `X-Task-Type: classify` | K01 入库分类、K05 主题打标等内部 caller_id |
-| `summary` | `X-Task-Type: summary` | K05 总结、O01 日报 caller_id |
-| `qa` | `X-Task-Type: qa` | `/api/files/ask` 内部调用 |
-| `long_context` | 自动 | 估算 prompt_tokens > 32K |
-| `chat` | 默认兜底 | 其它所有 |
-
-数据结构：渠道和模型组都可以打 `task_types: [coding, qa]` 标签。
-
-##### 步骤 2: 每种任务类型有独立的候选池子序列
-
-不再是「全局 5 层 tier」，而是**每种任务类型一棵候选树**：
-
-```yaml
-task_routes:
-  coding:
-    - tier: free-coding      # 免费模型擅长 coding 的子集
-      members: [siliconflow-qwen3-8b]  # 限流低速但免费
-    - tier: kimi-code-subscription     # 沉没成本，仅 coding 任务激活
-      members: [kimi-code]
-    - tier: paid-coding
-      members: [deepseek-chat, anyrouter-claude-sonnet]
-
-  classify:
-    - tier: free-fast
-      members: [siliconflow-qwen3-8b, siliconflow-qwen2.5-7b, bailian-free-qwen-turbo]
-    - tier: paid-budget
-      members: [deepseek-chat]
-    # ⛔ classify 任务永远不会用 kimi-code（无该 tier）
-
-  summary:
-    - tier: free-summary
-      members: [bailian-free-qwen-turbo, siliconflow-qwen2.5-7b]
-    - tier: paid-balanced
-      members: [deepseek-chat, bailian-qwen-plus]
-
-  qa:
-    - tier: free-qa
-      members: [bailian-free-qwen-turbo]  # 短上下文 QA
-    - tier: paid-balanced
-      members: [deepseek-chat]
-    - tier: high-quality
-      members: [anyrouter-claude-sonnet]
-
-  long_context:
-    # 自动跳过短上下文模型，直奔大窗口
-    - tier: balanced
-      members: [deepseek-chat]  # 128K
-    - tier: high-quality
-      members: [anyrouter-claude-sonnet]  # 200K
-
-  chat:  # 默认兜底
-    - tier: free
-      members: [siliconflow-qwen3-8b, bailian-free-qwen-turbo]
-    - tier: paid-balanced
-      members: [deepseek-chat]
-    - tier: high-quality
-      members: [anyrouter-claude-sonnet]
-```
-
-##### 步骤 3: 池内候选选择（Pre-flight 检查）
-
-对每个 tier 内的候选 channel，按以下顺序过滤：
-
-1. **健康检查**：channel 熔断中 → 跳过
-2. **Pre-flight token bucket 检查**（关键，针对免费池限流）：
-   - 当前 channel 上的 **目标 model** 的 RPM 桶余量 < 1 → 跳过
-   - 短任务（estimated_duration < 3s，看 model 类型 + prompt 长度估算）+ 桶余量 0 → 可挂起队列等 2s 重试
-   - 长任务 + 桶余量 0 → 立即降级到下一 tier
-3. **Context 长度检查**：prompt_tokens > model 上下文窗口 → 跳过
-4. **balance_aware 评分**（见 §2.3.5）：余额低的降权
-
-第一个通过所有过滤的 channel 即被选中。
-
-##### 步骤 4: Model 级 RPM 桶（细化限流）
-
-当前 token bucket 是 **channel 级**（一个 SiliconFlow 渠道共享 500 RPM）。要细化到 **model 级**：
-
-- 数据结构：`channel_id → model → TokenBucket`
-- SiliconFlow 案例：`siliconflow:Qwen3-8B` 500 RPM，`siliconflow:Qwen2.5-7B` 另外 500 RPM
-- 配置：`llm_channels.model_rpm_overrides JSON` 例如 `{"Qwen3-8B": 500, "Qwen2.5-7B": 500}`（**作为冷启动初值**，运行后由 §2.6.8 自适应学习覆盖）
-- Token bucket 主动限流（避免发请求才被 429）
-
-##### 步骤 5: Coding 任务路由子策略（可配置）
-
-对于 `task_type=coding`，有三种候选池排序方式，通过 `llm_proxy.coding_routing_strategy` 配置切换：
-
-| 策略 | 行为 | 适用场景 |
-|------|------|---------|
-| `free_first`（方案 A） | 免费 coding 模型 → Kimi Code → 付费 | 极致省钱，接受免费模型质量波动 |
-| `quality_first`（方案 B） | Kimi Code → 付费 → 免费（兜底） | 月费已付且额度充足时最大化使用 |
-| `complexity_aware`（方案 C，**默认**） | 按 prompt 复杂度选起点 | 自动平衡成本与质量 |
-
-**方案 C 复杂度判定规则**（按优先级）：
-
-1. **显式声明**：`X-Task-Complexity: simple|complex` 头存在 → 直接采用
-2. **Token 长度**：估算 `prompt_tokens + max_completion`：
-   - < `simple_threshold_tokens`（默认 1000）→ simple
-   - > `complex_threshold_tokens`（默认 4000）→ complex
-   - 之间 → medium
-3. **关键词匹配**：prompt 含「refactor / architecture / debug / implement entire / 重构 / 设计 / 调试 / 实现整个」等 → complex
-4. **回退**：未命中规则 → medium
-
-**复杂度对应候选序**：
-
-| 复杂度 | 候选序 |
-|--------|--------|
-| simple | 免费 coding → 免费通用 → Kimi Code → 付费 |
-| medium | 免费 coding → Kimi Code → 付费 |
-| complex | Kimi Code → 付费 Claude/DeepSeek-Coder → 免费（兜底） |
-
-**配置项**：
-```yaml
-llm_proxy:
-  coding_routing_strategy: complexity_aware  # 默认 C
-  complexity:
-    simple_threshold_tokens: 1000
-    complex_threshold_tokens: 4000
-    complex_keywords: ["refactor", "architecture", "debug", "implement entire",
-                       "重构", "架构", "设计", "调试", "实现整个"]
-```
-
-UI: `/llm/pools` 顶部加策略切换器（radio button A/B/C）+ 复杂度阈值滑块。
-
-##### 步骤 6: 全 tier 都被降级时的处理
-
-- 所有 tier 都不可用 → 返回 503 + Matrix 告警「所有渠道不可用」
-- 路由日志写入 `llm_routing_decisions(request_id, conversation_id, task_type, tried_tiers, final_channel, fallback_reasons[])` 表，前端可视化
-
-##### Kimi Code 接入说明
-
-- 新建渠道 `kimi-code`：`provider_type=anthropic`，`base_url=https://api.kimi.com/coding/`，`models=[kimi-for-coding]`
-- 凭证 `sk-kimi-*` 存 `LLM_KIMI_CODE_API_KEY` 环境变量
-- **仅出现在 `task_routes.coding` 的候选池中**，其它任务类型不会路由到它
-- 因为没有余额接口，仅靠 §2.6.4 错误码熔断 + 5h 探测自恢复
-
-##### 配置 UI
-
-见 §2.7.6 `/llm/pools` 重做后的「任务路由配置」视图。
-
-#### 2.6.6 告警聚合（合并通知）
-
-**问题**：原计划每个事件单独发 Matrix → 凭证过期、配额接近、熔断升级一起来会变成消息轰炸。
-
-**实施**：引入 `AlertAggregator`（`internal/alert/aggregator.go`）：
-
-- **缓冲窗口**：5 分钟（可配置 `alert.flush_interval`）
-- **去重维度**：`(alert_type, channel_id, severity)` 三元组在 1h 内只发一次
-- **凭证类告警**：1h 内同类只发一次（不烦人）
-- **聚合渲染**：5min 内多事件 → 一条 Matrix 消息：
-  ```
-  ⚠️ LLM Proxy 5min 内 3 个事件:
-  • [warning] siliconflow 限流 5 次（已熔断 30s）
-  • [error] kimi-code 配额耗尽，预计 6h 后恢复
-  • [info] deepseek 余额 < $5，建议充值
-  ```
-- **严重级别**：`info` / `warning` / `error` / `critical`，仅 `error+` 触发 Matrix；`info` 仅写 ActivityLog
-- **告警频道路由**：所有 LLM 相关告警 → Matrix `ops` 房间（单频道，避免分散）
-
-数据结构：新增表 `llm_alert_events(id, alert_type, severity, channel_id, message, created_at, dedup_key, flushed_at)`。
-
-#### 2.6.7 会话粘性与 Prompt Cache 保护（核心差异化）
-
-**问题**：每次调用独立选 channel 会发生严重问题——
-- Anthropic prompt cache 基于 `cache_control` 标记，跨 provider 切换缓存全失效（最多损失 90% 成本折扣）
-- 多轮会话中切换 model 导致响应风格突变、记忆错乱（用户体验灾难）
-- OpenAI auto-prefix cache 同理，跨 provider 失效
-
-**实施**：
-
-新增表 `llm_conversation_bindings`:
-```
-conversation_id (string, 主键), channel_id, model, task_type,
-first_seen_at, last_seen_at, expires_at (24h TTL),
-request_count, total_tokens, total_cost_cents
-```
-
-路由器规则：
-1. 请求带 `X-Conversation-ID` 头（推荐 UUID）→ 查绑定表
-2. 已存在绑定 → **必须使用同一 channel + model**；该 channel 熔断了 → **返回 503 让客户端决定**（绝不悄悄切换破坏 cache）
-3. 不存在绑定 → 按 §2.6.5 路由 → 写入绑定（24h TTL）
-4. 请求未传 `X-Conversation-ID` 但 body 含 `cache_control` 标记 → 用 `sha256(messages[0:N])` 作为隐式 conversation_id
-
-绑定 TTL 续期：每次请求 last_seen_at 滑动 24h；超期清理。
-
-**例外**：调用方可显式带 `X-Allow-Channel-Switch: true` 头，跳过粘性（适合无状态短任务）。
-
-**API 接口**：
-- `GET /api/llm/conversations` — 列出活跃绑定
-- `DELETE /api/llm/conversations/:id` — 手动解绑（用于排查）
-
-**前端**：`/llm/conversations` 新增子页（可选 P2），列表显示活跃会话 + 当前绑定 channel + 累计成本。
-
-#### 2.6.8 自适应限流学习（Adaptive Rate Limit Learning，核心差异化）
-
-**问题**：免费模型的真实 RPM/RPD/并发上限**文档常不准确或动态变化**——
-- SiliconFlow 文档说每模型 500 RPM，但实际可能因账号等级 / 时段 / 模型负载浮动
-- 阿里云百炼免费额度模型限速规则不透明
-- 中转站（anyrouter 类）限速跟随上游变动
-- 即使配了 `model_rpm_overrides` 也只是冷启动猜测，long-tail 会持续偏差
-
-**目标**：LLM Proxy 自动观察实际响应、学习真实限流参数，长期持久化并自我修正。
-
-##### 数据结构
-
-新增表 `llm_model_rate_limits`：
-```
-id, channel_id, model,
-configured_rpm,         -- 用户/文档配置的初值（冷启动用）
-configured_rpd,         -- 同上
-learned_rpm_safe,       -- 学习到的安全瞬时 RPM
-learned_rpd_safe,       -- 学习到的安全日上限
-learned_concurrent_max, -- 学习到的最高并发
-reset_pattern,          -- 'sliding_60s' | 'fixed_minute' | 'sliding_5h' | 'sliding_7d' | 'daily_utc8' | 'daily_utc'
-confidence_score,       -- 0.0-1.0, 观察次数越多越高
-last_429_at,
-last_429_observed_rpm,
-last_adjust_at,
-locked,                 -- bool, true 时不再自动学习（管理员手动锁定）
-adjustment_log JSON,    -- 最近 50 次调整记录 [{ts, from, to, reason}]
-created_at, updated_at
-```
-
-##### 学习算法
-
-**阶段 1: 冷启动**
-- 用 `configured_rpm` 的 **50%** 作为初始 `learned_rpm_safe`（保守，避免一上来就触发 429）
-- `confidence_score = 0.1`
-
-**阶段 2: 渐进探测（无 429）**
-- 后台任务每 5 分钟评估：当前 5min 内成功率 100% **且** 桶余量持续 < 30% → 说明上限可能更高
-- 将 `learned_rpm_safe` 上调 10%（最高不超过 `configured_rpm × 1.2`，避免被文档限制坑死）
-- `confidence_score += 0.05`（最高 1.0）
-- 写入 `adjustment_log`
-
-**阶段 3: 遇到 429 → 立即降级**
-- 立即将 `learned_rpm_safe` 调到 **当前瞬时实际 RPM × 0.85**
-- 记录 `last_429_observed_rpm`
-- `confidence_score` 不变（429 是真实数据，反而提高对该值的信任）
-- 触发熔断 30s（由 §2.6.4 错误码分类决定）
-
-**阶段 4: 周期识别**
-- 后台任务每天分析 `llm_proxy_logs`，统计 429 出现的时间模式：
-  - 每分钟 0 秒附近集中 → `fixed_minute`
-  - 每 5 小时整点 → `sliding_5h`（典型 Kimi Code）
-  - 每天 0 点 UTC+8 → `daily_utc8`（阿里云典型）
-  - 均匀分布 → `sliding_60s`
-- 周期识别后，对应调整 RPM 桶的 reset 时机
-
-**阶段 5: 日上限（RPD）学习**
-- 首次出现 `quota_exhausted` 错误时，记录当天累计请求数为 `learned_rpd_safe × 0.95`
-- 次日同样位置触发即确认值；不触发则慢慢上调
-- 周期为 `daily_*` 的情况下，在 95% 阈值触发降级（保留余量）
-
-##### 持久化与回滚
-
-- 每小时把内存中的 `learned_*` 写回 DB（避免重启丢失）
-- 启动时从 DB 加载（连续学习）
-- `adjustment_log` 保留最近 50 次，便于排查异常调整
-
-##### 异常保护
-
-- **暴跌检测**：若 1 小时内 `learned_rpm_safe` 下降 > 50%，发 Matrix 告警（可能上游策略变了，需人工确认）
-- **学习锁定**：管理员可在 UI 上 `locked=true`，禁止自动学习（用于已知精确限制的渠道，如付费 SLA）
-- **冷启动期保护**：`confidence_score < 0.3` 时即使学习到高值也限制为 `configured_rpm × 0.8`
-
-##### 与现有 Pre-flight 桶检查的关系
-
-- §2.6.5 步骤 3 的 Pre-flight 检查使用的是 `learned_rpm_safe`（而非 `configured_rpm`）
-- 桶余量计算：`learned_rpm_safe - 最近 60s 内的请求数`
-- 完全自动化，无需运维干预
-
-##### API 接口
-
-- `GET /api/llm/rate-limits` — 列出所有 channel × model 的学习状态
-- `GET /api/llm/rate-limits/:channel/:model/history` — 查看调整历史
-- `POST /api/llm/rate-limits/:id/lock` — 锁定/解锁自动学习
-- `POST /api/llm/rate-limits/:id/reset` — 重置学习（回到 configured_rpm × 0.5 重新开始）
-
-##### 前端：`/llm/channels` 行展开 + 学习历史图
-
-- 渠道行展开后显示每个 model 的学习状态：
-  - 当前 `learned_rpm_safe` vs `configured_rpm`，差异条形图
-  - 置信度环形图
-  - 最近 429 时间 + 当时瞬时 RPM
-  - 周期识别结果（`sliding_60s` / `daily_utc8` 等）
-- 「学习历史」时序图：过去 7/30 天 `learned_rpm_safe` 变化曲线，叠加 429 事件点
-- 「锁定」开关 + 「重置学习」按钮
+## 8. Bellkeeper 前端(P1–P2,延续并校准)
+
+- [ ] **P1 爬取队列可视化**(后端 API 全齐,前端无页面):`/knowledge/queue` 任务列表/重试/取消 + 域名健康/限速状态(对应 06-09 新增的 domains/audit/blocked 端点)+ Worker 详情
+- [ ] **P1 Vault 预览增强**:Markdown 渲染、frontmatter 折叠、`[[wikilink]]` 可点跳转(PKB 原子知识网落地后价值放大)、附件内联
+- [ ] **P1 知识问答改造**:多轮上下文、引用展示(路径+片段+评分+跳转)、SSE 流式、失败降级提示
+- [ ] **P2 Datasets → Collection 改造**:解耦 RAGFlow 含义(随 §5 一起做)
+- [ ] **P2 Matrix Admin 补全**:消灭「未实现」toast;命令 DB 动态加载;通知规则可视化编辑
+- [ ] **P2 Dashboard 重做**:核心指标卡 + 时间序列 + 活动流
 
 ---
 
-### 2.7 前端：UI 全面重做（核心交付物）
+## 9. 工程质量(P2,延续 + 架构审查第三阶段残留)
 
-> 设计原则：参考 new-api 视觉密度，但贴合 Bellkeeper 既有设计语言（Tailwind + shadcn-style）。
-
-#### 2.7.1 `/llm` Dashboard 重做（替换当前 `LLMOverview`）
-
-**布局（自上而下）**：
-1. **顶部 KPI 卡片行**（5 个）：今日请求数 / 今日 Token 量 / 今日成本（$） / 活跃渠道数 / 错误率
-2. **「估算 vs 真实」对比条**（核心差异化）：每渠道一行，左侧本地估算月度消费，右侧上游真实余额/已用，差异超 10% 高亮黄色
-3. **趋势图区**（左 2/3，右 1/3 分栏）：
-   - 左：折线图，24h/7d/30d 切换，可叠加多曲线（请求数/Token/成本）
-   - 右：渠道健康饼图 + 模型组健康卡片堆叠
-4. **Top N 排行**（三列）：消耗 Top10 Token、调用 Top10 模型、错误 Top10 渠道
-5. **实时事件流**（底部）：最近 20 条 LLM 调用，状态/Token/成本一行展示
-
-#### 2.7.2 `/llm/tokens` 新增页（对标 new-api Token 页）
-
-- 表格列：Name、Key 前缀、允许模型、配额（请求/Token/成本三 bar）、最近使用、状态
-- 操作：新建（**创建后弹窗一次性展示完整 key**）、重置 key、编辑配额、禁用、删除
-- 行展开：当前月用量明细 + 趋势小图
-- 创建表单：name、模型多选下拉（从渠道聚合）、配额三项、过期时间
-
-#### 2.7.3 `/llm/billing` 新增页（计费视图）
-
-- 顶部切片器：时间范围 / group_by（Token/渠道/模型/日期）
-- 主表：聚合后的成本/Token/请求数，可排序
-- 趋势图：堆叠面积图（按 group_by 维度堆叠）
-- 配额预警卡片区：即将超额的 Token/渠道高亮
-
-#### 2.7.4 `/llm/pricing` 新增页
-
-- 表格：渠道 × 模型 × input/output/cached 单价
-- 操作：CRUD、批量复制（同一渠道下复制定价到新模型）
-- 「测试计算」工具：输入 model + token 数 → 实时显示成本
-
-#### 2.7.5 现有页面增强
-
-| 页 | 增强项 |
-|----|--------|
-| `LLMChannels` | 增加「测试连接」按钮（发探测请求）+「自动探测模型」（拉 `/v1/models`）+ 显示渠道月成本 + **真实余额徽章**（绿/黄/红，悬停显示拉取时间） |
-| `LLMConfig` | API Key 改为「环境变量名 / 直接粘贴」双模 + 模型多选下拉（不再手填 JSON）+ 表单分步引导 + **「绑定余额来源」分页**（选 provider 类型 + 填凭证，session 类型给「从浏览器导入 Cookie」工具） |
-| `LLMLogs` | 增加 cost 列、cached_tokens 列、trace_id 链接（跳 LogCenter）、按 Token 筛选 |
-| `LLMGroups` | 路由策略可视化（`least_latency` 时展示各成员 EWMA 评分，`balance_aware` 时展示各成员剩余余额折算分数） |
-| `LLMPricing` | 在每行末尾对比上游真实结算价（若可拉取），偏差 > 15% 红字提示「需校准」 |
-
-#### 2.7.6 `/llm/pools` 新增页（任务路由配置 — 差异化核心）
-
-承接 §2.6.5 任务感知分层路由 + §2.6.7 会话粘性，需要好用的可视化配置：
-
-**主区域：任务路由矩阵**
-- 行：任务类型（coding / classify / summary / qa / long_context / chat）
-- 列：池子分层（free / balanced / high_quality / overflow）
-- 单元格：该任务-该层的候选 channel 列表，可拖拽编辑
-- Kimi Code 仅在 `coding × kimi-code-subscription` 这一格出现，其它任务类型该格为「不可用」（灰显）
-
-**右侧栏：Pre-flight 与限流监控**
-- 每个 channel 的 model 级 RPM 桶余量条
-- 当前 1min 内被「桶不足」跳过的次数
-- 配额耗尽倒计时（如 Kimi Code 5h 窗口 / 7d 周期）
-
-**会话粘性面板**（来自 §2.6.7）：
-- 列出最近 24h 活跃 `conversation_id` 绑定
-- 显示每个会话当前 channel、累计 token、累计成本
-- 可手动解绑（用于排查粘性卡死问题）
-
-**模拟器**：
-- 选「任务类型 + 估算 token 数 + 是否带 conversation_id」→ 可视化路由决策过程：tier 1 → 候选 [A,B] → A 桶不足跳过 → B 选中
-- 用于配置后验证策略是否符合预期
-
-**告警面板**：右上角浮动小组件，订阅 `/api/llm/alerts/recent`，5min 内事件以圆形数字标徽显示（来自 §2.6.6）。
-
-#### 2.7.7 顶部导航重组
-
-当前 `/llm/*` 子页扁平，新结构：
-```
-/llm                  概览 (Dashboard)
-/llm/tokens           Token 管理
-/llm/channels         渠道运行时
-/llm/groups           模型组运行时
-/llm/pools            池子分层配置 ⭐ 差异化
-/llm/billing          计费与统计
-/llm/pricing          定价配置
-/llm/config           渠道/组配置 (合并到一个工作台)
-/llm/logs             请求日志
-/llm/alerts           告警历史（关联 §2.6.6）
-```
-
-侧栏增加分组：「运行时」「配置」「计费」「告警」四段折叠。
+- [ ] 单元/集成测试:`file_ingestion` / `crawl_queue` / `llm_proxy` / `classify` / `pkb` 核心 case;testcontainers 端到端;目标覆盖 60%
+- [ ] API 契约测试或 OpenAPI/类型生成(防前后端契约漂移——审查报告第三阶段)
+- [ ] 清理假测试,补行为断言(ASSISTANT-GUIDELINES 红线)
+- [ ] golang-migrate 接入:`bellkeeper migrate up/down`(已有显式 runtime 表迁移,补版本化与回滚)
+- [ ] 配置热重载推广:`system_settings` 通用动态配置 + `/settings` 分类完善
 
 ---
 
-### 2.8 迁移与停服计划
+## 10. 知识问答优化(P2,校准)
 
-1. **W1**：完成 §2.2 §2.3 §2.4（后端 Token + 计费 + Gemini）
-2. **W2**：完成 §2.3.5 §2.5 §2.6.1-2.6.3（真实余额 + Rerank + 基础归档/告警/路由）
-3. **W3**：完成 §2.6.4 §2.6.5（错误码分类 + Kimi Code 探测 + 任务感知池子分层 + Model RPM 桶 + Coding 三策略）
-4. **W4**：完成 §2.6.6 §2.6.7 §2.6.8（告警聚合 + 会话粘性 + 自适应限流学习）
-5. **W5**：完成 §2.7.1-2.7.4（Dashboard + Token + Billing + Pricing 前端）
-6. **W6**：完成 §2.7.5-2.7.7（现有页增强 + Pools 矩阵 + 学习历史图 + 导航）+ 迁移：
-   - 从 new-api 导出 Token 列表 → 在 Bellkeeper Web 重建（手工，<10 个）
-   - 新建 Kimi Code 渠道：base_url `https://api.kimi.com/coding/`，key 存 `LLM_KIMI_CODE_API_KEY`，仅放入 `task_routes.coding` 候选池
-   - 配置任务路由矩阵（coding / classify / summary / qa / chat 各自的候选序列）+ 选定 coding 子策略（默认 complexity_aware）
-   - 调用方迁移：Open WebUI / 其他工具的 base_url 从 new-api 改为 `https://bellkeeper/api/llm/v1`，并加 `X-Conversation-ID` 头
-   - 观察 7 天调用量稳定后，`docker stop new-api` → `docker rm`
-   - 清理 `bundles/` 中 new-api 相关模板
+> Rerank 端点(`/api/llm/v1/rerank`)已随 LLM Proxy Tier 7 建成;本节是**消费侧**接入。
 
-**验收标准**：
-- new-api 容器停止运行 7 天后无回滚需求
-- `/llm/billing` 能看到上月按 Token/渠道/模型的成本切片
-- 单个 Token 触发配额能在 Matrix `ops` 频道收到告警（且 5min 内同类告警合并为 1 条）
-- Gemini 模型可通过 Bellkeeper 调用（K05 总结链路可选切换验证）
-- **Kimi Code 订阅验证**：调用 `kimi-for-coding` 成功；触发 403 → 自动熔断且 5h 后探测自恢复；周配额满 → Matrix 收到一条聚合告警
-- **任务感知路由验证**：发 `X-Task-Type: classify` 请求**永远不会**路由到 Kimi Code（仅 coding 才用）
-- **Coding 三策略验证**：切换 `coding_routing_strategy` 配置 → 同一 coding 请求路由到的 channel 序列符合该策略；默认 C 时短 prompt 走免费、长 prompt 走 Kimi Code
-- **会话粘性验证**：带 `X-Conversation-ID: xxx` 连续 10 次请求，全部命中同一 channel；Anthropic prompt cache hit rate > 80%（vs 无粘性约 0%）
-- **Model 级 RPM 桶验证**：SiliconFlow Qwen3-8B 跑满 500 RPM 时，Qwen2.5-7B 仍可继续接收请求（说明分桶生效）
-- **自适应限流验证**：
-  - 故意配置 `configured_rpm=1000`（超过实际） → 运行 30 分钟后 `learned_rpm_safe` 应自动降至实际值 ±20% 范围
-  - 故意配置 `configured_rpm=10`（远低于实际） → 运行 24 小时后 `learned_rpm_safe` 应自动上调（不超过 `configured_rpm × 1.2`，受冷启动保护）
-  - 触发一次 quota_exhausted → 次日同一时间触发率应 < 10%（学习到了日上限）
-  - 学习历史图能展示过去 7 天的调整轨迹
+- [ ] knowledge_ask 接 Rerank:召回 top-20 → rerank → top-5(现成端点零新增基建);抽样 20 问对比精度
+- [ ] 上下文压缩:片段独立摘要后拼接,超阈值才启用
+- [ ] 引用结构化:`{file_path, line_range, score, excerpt}` + 前端跳转高亮
+- [ ] 多源检索:可选包含 vault(PKB 长青卡片)/ todos
+- [ ] 历史会话:`qa_sessions/qa_messages` + Matrix thread 上下文
 
 ---
 
-### 2.9 工期估算
+## 11. 运维与可观测性(P2,延续)
 
-| 阶段 | 工期 |
-|------|------|
-| §2.2 Token 体系（后端） | 1.5 天 |
-| §2.3 定价+成本（后端） | 1 天 |
-| §2.3.5 真实余额同步（后端，4 个 provider） | 2.5 天 |
-| §2.4 协议扩展（后端） | 1.5 天 |
-| §2.5 Rerank/Embedding（后端） | 1 天 |
-| §2.6.1-2.6.3 归档+告警+路由（后端） | 1 天 |
-| §2.6.4 错误码分类 + Kimi Code 探测（后端） | 1.5 天 |
-| §2.6.5 任务感知 × 池子分层 + Model 级 RPM 桶 + Coding 三策略（后端） | 3 天 |
-| §2.6.6 告警聚合器（后端） | 1 天 |
-| §2.6.7 会话粘性 + Prompt Cache 保护（后端） | 1.5 天 |
-| §2.6.8 自适应限流学习（后端，含周期识别）| 2.5 天 |
-| §2.7 前端全套（含 /llm/pools 矩阵 + 模拟器 + 学习历史图） | 7 天 |
-| §2.8 迁移 + 验证 | 1.5 天 |
-| **合计** | **26.5 天**（含缓冲约 5.5 周） |
-
-> 原 ROADMAP §0 中 P1 LLM Proxy 估「3 天」过于乐观，此处修正为 26.5 天 / 5.5 周（含真实余额、任务感知池子分层、错误码分类、会话粘性、告警聚合、**自适应限流学习**、Kimi Code 接入、Coding 三策略 这八项差异化能力）。
+- [ ] Prometheus 抓取 + Grafana 看板(bundles/observability/):全局概览 / Bellkeeper 内部 / n8n SLA
+- [ ] 容器资源压力检测(cAdvisor)+ O04 阈值告警
+- [ ] 备份恢复验证:每月自动恢复演练 + 失败告警
+- [ ] n8n 工作流 SLA 指标:executions 推送/拉取 → `workflow_executions` 表 + 看板
 
 ---
 
-## 3. n8n 工作流优化 (P1)
+## 12. 远期(P3)
 
-### 3.1 调用链路压缩
+- [ ] K07 Obsidian 回流端到端验证(或确认删除)
+- [ ] 文件级权限标签(`access: public|private|shared`)+ 检索过滤
+- [ ] 存量知识批量导入(OWASP/MITRE 等,`bulk_import` 走 PKB 打分管线 + 指定领域)
+- [ ] Vault 在线编辑(CodeMirror/Monaco + LiveSync 冲突检测)
+- [ ] 元数据批量操作(多选改 tag/移动/删除,二次确认)
+- [ ] 多用户与 ACL(待评估必要性)
 
-**问题**：当前部分链路超过 4 层（n8n → n8n webhook → Bellkeeper → 下游）。
-
-| 链路 | 现状 | 优化 |
-|------|------|------|
-| K02 → K01 webhook → Bellkeeper | n8n-to-n8n 间接调用 | K02 直接调 Bellkeeper `/api/files/ingest/url`，移除 K01 webhook 中转 |
-| K02 RSS XML 解析 | 当前在 n8n JS 节点中正则解析 | 下沉到 Bellkeeper `/api/rss/parse`，K02 只做调度 |
-| K08 → K05 webhook | K08 通过 K05 中转走 LLM Proxy | K08 直接调 `/api/llm/v1/chat/completions`（如保留 K08）|
-
-### 3.2 通知链路降层
-
-**问题**：n8n → B01 → Bellkeeper `/api/matrix/notify` → NATS → worker → Matrix（5 层）。
-
-**评估**：当前 NATS 是必要的（重试 + 限速 + 异步），但 B01 这一层是否仍需要？
-- **方案 A**：保留 B01 作为格式化与默认值兜底（推荐）
-- **方案 B**：移除 B01，所有工作流直接调 `/api/matrix/notify`（更扁平但每个工作流要重复格式化逻辑）
-
-**决策建议**：保留 B01，但在 Bellkeeper Notify 接口侧支持模板（`template_id` + `params`），让 B01 只做模板渲染。
-
-### 3.3 工作流统一管理
-
-**问题**：当前 20 个工作流，激活状态分散，命名虽然遵循 B/K/M/O 但运行时缺少全局视图。
-
-**实施**：
-- Bellkeeper `/workflows` 页扩展：增加批量激活/停用、批量启用/禁用、Tag 分组视图
-- 新增 `/workflows/dependencies` 调用图视图（n8n → Bellkeeper 调用关系自动绘制）
-
-### 3.4 死代码工作流回收
-
-| 工作流 | 处理建议 |
-|--------|---------|
-| K06-parse-fallback | 直接删除（RAGFlow 解析兜底，已无用） |
-| K08-daily-digest | 删除或合并到 O01（O01 已包含日报）|
-| K07-obsidian-sync | 重写为「从 working/ 回流到 Vault」适配器；如 6 月仍未启用则删除 |
-| O02.1-todo-sync | 验证后并入 O02 或 M02 |
-
-### 3.5 工作流 SLA 指标
-
-**实施**：
-- n8n executions 通过 webhook 推送到 Bellkeeper（n8n native 不支持，需 `executions.success` webhook 或后台任务拉取）
-- 新增表 `workflow_executions(workflow_id, start_time, duration_ms, status, error)`
-- 看板：成功率、平均时长、最近 100 次执行趋势
+**已取消项**:
+- ~~智能归档建议(旧 §9.2:扫描 working/ 超 30 天文档 LLM 评估沉淀)~~ — 已被 PKB `pkb-curate` 漏斗全面取代(raw 层打分分流即同一目的,且已常态化调度)
+- ~~Embedding 端点(旧 §2.5.2)~~ — Meili 主用全文,无消费方;有真实需求再立项(防死代码)
+- ~~n8n 通知链路降层(旧 §3.2)~~ — 维持 B01 模板渲染 + NATS 现状,无实际痛点
 
 ---
 
-## 4. 日志中心优化 (P1)
-
-当前 Bellkeeper 已有 LogCenter（entries/sources/dashboard/alerts），但功能比较表层。
-
-### 4.1 日志全文检索
-
-**问题**：当前日志按 module/action/status 过滤，长消息体不可检索。
-
-**实施**：
-- 复用 Meilisearch（已部署），创建 `logs` 索引
-- LogCenter 写入时双写：DB（结构化）+ Meili（全文）
-- `/api/logs/search?q=keyword` 走 Meili，`/api/logs` 走 DB 分页
-- 前端 `/logs/dashboard` 增加搜索框
-
-### 4.2 日志保留与归档
-
-**问题**：`activity_logs` 表无生命周期，长时间累积会变慢。
-
-**实施**：
-- 配置项 `logging.retention_days = 90`
-- 后台任务每天清理过期记录（先归档到 `/mnt/knowledge/logs-archive/YYYY-MM.jsonl.gz` 再删除）
-- Meili 索引同步清理
-
-### 4.3 实时日志流
-
-**问题**：调试时需要 tail -f 容器日志，无 Web 入口。
-
-**实施**：
-- Bellkeeper 新增 `/api/logs/stream` SSE 端点
-- 前端 `/logs/dashboard` 新增 "实时" 模式
-- 仅订阅最近 5 分钟事件，避免大量历史回放
-
-### 4.4 告警规则增强
-
-**问题**：当前告警规则简陋，仅支持单条规则匹配。
-
-**实施**：
-- 规则类型：`threshold`（计数）/ `pattern`（正则）/ `silence`（一段时间无日志即告警）
-- 告警渠道：Matrix 房间 / Webhook / 邮件（暂不实施邮件）
-- 告警去重：同一规则 X 分钟内只发一次
-- 前端 `/logs/alerts` 增加规则编辑器
-
-### 4.5 跨服务日志关联
-
-**问题**：一次入库失败的根因可能跨 n8n → Bellkeeper → LLM Proxy → 外部 LLM 多个系统，日志分散。
-
-**实施**：
-- 引入 `trace_id`（从 n8n 触发起就生成，传递到 Bellkeeper Header）
-- 所有日志写入时强制带 `trace_id`
-- 前端 `/logs/dashboard` 增加 "按 trace 聚合" 视图，点 trace_id 看完整链路
-
----
-
-## 5. Bellkeeper 前端优化 (P1-P3)
-
-四大核心域（Knowledge / LLM / Logs / Matrix）已重构完成，现在需要补功能深度。
-
-### 5.1 P1: 爬取队列可视化
-
-**当前**：CrawlQueue 后端能力完整（任务、Worker、熔断），但前端没有专门页面，运维查看依赖 API 或日志。
-
-**实施**：
-- 新增页面 `/knowledge/queue`
-  - 任务列表：URL、状态（pending/running/success/retrying/blocked/dead）、worker、错误信息、重试次数
-  - 任务操作：手动重试、取消、查看完整日志
-  - 状态分布饼图 + 最近 24 小时趋势线
-- 新增页面 `/knowledge/workers`
-  - Worker 实例列表：channel、状态、熔断器状态、连续失败数、最近请求时间
-  - 操作：手动开/关熔断、调整并发度
-
-### 5.2 P1: Vault 文件预览增强
-
-**当前**：`/knowledge/files` 提供 Vault 浏览，但 Markdown 内联渲染、frontmatter 高亮、链接预览缺失。
-
-**实施**：
-- 引入轻量 Markdown 渲染器（如 `markdown-it` 或 `marked`）
-- frontmatter 区折叠 + 元数据快速编辑（标签、分类、wikilinks）
-- `[[wikilink]]` 解析为可点跳转的 Vault 内链接
-- 附件图片内联展示（从 `notes-assets/` 解析）
-
-### 5.3 P1: 知识问答改造
-
-**当前**：`/knowledge/ask` 是单轮问答，引用展示弱。
-
-**实施**：
-- **多轮上下文**：会话内保留最近 N 轮，UI 支持「新建会话」/ 「分享会话链接」
-- **引用展示**：每条引用展示文件路径、片段、相关度评分；点引用跳到 `/knowledge/files` 对应位置
-- **流式响应**：SSE 边生成边展示
-- **降级提示**：当问答失败（LLM 异常、检索为空）给出明确原因和建议
-- **检索调试模式**：开关 `?debug=1` 展示中间检索结果、Rerank 评分
-
-### 5.4 P2: Tag / Dataset 改造
-
-**当前**：Datasets 页面仍包含 RAGFlow Dataset 概念。
-
-**实施**：
-- 重命名 Datasets → Collections（或保留 Dataset 但解耦 RAGFlow 含义）
-- Collection 仅作为：标签分组 + Meilisearch 索引分区 + 默认存储路径
-- 操作：新增/编辑 Collection、关联标签、查看包含的文档数、跳转到 `/knowledge/files?collection=xxx`
-
-### 5.5 P2: Matrix Admin 完善
-
-**当前**：Matrix 页面框架完整，但实际功能存在 TODO（如「房间删除」前端 toast「未实现」）。
-
-**实施**：
-- 完成所有标注「未实现」的功能（鼠标移到按钮上能预期到的操作都应工作）
-- 命令管理：从 DB 动态加载（替代硬编码注册）
-- 通知规则编辑器：可视化配置 `房间 + 关键词 → 频道` 路由
-
-### 5.6 P2: Dashboard 重做
-
-**当前**：Dashboard 简单展示服务状态。
-
-**实施**：
-- 上半区：核心指标卡片（今日新文档数、待办数、LLM 调用数、爬取队列长度、最近错误数）
-- 中部：时间序列图（24h 入库趋势、LLM 延迟、爬取成功率）
-- 下半区：最近活动流（合并 ActivityLog + 重要事件）
-- 集成 `/llm/groups/status` 健康卡片
-
-### 5.7 P3: Vault 在线编辑
-
-**实施**（远期）：
-- 编辑器：CodeMirror 6 或 Monaco
-- 双向同步：写入 → Bellkeeper API → 文件落盘 → CouchDB LiveSync 通知（如 K07 启用）
-- 冲突处理：基于 mtime 检测，提示「文件已被外部修改」
-
-### 5.8 P3: 元数据批量操作
-
-**实施**：
-- `/knowledge/files` 列表支持多选
-- 批量改 tag、批量移动、批量删除
-- 操作前预览（不可逆操作必须二次确认）
-
----
-
-## 6. Bellkeeper 后端功能优化 (P1-P3)
-
-### 6.1 P1: 索引增量更新
-
-**当前**：Meilisearch 索引重建是全量的（`/api/files/rebuild`），新增/编辑文件后需要等下次全量。
-
-**实施**：
-- 文件入库成功后异步触发单文件 reindex（`indexer.QueueFile(path)`）
-- 文件删除事件同步删除 Meili 文档
-- 后台任务每小时校对 DB 与 Meili 文档数量，发现漂移自动修复
-
-### 6.2 P1: 文件入库幂等性
-
-**当前**：URL 去重生效，但「同一 URL 强制重新入库」（更新已存在文件）路径不清晰。
-
-**实施**：
-- 接口扩展：`POST /api/files/ingest/url` 增加 `force_refresh: true` 参数
-- 强制刷新时：保留原 frontmatter `id`，body 重写，更新 `updated_at`
-- 历史版本可选保存到 `working/.history/<id>/<timestamp>.md`
-
-### 6.3 P1: 配置热重载完善
-
-**当前**：LLM Proxy 配置已支持 DB 热重载，但其他配置项（爬取并发数、提取器超时、Meili 索引名）仍需重启。
-
-**实施**：
-- `system_settings` 表扩展为通用动态配置
-- 关键配置项注册到 `ConfigManager.Watch(key, callback)`
-- Web UI `/settings` 完善配置项分类（爬取 / 提取 / 索引 / 通知）
-
-### 6.4 P2: Webhook 接入层
-
-**当前**：外部系统给 Bellkeeper 推送数据只能通过 API Key 直连或 n8n 中转。
-
-**实施**：
-- 新增表 `webhooks(id, name, secret, url_slug, handler, enabled)`
-- 端点 `POST /webhooks/:slug` 校验 HMAC + 路由到 handler
-- 用途：GitHub PR 通知 → Matrix、Webhook 触发知识入库
-
-### 6.5 P2: 单元 / 集成测试
-
-**当前**：测试覆盖严重不足，仅 2 个测试文件。
-
-**实施**：
-- 关键 service：`file_ingestion`、`crawl_queue`、`llm_proxy`、`classify` 各至少 5 个核心 case
-- 关键 handler：表驱动测试覆盖参数校验、权限、错误码
-- 集成测试：用 testcontainers 起 Postgres + Meili，跑端到端入库 → 检索流程
-- 目标：核心模块覆盖率 60%
-
-### 6.6 P2: golang-migrate 接入
-
-**当前**：靠 GORM AutoMigrate 自动建表。生产环境无版本化、无回滚。
-
-**实施**：
-- 启用 `migrations/` 目录的 SQL 文件（已有 `001_init.sql`）
-- 用 `golang-migrate/migrate` 包裹，`bellkeeper migrate up/down` 子命令
-- AutoMigrate 保留为开发环境兜底
-
-### 6.7 P3: 多用户与 ACL
-
-**当前**：通过 Authelia 单用户访问。
-
-**实施**（待评估必要性）：
-- 文件 / 标签 / 房间 / 频道粒度的 ACL
-- 角色：`owner` / `editor` / `viewer`
-- API Key 绑定角色 + IP 白名单
-
----
-
-## 7. 知识库与问答优化 (P2)
-
-### 7.1 Rerank
-
-**当前**：Meilisearch 一次召回，无 Rerank。
-
-**实施**：
-- 优先依赖 §2.5.1 新增的 Bellkeeper Rerank 端点（`/api/llm/v1/rerank`，复用熔断/粘性/计费）
-- 召回 top-20 → 调用本地 Rerank → top-5
-- LLM 调用接 Rerank 后的结果
-- 评估：抽样 20 个真实问题，对比有无 Rerank 的命中精度
-
-### 7.2 上下文压缩
-
-**当前**：检索到的文档片段直接拼接进 prompt，长文档很快撑爆 token。
-
-**实施**：
-- 引入 `llm.compress` 步骤：每个片段独立摘要为 200 字，再拼接
-- 提示词模板：`基于以下摘要回答问题，摘要中可能包含原文链接`
-- 当总 token 超过阈值时启用，否则跳过
-
-### 7.3 引用与跳转
-
-**当前**：引用展示为纯文本片段。
-
-**实施**：
-- 每个引用包含 `{file_path, line_range, similarity_score, excerpt}`
-- 前端引用卡片支持点击跳到 `/knowledge/files?path=<path>#L<line>`
-- 高亮命中片段
-
-### 7.4 多源检索
-
-**当前**：仅检索 `raw|working`。
-
-**实施**：
-- 可选包含 `KNOWLEDGE/`（PKB 长青笔记）— 默认关闭，UI 开关
-- 可选包含 `todos/`（Memos 同步的待办）— 用于回答「我有哪些待办」
-
-### 7.5 历史会话
-
-**当前**：每次问答是无状态的。
-
-**实施**：
-- 表 `qa_sessions(id, user, started_at, last_active)` + `qa_messages(session_id, role, content, citations)`
-- API `/api/files/ask` 接受 `session_id` 参数
-- Matrix M03 端按 thread_id 维护会话上下文
-
----
-
-## 8. 运维与可观测性 (P2)
-
-### 8.1 Prometheus + Grafana
-
-**当前**：Bellkeeper 暴露 `/metrics`，但无 Grafana 抓取。
-
-**实施**：
-- 新增 bundle `bundles/observability/`（Prometheus + Grafana + Loki 可选）
-- 抓取目标：Bellkeeper、n8n、Meilisearch、NATS、Postgres exporter
-- 看板模板：
-  - SilkSpool 全局概览（HTTP QPS、错误率、延迟、容器健康）
-  - Bellkeeper 内部（LLM Proxy 各渠道、CrawlQueue、Meili 索引、Matrix Gateway）
-  - n8n 工作流（每个工作流的执行次数 / 成功率 / 时长）
-
-### 8.2 容器健康深化
-
-**当前**：O04-container-health 工作流监控容器存活，但无资源压力检测。
-
-**实施**：
-- 集成 `cAdvisor`（Prometheus 抓取）获取 CPU/内存/IO
-- O04 增加资源告警阈值（CPU > 80% 5 分钟、内存 > 90%、磁盘 > 85%）
-- 告警发到运维频道，附带最近日志摘要
-
-### 8.3 备份验证
-
-**当前**：O05-auto-backup 执行备份，但无定期恢复验证。
-
-**实施**：
-- 每月一次自动恢复验证：到测试环境恢复最近一份备份，跑健康检查
-- 验证失败发 Matrix 告警
-
----
-
-## 9. 知识库 MVP 演进 (P3)
-
-### 9.1 K07 端到端验证
-
-**任务**：
-- 编辑 Obsidian Vault 笔记 → LiveSync → CouchDB `_changes` → K07 触发
-- K07 重写为「文件回流」适配器：从 CouchDB 拉取变更 → 写入 `working/` 或 `pkb-assets/`
-- 验证：编辑 → 5 分钟内出现在 `/knowledge/files` 列表
-
-### 9.2 智能归档建议
-
-**实施**：
-- 后台任务每周扫描 `working/` 中超过 30 天未访问的文档
-- LLM 评估文档「值得沉淀到 PKB 吗？」→ 高分文档列表推送到 Matrix `digest` 频道
-- 用户在 Bellkeeper Web 一键归档（移动到 `pkb-staging/`，再人工整理进 Obsidian）
-
-> **交叉引用（事实源 §10）**：归档判定复用 §10.2「三维加权打分」，落盘目录统一到 §10.1「raw / archive / vault」分层（本节正文 `working/`·`pkb-staging/` 为旧表述，实现以 §10.1 为准）。本节差异化定位 = §10 实时入库闭环之外的**存量定期回扫**补充场景（P3），不另立打分标准。
-
-### 9.3 文件级权限标签
-
-**实施**：
-- frontmatter 增加 `access: public | private | shared` 字段
-- 检索/问答时根据当前用户身份过滤
-- Matrix 通知避免泄漏 private 文档
-
-### 9.4 存量知识导入
-
-**实施**：
-- OWASP / MITRE ATT&CK / 各厂商安全文档批量导入到 `KNOWLEDGE/security/`
-- 导入工具：`lib/tools/bulk_import.py` 接受 URL 列表或 sitemap
-- 入库后建立专门 Collection，问答时可指定范围
-
-> **交叉引用（事实源 §10）**：批量导入走 §10.3 入库管线（经 §10.2 打分分流）+ §10.5「领域 / 标签可配置」（§10.5 已反向引用本节——批量导入时指定领域、走同一打分/落盘管线）；专门 Collection 即 §10.5 领域的 `default_collection`。本节差异化定位 = 安全文档**一次性初始灌入工具**（`bulk_import.py`，P3）。
-
----
-
-## 10. 个人知识库成熟化 (P0 ⭐)
-
-> 📐 **实施文档**：本章是需求与蓝图（做什么、为什么）；完整落地方案见 [PKB-IMPLEMENTATION.md](PKB-IMPLEMENTATION.md)。需求变更改本章，落地细节改实施文档。
->
-> ⚠️ **实施方式已两次转向**（细节见实施文档「方向沿革」表）：v1「Bellkeeper 内置 Evaluator/Reconstruct 常驻 service」→ v2「Claude Agent + Skill」→ **现行 v3「Bellkeeper 一次性 CLI 子命令 `pkb-curate` + 外置提示词 `config/pkb/`」**（2026-06-05；用户决策不用 Claude Code 做自动化 agent，且任务本质是流程固定的 LLM 批处理、无需自主 agent 框架）。本章下文凡出现「拟新增 service / 表」等字样，**实现方式以实施文档为准**（搬入一次性 CLI + `config/pkb/` 提示词，不内置常驻 service）。需求（漏斗 → 重构 → 合成、三层存储、领域可配、n8n 纳管、体系化合成）不变。
->
-> **实施状态（2026-06-08 核验）**：**MVP 开发完成**。已落地 `internal/pkb` 编排、`bellkeeper pkb-curate` / `pkb-curate digest`、`config/pkb/` 提示词包、`raw/archive/vault` 索引隔离、递归扫描、`llm_jobs` 队列接入、PKB 自动调度开关、`internal/n8n_workflows/` 仓库 JSON 事实源与工作流定义 Web/API 管理。`go test ./...` 已通过。
->
-> 🔶 **P0 总体验收尚未完成**：§10.6 n8n 的 Bellkeeper 侧 JSON 事实源与 Web/API 管理已落地，但 `spool n8n export` 冷备进 Git、线上漂移检测与定期备份流程尚未完成；§10.9「新增领域后存量 `archive/` 批量重打分并聚合」尚缺专门命令/流程；线上还需用真实 raw 样本跑 `pkb-curate --dry-run` 与 live run，确认 LLM 输出、Obsidian LiveSync 同步范围和 Meili rebuild 结果。
-
-> **核心闭环**：把「n8n 无脑爬取 → 信息垃圾场」改造成「**漏斗筛选 + 深度重构 + 体系化合成**」三段式管线，复用已落地的 LLM Proxy（`pool-summary` 虚拟组）+ CrawlQueue + Meilisearch，产出**可检索、可整体取用、知识互联**的成熟 Obsidian Vault。当前最高优先级（P0 ⭐），§0 总览工期 5.5 天。
-
-### 10.0 背景与目标
-
-**现状**：n8n 工作流定时爬取文章 → 落到 TrueNAS 某目录 → 本地脚本拉进 Obsidian Vault。问题是「**无脑收集 = 信息垃圾场**」：低质内容淹没高价值卡片，越攒越不敢看。用户**已主动停掉本地拉取脚本**，等待改造后再恢复。
-
-**痛点**：
-- 无筛选：所有爬到的都进库，信噪比低
-- 无重构：原始正文直接堆叠，没提炼成可复用的知识卡片
-- 无互联：卡片之间没有 `[[wikilink]]`，无法形成知识网络
-- 无体系：碎片永远是碎片，没有定期缝合成专题
-
-**目标**：建立「漏斗 → 重构 → 合成」闭环——
-1. **漏斗**：AI 三维打分，高分进 Vault、中分归档、低分丢弃（§10.2）
-2. **重构**：高分内容二次 LLM 转换为结构化 Obsidian 笔记 + 自动 wikilink 互联（§10.4）
-3. **合成**：定期聚合某领域高分卡片生成专题笔记，碎片缝合成体系（§10.7，P1 延伸）
-
-**领域/标签可配置**：领域（如「网络安全」「LLM 工程」）作为一等配置项，新增领域时可把存量与增量批量聚合、并入已有结构（§10.5）。
-
-**不做范围**：
-- ❌ 不重写爬虫：继续用 n8n 爬取，只在**入库环节**加漏斗（复用 §10.6 纳管的工作流）
-- ❌ 不引入向量库：检索仍走 Meilisearch 全文（Rerank 另见 §7.1）
-- ❌ 不做多用户：单租户自用
-
-### 10.1 分层存储 raw / archive / vault
-
-把单一目录拆成**三层**，按价值分流，只让最高价值层进本地 Obsidian：
-
-| 层 | 路径 | 内容 | 同步本地 Obsidian | 进 Meili 索引 |
-|----|------|------|:----:|:----:|
-| **raw** | `pkb/raw/` | 爬虫原始落盘（正文+元数据），仅作溯源/重跑 | ❌ **绝不同步** | ❌ |
-| **archive** | `pkb/archive/` | 中分内容，留档可搜但不占本地空间 | ❌ | ✅ |
-| **vault** | `pkb/vault/` | 高分 + 原子化重构后的成熟卡片 | ✅ LiveSync | ✅ |
-
-**要点**：
-- `raw/` 永不进 Obsidian——这是「信息垃圾场」的根治（直接对应用户痛点）
-- `archive/` 进 Meili，全局检索能搜到，但不下行到本地，避免 Vault 膨胀
-- `vault/` 才是 Obsidian 同步范围，且只放重构后的结构化笔记
-- 整库可整体取用：`vault/` 本身就是合法 Obsidian Vault，可 git/rsync 整体导出（见 §10.9 验收）
-
-### 10.2 AI 三维加权打分分流
-
-入库内容经 `pool-summary` 虚拟组（LLM Proxy 已落地）跑**打分 Prompt**，输出标准 JSON：
-
-**三维度 + 权重**：
-
-| 维度 | 权重 | 含义 |
-|------|:----:|------|
-| 相关度 relevance | 40% | 与已配置领域关键词的匹配程度 |
-| 深度 depth | 30% | 是否有原理/实现/数据，而非泛泛而谈 |
-| 可执行性 actionability | 30% | 是否含可复用代码/配置/方法论 |
-
-`final_score = 0.4*relevance + 0.3*depth + 0.3*actionability`（各维 0–10）
-
-**分流阈值**：
-- `final_score >= 7.0` → 进 §10.4 深度重构 → `vault/`
-- `4.0 <= final_score < 7.0` → 直接进 `archive/`（不重构）
-- `final_score < 4.0` → **丢弃**（仅 `raw/` 留底，可溯源）
-
-**打分输出契约**（Evaluator 解析）：
-```json
-{
-  "relevance": 8, "depth": 7, "actionability": 6,
-  "final_score": 7.1,
-  "matched_domains": ["security"],
-  "reason": "讲清了 JWT 攻击面 + 可复用 PoC",
-  "decision": "vault"
-}
-```
-
-### 10.3 入库管线（n8n → ingest → Evaluator → 分流落盘 → Meili）
-
-```
-n8n 爬取
-  └─→ POST /api/files/ingest/url        [已存在] 接收 URL/正文，落 raw/
-        └─→ AI 三维打分                  [pkb-curate CLI] 调 pool-summary 打分(§10.2)
-              ├─ >=7.0 → 原子化重构        [pkb-curate CLI] 原子化重构(§10.4) → vault/
-              ├─ 4–7   → 落 archive/
-              └─ <4.0  → 丢弃(留 raw/)
-        └─→ POST /api/files/rebuild       [已存在] archive+vault 都进 Meili，全局可搜
-```
-
-**现有能力**（已核实 router，不重复造）：
-- `POST /api/files/ingest/url` — 入库入口，n8n 直接打这个端点
-- `POST /api/files/rebuild` — Meili 重建索引
-- `POST /api/files/search` / `POST /api/files/ask` — 检索 / RAG 问答
-- `pool-summary` 虚拟组 — 打分/重构的 LLM 后端
-
-**拟新增能力**（⚠ 实现方式以 [PKB-IMPLEMENTATION.md](PKB-IMPLEMENTATION.md) 为准，搬入一次性 CLI、不内置常驻 service）：
-- 打分 + 分流决策：三维打分 Prompt + JSON 解析 + 按分数分流 → **由 `pkb-curate` CLI 编排**（实施文档 §4），非内置 Go service
-- 分流落盘：按 `decision` 写 `raw/archive/vault` → `pkb-curate` 经现有 API + 容器内 `os` 直接读写落盘（无需 spool/新端点）
-- 领域配置：作为可配置项（关键词/阈值/子目录）→ **`config/pkb/domains.yaml`**（非新增 DB 表）
-- 入库直传：`ingest/url` 已有 `Content` 字段直传正文，**无需** `ingest/file`（已核实）
-- 入库幂等：已具备 URL + 内容 SHA256 双重去重，同 URL 重爬不产生重复卡片（已核实）
-
-### 10.4 高分内容原子化重构
-
-`final_score >= 7.0` 的内容经**第二道 LLM 转换**（`pool-summary`），从「一篇文章」重构为「一张成熟知识卡片」：
-
-**Obsidian 笔记模板**：
-```markdown
----
-title: <提炼的标题>
-source: <原始 URL>
-ingest_date: <YYYY-MM-DD>
-score: <final_score>
-domains: [security]
-tags: [jwt, auth, poc]
----
-
-## 核心洞察
-<1–3 句结论先行>
-
-## 关键技术要点 / 可复用资产
-- <要点 / 代码片段 / 配置>
-
-## 深度摘要
-<结构化正文，去水分>
-
-## 关联
-- [[已有卡片A]]   ← AI 生成的 wikilink
-```
-
-**wikilink 自动互联**：重构时把候选标题/标签喂给 LLM，让它在「关联」区生成指向**已有卡片**的 `[[wikilink]]`，使新卡片接入知识网络（前端可点跳转见 §5.2 Vault 预览增强）。
-
-### 10.5 领域 / 标签可配置
-
-领域是**一等配置项**，不是硬编码：
-
-**领域模型**（实现 = `config/pkb/domains.yaml`，非 DB 表，见 [PKB-IMPLEMENTATION.md](PKB-IMPLEMENTATION.md) §4.2）：
-- `name`（如 `security`）、`keywords`（关键词集，喂 §10.2 relevance 打分）、`weight`（领域权重）、`default_collection`（默认 Collection）、`vault_subpath`（落盘子目录，如 `vault/security/`）
-
-**能力**：
-- 新增领域 → 可对存量 `archive/` 批量重打分、批量聚合并入新领域结构
-- 与 §5.4「Tag/Dataset → Collection 改造」对齐：领域的 `default_collection` 即 Meili 索引分区 + 默认存储路径
-- 与 §9.4「存量知识导入」对齐：OWASP/MITRE 等批量导入时指定领域，走同一打分/落盘管线
-
-### 10.6 n8n 工作流纳管
-
-**现状**：n8n 工作流散落在 SilkSpool 管的主机上，定义没有版本化、没有单一治理入口。用户多次强调「**n8n 工作流文件应该放在 Bellkeeper 中**」。
-
-**方案**——职责对齐：
-- **Bellkeeper = 业务工作流治理**：承载工作流定义（`internal/n8n_workflows/` 目录托管 JSON，或 DB 持久化）+ 现有 `/api/workflows/*` 接口管理（增删查、启停、查看），是工作流的**单一事实源**
-- **SilkSpool = IaC 生命周期 + 冷备**：`spool n8n export` 定时把线上 n8n 工作流导出为 JSON，落 `out/backups/n8n/` 并纳入 **git 版本控制**，作为冷备份与漂移检测
-
-**收益**：工作流定义可 review、可回滚、可在 Bellkeeper Web 可见可管，不再散落。
-
-**实施状态（2026-06-08）**：Bellkeeper 侧已落地 `internal/n8n_workflows/` 目录事实源、`n8n.workflow_dir` 配置、`/api/workflows/definitions*` 增删改查/推送接口、Web 工作流定义视图，以及 Docker 镜像内定义目录复制。仍待 SilkSpool 侧补齐 `spool n8n export` 定期冷备进 Git、线上漂移检测与恢复演练。
-
-### 10.7 体系化输出（P1 延伸）
-
-让碎片在**周/月维度被缝合成体系**，是漏斗+重构之上的合成层：
-
-- **主动问答**：Matrix `!问 <领域>` → `POST /api/files/ask`[已存在] 走 RAG，跨 vault+archive 检索回答（多源检索见 §7.4）
-- **低频聚合简报**：`bellkeeper pkb-curate digest --domain <领域> --period weekly|monthly` 读取某领域周期内 `score>=7` 的 vault 卡片 → LLM 聚合 → 生成**综述笔记**写入 `vault/<领域>/digest/`，自动 wikilink 到本周期各卡片；n8n/cron 只负责低频触发，不承载合成逻辑
-- 效果：例如「网络安全」领域每周自动产出一篇「本周要点综述」，把分散卡片缝成专题
-- 第一版只做 digest 周/月综述；领域首页 `_index.md`、知识地图 `maps/`、专题页 `topics/` 等全局结构在 digest 质量稳定后再扩展，避免把体系化层做重。
-
-> 此层依赖 §10.1–§10.5 闭环先跑通，故列为 **P1 延伸**（单列 2–3 天），不计入 P0 的 5.5 天。
-
-### 10.8 实施阶段与工期
-
-| 阶段 | 内容 | 工期 |
-|------|------|:----:|
-| A 目录隔离 + 存量清理 | 建 `raw/archive/vault` 三层；停掉旧的全量本地同步；存量分流 | 0.5 天 |
-| B 拦截器 + 打分管线 | Evaluator service + 三维打分 Prompt + 分流落盘 + 接 `ingest/url` | 2.5 天 |
-| C 原子化重构 | 高分二次转换 + Obsidian 模板 + wikilink 生成 | 1.5 天 |
-| D n8n 纳管 | 工作流入 Bellkeeper + `spool n8n export` 冷备 + git | 1.0 天 |
-| **P0 闭环小计** | | **5.5 天** |
-| E 体系化输出（P1） | RAG 主动问答 + 定时聚合简报 | 2–3 天 |
-
-（P0 闭环 5.5 天与 §0 总览一致；E 为 P1 延伸，单列、不计入 P0。）
-
-> ⚠️ **上表为 2026-06-04 旧（内置 service）方案工期，已被取代**。两次转向后（v1 内置 service → v2 Agent+Skill → **v3 一次性 CLI `pkb-curate`**，2026-06-05）：阶段 B 的「Evaluator service」**不再开发**（逻辑搬入一次性 CLI + `config/pkb/` 提示词），MVP（三层隔离 + `pkb-curate` 打分分流 + 原子化重构）**≈ 2.75 天**即可跑通；n8n 纳管（D）/ 体系化输出（E）移入实施文档 §6 路线图按需迭代。**工期与分步以 [PKB-IMPLEMENTATION.md](PKB-IMPLEMENTATION.md) §5 为准。**
-
-### 10.9 验收标准
-
-- [ ] `raw/` 目录的任何内容**不会**出现在本地 Obsidian（代码侧已保证 `raw` 不进 Meili；LiveSync 同步范围需线上确认）
-- [x] 低质文章（`final_score < 4.0`）被丢弃，不进 `archive/`/`vault/`，仅 `raw/` 可溯源（`pkb-curate` 已实现；待真实样本抽验）
-- [x] 高分文章（`>=7.0`）在 `vault/` 生成**结构化笔记**（frontmatter + 核心洞察 + 关键要点 + 深度摘要 + wikilink；`pkb-curate` 已实现；待真实样本抽验）
-- [ ] 新增一个领域（如 `security`）后，存量 `archive/` 可批量重打分并聚合并入该领域（尚缺 archive 批量重打分/聚合流程）
-- [x] 整个 `vault/` 可被 Meili 全局检索（`/api/files/search`），也可 git/rsync **整体导出**为独立 Obsidian Vault（递归 scanner + `scan_dirs=archive/vault` 已实现；待线上 rebuild 抽验）
-- [ ] n8n 工作流定义在 Bellkeeper 可见可管，且 `spool n8n export` 冷备进 git（Bellkeeper 侧仓库 JSON 事实源 + Web/API 管理已落地；仍缺 SilkSpool 冷备进 Git、漂移检测与恢复演练）
-
----
-
-## 11. 收敛与里程碑
-
-### 一个月内（2026-06）
-- [ ] §10 个人知识库成熟化闭环 — **MVP 开发完成，P0 总包未完成**（漏斗筛选/原子化重构/自动调度/n8n JSON 纳管已落地；还差 n8n 冷备与漂移检测、存量 `archive/` 批量重打分聚合、线上运行验收；体系化输出 §10.7 属 P1 延伸且 digest 已有初版）
-- [ ] §1 RAGFlow 全部退役（代码 + 工作流 + 配置）
-- [x] §2.2–§2.7 LLM Proxy 对标 new-api（Token + 定价 + Gemini + Rerank + Dashboard）— **开发完成 · 🔶 2026-06-08 复核仍待运行时验证**（详见 §2 顶部清单）
-- [ ] §2.8 停掉 new-api 容器 — **暂缓**（用户仍在使用，待调用方迁移并观察稳定后再停）
-- [ ] §3.1 §3.4 n8n 链路压缩 + 死代码回收
-- [ ] §5.1 §5.3 爬取队列前端 + 问答多轮 + 流式
-
-### 二个月内（2026-07）
-- [ ] §4 日志中心全文检索 + 告警增强 + trace_id
-- [ ] §6.5 §6.6 Bellkeeper 测试覆盖到 60% + golang-migrate
-- [ ] §7 Rerank + 引用跳转 + 上下文压缩
-- [ ] §8.1 Prometheus + Grafana 基础
-
-### 三个月内（2026-08）
-- [ ] §5.7 §5.8 Vault 在线编辑 + 批量操作
-- [ ] §9 K07 端到端验证 + 智能归档建议
-- [ ] §8.2 §8.3 容器健康深化 + 备份验证
+## 13. 里程碑
+
+### 2026-06 内
+- [x] §1 认证层 — 已关闭:生产为纯内网环境,无需认证(2026-06-10)
+- [ ] §2.1 PKB 存量批跑 + 线上验收;§2.2 原子知识网 Phase A–B
+- [ ] §4.1 提示词 P0 修复;§4.2 response_format + eval 骨架
+- [ ] §5 RAGFlow 全退役
+- [ ] §6 第一批新源导入 + 7 天指标
+
+### 2026-07 内
+- [ ] §2.2 原子知识网 Phase C–E
+- [ ] §3 LLM 运行时验收 + new-api 停服决策
+- [ ] §7 日志中心(全文检索 + trace_id)
+- [ ] §8 爬取队列前端 + 问答多轮/流式
+
+### 2026-08 内
+- [ ] §9 测试覆盖 + 契约测试 + golang-migrate
+- [ ] §10 问答 Rerank 接入;§11 Prometheus + Grafana
+- [ ] §12 按需启动
 
 ---
 
 ## 维护规则
 
-1. 每次完成一项时：
-   - 在 ROADMAP 对应任务前打勾 `[x]`
-   - 在 [STATUS.md](STATUS.md) 「最近主线动作」表追加一行
-   - 重要架构变化更新 [architecture/overview.md](architecture/overview.md)
-
-2. 新增任务时：
-   - 按 P0/P1/P2/P3 评估优先级（影响范围 + 紧迫度）
-   - 在对应章节追加，不另开新文档
-
-3. 任务取消时：
-   - 不删除，加 `~~删除线~~` + 简短理由
-   - 三个月后清理整理
-
-4. 当 ROADMAP 一个章节全部完成：
-   - 移动到 STATUS.md 「最近主线动作」+ 「已完成里程碑」
-   - 从 ROADMAP 移除
+1. 完成一项:本文打勾/移入「已完成里程碑」表 → STATUS.md「最近主线动作」追加 → 大架构变化同步 ARCHITECTURE.md。
+2. 新增任务:按 P0–P3 评估,加入对应章节,不另开新文档;大型计划单独立文档并在 §0 索引。
+3. 取消任务:移入 §12「已取消项」加删除线 + 理由,三个月后清理。
+4. 计划类文档(\*-PLAN/\*-REVIEW)完成后移 `archive/`,残留转本文。

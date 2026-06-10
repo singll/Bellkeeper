@@ -29,6 +29,9 @@ var (
 	pkbDigestPeriod   string
 	pkbDigestSince    string
 	pkbDigestMaxCards int
+
+	// pkb-curate audit flags
+	pkbAuditJSON bool
 )
 
 func main() {
@@ -89,6 +92,18 @@ then rebuilds the search index. Use --dry-run first to inspect candidates.`,
 	pkbDigestCmd.Flags().IntVar(&pkbDigestMaxCards, "max-cards", 50, "max high-score cards per domain")
 	pkbDigestCmd.Flags().StringVar(&pkbCfgDir, "pkb-config", "config/pkb", "directory holding domains.yaml + prompts/")
 	pkbCurateCmd.AddCommand(pkbDigestCmd)
+
+	pkbAuditCmd := &cobra.Command{
+		Use:   "audit",
+		Short: "Audit vault knowledge network health (orphan cards, broken links, hubs, duplicates)",
+		Long: `audit scans the vault, builds a link graph, and reports network health metrics.
+It is read-only: no files are moved, written, or deleted.
+Use --json for machine-readable output.`,
+		Run: runPkbAudit,
+	}
+	pkbAuditCmd.Flags().BoolVar(&pkbAuditJSON, "json", false, "output JSON for machine parsing")
+	pkbAuditCmd.Flags().StringVar(&pkbCfgDir, "pkb-config", "config/pkb", "directory holding domains.yaml + prompts/")
+	pkbCurateCmd.AddCommand(pkbAuditCmd)
 
 	rootCmd.AddCommand(serveCmd, versionCmd, migrateCmd, pkbCurateCmd)
 
@@ -226,6 +241,32 @@ func runPkbCurate(cmd *cobra.Command, args []string) {
 
 	if err := curator.Run(); err != nil {
 		fmt.Fprintf(os.Stderr, "pkb-curate run failed: %v\n", err)
+		os.Exit(1)
+	}
+}
+
+func runPkbAudit(cmd *cobra.Command, args []string) {
+	cfg, err := config.Load(cfgFile)
+	if err != nil {
+		fmt.Fprintf(os.Stderr, "Failed to load config: %v\n", err)
+		os.Exit(1)
+	}
+
+	if err := middleware.InitLogger(cfg.Logging.Level); err != nil {
+		fmt.Fprintf(os.Stderr, "Failed to initialize logger: %v\n", err)
+		os.Exit(1)
+	}
+
+	curator, err := pkb.NewCurator(cfg, pkb.Options{
+		ConfigDir: pkbCfgDir,
+	}, nil)
+	if err != nil {
+		fmt.Fprintf(os.Stderr, "Failed to init pkb curator: %v\n", err)
+		os.Exit(1)
+	}
+
+	if err := curator.RunAudit(pkbAuditJSON); err != nil {
+		fmt.Fprintf(os.Stderr, "pkb-curate audit failed: %v\n", err)
 		os.Exit(1)
 	}
 }

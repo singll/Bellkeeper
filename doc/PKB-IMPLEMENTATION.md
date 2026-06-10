@@ -467,6 +467,7 @@ MVP 的结构建设方式是 **Obsidian wikilink 双链**：`pkb-curate` 在高�
 | R6 | **Matrix `!问<领域>`** 主动问答 | 想在 Matrix 里直接查知识库 | 复用现有 `/api/files/ask`，仅接 Matrix 命令 |
 | R7 | **维护定时化（keeper cron 调 `pkb-curate`）** | 手动触发成为负担、且信任打分质量 | CLI 已天然适配 cron；需先有可观测（处理摘要落日志/告警），避免静默误判 |
 | R8 | **CLI 进程内直调 service**（省去对本机 server 的 HTTP 往返） | 性能/部署上确有收益 | 纯内部优化；需 wire service 依赖，权衡复杂度 |
+| R9 | **原子知识网升级**（提示词重构 + 语义去重 + 一文多卡 + 体系主文件） | vault 卡片质量低：总结性、重复、无体系 | 详细方案见 [PKB-ATOMIC-KNOWLEDGE-PLAN.md](PKB-ATOMIC-KNOWLEDGE-PLAN.md)；分 4 阶段实施，Phase A（提示词+配置）零代码风险可先行 |
 
 > 顺序非固定，由真实使用反馈决定。**新增任何一项前，先回 §0 核对。**
 
@@ -498,7 +499,7 @@ MVP 的结构建设方式是 **Obsidian wikilink 双链**：`pkb-curate` 在高�
 | AI 维护"跑飞"（误删/乱建） | `--dry-run` 预演 + discard 不删 + wikilink 校验 + `per_run` 上限 + MVP 默认手动触发 |
 | 全量 rebuild 慢 | MVP 库小可接受；变慢则 R1 增量索引 |
 | 提示词/config 未进 git 丢失 | `config/pkb/` 不被 .gitignore，正常 `git add` 即进库（无需 `-f`） |
-| keeper noauth 公网暴露 | 见记忆 [[keeper-bellkeeper-noauth]]：内网/VPN 限制，公网需网络层补认证（待用户处理） |
+| keeper noauth 运行 | 见记忆 [[keeper-bellkeeper-noauth]]：生产为纯内网环境（域名不出外网、无公网暴露），noauth 为预期状态，无需认证 |
 
 **回滚**：各 Step 独立提交可单独 revert。M3 目录迁移可 `mv` 回；M2 改回 `scan_dirs` 即恢复旧扫描；删除 `pkb-curate` 命令注册即停用 AI 维护（ingest 仍正常落 raw，退化为改造前行为）。
 

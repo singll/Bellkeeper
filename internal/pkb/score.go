@@ -8,14 +8,15 @@ import (
 
 // ScoreResult 打分结果（LLM 返回的三维分 + matched_domains + 依据）
 type ScoreResult struct {
-	Relevance      int      `json:"relevance"`
-	Depth          int      `json:"depth"`
-	Actionability  int      `json:"actionability"`
-	Durability     int      `json:"durability"`
-	Novelty        int      `json:"novelty"`
-	ContentType    string   `json:"content_type"`
-	MatchedDomains []string `json:"matched_domains"`
-	Reason         string   `json:"reason"`
+	Relevance       int      `json:"relevance"`
+	Depth           int      `json:"depth"`
+	Actionability   int      `json:"actionability"`
+	Durability      int      `json:"durability"`
+	Novelty         int      `json:"novelty"`
+	AtomicPotential int      `json:"atomic_potential"`
+	ContentType     string   `json:"content_type"`
+	MatchedDomains  []string `json:"matched_domains"`
+	Reason          string   `json:"reason"`
 }
 
 // FinalScore 按权重计算综合分（0–10）
@@ -73,6 +74,7 @@ func (c *Curator) scoreArticle(art ArticleMeta, body string) (*ScoreResult, erro
 	sr.Actionability = clamp10(sr.Actionability)
 	sr.Durability = clamp10(sr.Durability)
 	sr.Novelty = clamp10(sr.Novelty)
+	sr.AtomicPotential = clamp10(sr.AtomicPotential)
 	return &sr, nil
 }
 
