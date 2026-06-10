@@ -91,6 +91,15 @@ func (r *RSSRepository) GetActiveIncludingPaused() ([]model.RSSFeed, error) {
 	return feeds, nil
 }
 
+// GetPaused returns active feeds that are currently paused by the health circuit breaker
+func (r *RSSRepository) GetPaused() ([]model.RSSFeed, error) {
+	var feeds []model.RSSFeed
+	if err := r.db.Where("is_active = ? AND is_paused = ?", true, true).Find(&feeds).Error; err != nil {
+		return nil, err
+	}
+	return feeds, nil
+}
+
 // BatchUpdatePaused 批量更新源的暂停状态，返回受影响行数
 func (r *RSSRepository) BatchUpdatePaused(ids []uint, paused bool) (int64, error) {
 	if len(ids) == 0 {

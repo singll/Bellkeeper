@@ -73,11 +73,12 @@ func NewServices(repos *repository.Repositories, cfg *config.Config, version str
 	// Create RSS fetcher service (depends on file ingestion)
 	rssFetcherSvc := NewRSSFetcherService(
 		RSSFetcherConfig{
-			Enabled:       cfg.RSSFetcher.Enabled,
-			CheckInterval: cfg.RSSFetcher.CheckInterval,
-			MaxPerBatch:   cfg.RSSFetcher.MaxPerBatch,
-			Timeout:       cfg.RSSFetcher.Timeout,
-			RSSHubBaseURL: cfg.RSSFetcher.RSSHubBaseURL,
+			Enabled:              cfg.RSSFetcher.Enabled,
+			CheckInterval:        cfg.RSSFetcher.CheckInterval,
+			MaxPerBatch:          cfg.RSSFetcher.MaxPerBatch,
+			Timeout:              cfg.RSSFetcher.Timeout,
+			RSSHubBaseURL:        cfg.RSSFetcher.RSSHubBaseURL,
+			ProbeIntervalMinutes: cfg.RSSFetcher.ProbeIntervalMinutes,
 		},
 		repos.RSS,
 		fileIngestionSvc,

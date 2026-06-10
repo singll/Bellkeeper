@@ -240,11 +240,12 @@ type KnowledgeConfig struct {
 
 // RSSFetcherConfig RSS 抓取器配置
 type RSSFetcherConfig struct {
-	Enabled       bool   `mapstructure:"enabled"`
-	CheckInterval int    `mapstructure:"check_interval"`  // 轮询间隔（秒）
-	MaxPerBatch   int    `mapstructure:"max_per_batch"`   // 每批最大处理 feed 数
-	Timeout       int    `mapstructure:"timeout"`         // 单个 feed 超时（秒）
-	RSSHubBaseURL string `mapstructure:"rsshub_base_url"` // RSSHub 实例地址，用于拼接以 / 开头的相对路径
+	Enabled              bool   `mapstructure:"enabled"`
+	CheckInterval        int    `mapstructure:"check_interval"`         // 轮询间隔（秒）
+	MaxPerBatch          int    `mapstructure:"max_per_batch"`          // 每批最大处理 feed 数
+	Timeout              int    `mapstructure:"timeout"`                // 单个 feed 超时（秒）
+	RSSHubBaseURL        string `mapstructure:"rsshub_base_url"`        // RSSHub 实例地址，用于拼接以 / 开头的相对路径
+	ProbeIntervalMinutes int    `mapstructure:"probe_interval_minutes"` // 暂停 feed 恢复探测间隔（分钟）
 }
 
 // CrawlQueueConfig 爬取队列配置
@@ -528,6 +529,7 @@ func setDefaults(v *viper.Viper) {
 	v.SetDefault("rss_fetcher.max_per_batch", 5)
 	v.SetDefault("rss_fetcher.timeout", 30)
 	v.SetDefault("rss_fetcher.rsshub_base_url", "")
+	v.SetDefault("rss_fetcher.probe_interval_minutes", 30)
 
 	// Crawl Queue
 	v.SetDefault("crawl_queue.enabled", true)

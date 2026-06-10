@@ -52,11 +52,12 @@ func retryBackoff(attempt int) time.Duration {
 
 // RSSFetcherConfig holds configuration for the RSS fetcher
 type RSSFetcherConfig struct {
-	Enabled       bool
-	CheckInterval int    // seconds between feed checks
-	MaxPerBatch   int    // max feeds to process per check
-	Timeout       int    // seconds for each feed fetch
-	RSSHubBaseURL string // RSSHub 实例地址，用于拼接以 / 开头的相对路径
+	Enabled              bool
+	CheckInterval        int    // seconds between feed checks
+	MaxPerBatch          int    // max feeds to process per check
+	Timeout              int    // seconds for each feed fetch
+	RSSHubBaseURL        string // RSSHub 实例地址，用于拼接以 / 开头的相对路径
+	ProbeIntervalMinutes int    // 暂停 feed 恢复探测间隔（分钟），0 取默认值
 }
 
 // retryItem represents a feed scheduled for retry
@@ -121,6 +122,9 @@ func NewRSSFetcherService(
 	if cfg.Timeout <= 0 {
 		cfg.Timeout = 30
 	}
+	if cfg.ProbeIntervalMinutes <= 0 {
+		cfg.ProbeIntervalMinutes = DefaultProbeIntervalMinutes
+	}
 
 	return &RSSFetcherService{
 		cfg:        cfg,
@@ -179,8 +183,10 @@ func (s *RSSFetcherService) runLoop(ctx context.Context) {
 
 	ticker := time.NewTicker(time.Duration(s.cfg.CheckInterval) * time.Second)
 	retryTicker := time.NewTicker(30 * time.Second) // check retry queue every 30s
+	probeTicker := time.NewTicker(time.Duration(s.cfg.ProbeIntervalMinutes) * time.Minute)
 	defer ticker.Stop()
 	defer retryTicker.Stop()
+	defer probeTicker.Stop()
 
 	for {
 		select {
@@ -188,6 +194,8 @@ func (s *RSSFetcherService) runLoop(ctx context.Context) {
 			s.fetchAllActive(ctx)
 		case <-retryTicker.C:
 			s.processRetryQueue(ctx)
+		case <-probeTicker.C:
+			s.probePausedFeeds(ctx)
 		case <-s.stopCh:
 			return
 		case <-ctx.Done():
@@ -323,6 +331,17 @@ func (s *RSSFetcherService) FetchFeedInternal(ctx context.Context, feedID uint) 
 	return s.fetchFeed(ctx, feed)
 }
 
+// resolveFeedURL 返回 feed 的实际抓取地址：
+// 以 / 开头的 URL 视为 RSSHub 相对路径，拼接 base URL 与路由参数
+func (s *RSSFetcherService) resolveFeedURL(feed *model.RSSFeed) string {
+	feedURL := feed.URL
+	if strings.HasPrefix(feedURL, "/") && s.cfg.RSSHubBaseURL != "" {
+		feedURL = s.cfg.RSSHubBaseURL + feedURL
+		feedURL = s.appendRSSHubParams(feedURL, feed.RSSHubParams)
+	}
+	return feedURL
+}
+
 // fetchFeed fetches and processes a single RSS feed with health tracking
 func (s *RSSFetcherService) fetchFeed(ctx context.Context, feed *model.RSSFeed) *fetchFeedInternalResult {
 	result := &fetchFeedInternalResult{}
@@ -335,10 +354,8 @@ func (s *RSSFetcherService) fetchFeed(ctx context.Context, feed *model.RSSFeed) 
 	log.Printf("[RSSFetcher] fetching feed: %s (%s)", feed.Name, feed.URL)
 
 	// 拼接 RSSHub 相对路径：以 / 开头的 URL 视为 RSSHub 路径，需加上 base URL
-	feedURL := feed.URL
-	if strings.HasPrefix(feedURL, "/") && s.cfg.RSSHubBaseURL != "" {
-		feedURL = s.cfg.RSSHubBaseURL + feedURL
-		feedURL = s.appendRSSHubParams(feedURL, feed.RSSHubParams)
+	feedURL := s.resolveFeedURL(feed)
+	if feedURL != feed.URL {
 		log.Printf("[RSSFetcher] resolved RSSHub URL: %s -> %s", feed.URL, feedURL)
 	}
 
