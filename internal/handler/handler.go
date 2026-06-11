@@ -27,6 +27,7 @@ type Handlers struct {
 	Report         *ReportHandler
 	PKBReport      *PKBReportHandler
 	Dashboard      *DashboardHandler
+	DailyReport    *DailyReportHandler
 	Crawler        *CrawlerHandler
 	CrawlQueue     *CrawlQueueHandler
 	ExtractionRule *ExtractionRuleHandler
@@ -60,6 +61,7 @@ func NewHandlers(services *service.Services, repos *repository.Repositories, shu
 		Report:        NewReportHandler(services.Report),
 		PKBReport:     NewPKBReportHandler(services.PKBReport),
 		Dashboard:     NewDashboardHandler(services.Dashboard),
+		DailyReport:   NewDailyReportHandler(services.DailyReport),
 		Crawler:       NewCrawlerHandler(services.Crawler),
 	}
 

@@ -168,7 +168,7 @@ func (w *DailyReportWatchdog) CheckOnce(ctx context.Context, now time.Time) (boo
 		return false, nil
 	}
 
-	msg := fmt.Sprintf("### 每日日报缺失告警\n\n- 日期: %s\n- 预期文件: `%s`\n- 检查时间: %s\n\nn8n 日报工作流可能未触发、已禁用或执行失败。请检查 O01/O02/K08 日报工作流和 n8n 执行历史。",
+	msg := fmt.Sprintf("### 每日日报缺失告警\n\n- 日期: %s\n- 预期文件: `%s`\n- 检查时间: %s\n\nn8n 日报工作流可能未触发、已禁用或执行失败。请检查 O01 日报工作流和 n8n 执行历史。",
 		date,
 		filepath.ToSlash(filepath.Join(w.cfg.Path, date+".md")),
 		localNow.Format(time.RFC3339),

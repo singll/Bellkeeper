@@ -76,6 +76,10 @@ func Setup(r *gin.Engine, handlers *handler.Handlers, mode string, apiKey string
 	if handlers.Dashboard != nil {
 		registerDashboardRoutes(api, handlers.Dashboard)
 	}
+	// Daily report (backend-driven)
+	if handlers.DailyReport != nil {
+		registerDailyReportRoutes(api, handlers.DailyReport)
+	}
 }
 
 func registerTagRoutes(api *gin.RouterGroup, h *handler.TagHandler) {
@@ -314,6 +318,14 @@ func registerPKBReportRoutes(api *gin.RouterGroup, h *handler.PKBReportHandler) 
 
 func registerDashboardRoutes(api *gin.RouterGroup, h *handler.DashboardHandler) {
 	api.GET("/dashboard/stats", h.Stats)
+}
+
+func registerDailyReportRoutes(api *gin.RouterGroup, h *handler.DailyReportHandler) {
+	reports := api.Group("/reports")
+	reports.GET("/daily-data", h.DailyData)
+	reports.POST("/daily/generate", h.Generate)
+	reports.GET("/brief-data", h.BriefData)
+	reports.POST("/brief/generate", h.GenerateBrief)
 }
 
 func registerKnowledgeRoutes(api *gin.RouterGroup, h *handler.KnowledgeHandler) {

@@ -91,6 +91,38 @@ func (r *ActivityLogRepository) GetDistinctModules() ([]string, error) {
 	return modules, nil
 }
 
+type ActionStat struct {
+	Action string `json:"action"`
+	Status string `json:"status"`
+	Count  int64  `json:"count"`
+}
+
+func (r *ActivityLogRepository) GetActionStats(module string, since time.Time) ([]ActionStat, error) {
+	var stats []ActionStat
+	tx := r.db.Model(&model.ActivityLog{}).
+		Select("action, status, COUNT(*) as count").
+		Where("module = ? AND created_at >= ?", module, since).
+		Group("action, status")
+	if err := tx.Scan(&stats).Error; err != nil {
+		return nil, err
+	}
+	return stats, nil
+}
+
+func (r *ActivityLogRepository) GetRecentFailures(module string, since time.Time, limit int) ([]model.ActivityLog, error) {
+	var logs []model.ActivityLog
+	if limit <= 0 {
+		limit = 10
+	}
+	if err := r.db.Where("module = ? AND status = ? AND created_at >= ?", module, "failure", since).
+		Order("created_at DESC").
+		Limit(limit).
+		Find(&logs).Error; err != nil {
+		return nil, err
+	}
+	return logs, nil
+}
+
 func (r *ActivityLogRepository) CleanOldLogs(olderThanDays int) (int64, error) {
 	cutoff := time.Now().AddDate(0, 0, -olderThanDays)
 	result := r.db.Where("created_at < ?", cutoff).Delete(&model.ActivityLog{})

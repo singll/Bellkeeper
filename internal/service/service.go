@@ -1,6 +1,8 @@
 package service
 
 import (
+	"fmt"
+
 	"github.com/singll/bellkeeper/internal/config"
 	"github.com/singll/bellkeeper/internal/repository"
 )
@@ -27,6 +29,7 @@ type Services struct {
 	Dashboard     *DashboardService
 	CrawlQueue    *CrawlQueueService
 	RuleOptimizer *RuleOptimizerService
+	DailyReport   *DailyReportService
 	// Optional services (initialized in main.go with infra dependencies)
 	Notification *NotificationService
 	MatrixAdmin  *AdminService
@@ -112,6 +115,21 @@ func NewServices(repos *repository.Repositories, cfg *config.Config, version str
 
 	pkbReportSvc := NewPKBReportService(cfg.Knowledge, cfg.DailyReport, activityLogSvc)
 	dashboardSvc := NewDashboardService(repos.CrawlJob, repos.RSS, repos.LLMProxy, pkbReportSvc, cfg.DailyReport)
+	healthSvc := NewHealthService(cfg, version, repos.Tag, repos.RSS, repos.DatasetMapping)
+
+	llmProxyURL := fmt.Sprintf("http://localhost:%d/api/llm/v1", cfg.Server.Port)
+	dailyReportSvc := NewDailyReportService(
+		healthSvc,
+		dashboardSvc,
+		pkbReportSvc,
+		repos.ActivityLog,
+		repos.CrawlJob,
+		nil,
+		reportSvc,
+		cfg.DailyReport,
+		llmProxyURL,
+		cfg.Server.APIKey,
+	)
 
 	return &Services{
 		Tag:           NewTagService(repos.Tag),
@@ -120,7 +138,7 @@ func NewServices(repos *repository.Repositories, cfg *config.Config, version str
 		Crawler:       crawlSvc,
 		Dataset:       datasetSvc,
 		Setting:       NewSettingService(repos.Setting),
-		Health:        NewHealthService(cfg, version, repos.Tag, repos.RSS, repos.DatasetMapping),
+		Health:        healthSvc,
 		Workflow:      NewWorkflowService(cfg.N8N, repos.Setting),
 		LLMProxy:      NewLLMProxyService(cfg.LLMProxy, repos.LLMProxy, repos.LLMChannel, repos.LLMModelGroup, pricer, repos.LLMTokenUsage, repos.LLMRateLimit, repos.LLMConversationBinding, repos.LLMToken, repos.LLMChannelCredential, repos.LLMChannelBalanceSnapshot),
 		LLMJobQueue:   llmJobQueueSvc,
@@ -134,12 +152,16 @@ func NewServices(repos *repository.Repositories, cfg *config.Config, version str
 		Dashboard:     dashboardSvc,
 		CrawlQueue:    crawlQueueSvc,
 		RuleOptimizer: ruleOptimizerSvc,
+		DailyReport:   dailyReportSvc,
 	}
 }
 
 // SetNotificationService sets the optional notification service
 func (s *Services) SetNotificationService(svc *NotificationService) {
 	s.Notification = svc
+	if s.DailyReport != nil {
+		s.DailyReport.notify = svc
+	}
 }
 
 // SetKnowledgeServices sets the knowledge service adapters for Matrix command handlers

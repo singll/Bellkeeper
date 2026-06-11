@@ -28,6 +28,7 @@ type Config struct {
 	Knowledge     KnowledgeConfig     `mapstructure:"knowledge"`
 	CrawlQueue    CrawlQueueConfig    `mapstructure:"crawl_queue"`
 	DailyReport   DailyReportConfig   `mapstructure:"daily_report"`
+	Health        HealthConfig        `mapstructure:"health"`
 }
 
 type LLMProxyConfig struct {
@@ -282,6 +283,19 @@ type DailyReportConfig struct {
 	Timezone        string `mapstructure:"timezone"`
 	ReportChannel   string `mapstructure:"report_channel"`
 	AlertChannel    string `mapstructure:"alert_channel"`
+}
+
+// HealthConfig controls which services are probed by the health check endpoint.
+type HealthConfig struct {
+	Services []ServiceProbe `mapstructure:"services"`
+}
+
+// ServiceProbe defines a single service health check target.
+type ServiceProbe struct {
+	Name    string `mapstructure:"name"`
+	URL     string `mapstructure:"url"`
+	Type    string `mapstructure:"type"`    // http (default) or tcp
+	Timeout int    `mapstructure:"timeout"` // seconds, 0 = use default (5s)
 }
 
 // ScanDirConfig 扫描目录配置
@@ -566,4 +580,17 @@ func setDefaults(v *viper.Viper) {
 	v.SetDefault("daily_report.timezone", "Asia/Shanghai")
 	v.SetDefault("daily_report.report_channel", "daily")
 	v.SetDefault("daily_report.alert_channel", "alerts")
+
+	// Health check probes (keeper host service bundle)
+	v.SetDefault("health.services", []map[string]interface{}{
+		{"name": "n8n", "url": "", "type": "n8n_api"},
+		{"name": "meilisearch", "url": "http://sp-meilisearch:7700/health", "type": "http"},
+		{"name": "redis", "url": "sp-redis:6379", "type": "tcp"},
+		{"name": "memos", "url": "http://sp-memos:5230", "type": "http"},
+		{"name": "rsshub", "url": "http://sp-rsshub:1200", "type": "http"},
+		{"name": "couchdb", "url": "http://sp-couchdb:5984/_up", "type": "http"},
+		{"name": "nats", "url": "sp-nats:4222", "type": "tcp"},
+		{"name": "postgres", "url": "sp-bellkeeper-db:5432", "type": "tcp"},
+		{"name": "rss_fetcher", "url": "", "type": "internal"},
+	})
 }

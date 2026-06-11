@@ -2,7 +2,9 @@ package service
 
 import (
 	"fmt"
+	"net"
 	"net/http"
+	"sync"
 	"time"
 
 	"github.com/singll/bellkeeper/internal/config"
@@ -58,31 +60,75 @@ func (s *HealthService) Check() map[string]string {
 func (s *HealthService) Detailed() *DetailedHealth {
 	services := make(map[string]ServiceStatus)
 
-	// Check n8n (使用 API 端点 + API Key 认证，避免根路径 404 误判)
-	if s.cfg.N8N.APIBaseURL != "" && s.cfg.N8N.APIKey != "" {
+	probes := s.cfg.Health.Services
+	if len(probes) == 0 {
 		services["n8n"] = s.checkN8N()
+		if s.cfg.Meilisearch.URL != "" {
+			services["meilisearch"] = s.checkHTTPService(s.cfg.Meilisearch.URL + "/health")
+		}
+		services["rss_fetcher"] = ServiceStatus{Status: s.checkRSSFetcher()}
+	} else {
+		sem := make(chan struct{}, 4)
+		var mu sync.Mutex
+		var wg sync.WaitGroup
+
+		for _, probe := range probes {
+			wg.Add(1)
+			go func(p config.ServiceProbe) {
+				defer wg.Done()
+				sem <- struct{}{}
+				defer func() { <-sem }()
+
+				var status ServiceStatus
+				switch p.Type {
+				case "n8n_api":
+					if s.cfg.N8N.APIBaseURL != "" && s.cfg.N8N.APIKey != "" {
+						status = s.checkN8N()
+					} else {
+						status = ServiceStatus{Status: "disabled", Error: "n8n not configured"}
+					}
+				case "http":
+					if p.URL != "" {
+						status = s.checkHTTPServiceWithTimeout(p.URL, p.Timeout)
+					} else {
+						status = ServiceStatus{Status: "disabled", Error: "no URL configured"}
+					}
+				case "tcp":
+					if p.URL != "" {
+						status = s.checkTCPService(p.URL, p.Timeout)
+					} else {
+						status = ServiceStatus{Status: "disabled", Error: "no address configured"}
+					}
+				case "internal":
+					if p.Name == "rss_fetcher" {
+						status = ServiceStatus{Status: s.checkRSSFetcher()}
+					} else {
+						status = ServiceStatus{Status: "up"}
+					}
+				default:
+					if p.URL != "" {
+						status = s.checkHTTPServiceWithTimeout(p.URL, p.Timeout)
+					} else {
+						status = ServiceStatus{Status: "disabled"}
+					}
+				}
+
+				mu.Lock()
+				services[p.Name] = status
+				mu.Unlock()
+			}(probe)
+		}
+		wg.Wait()
 	}
 
-	// Check Meilisearch (only if enabled in knowledge config)
-	if s.cfg.Meilisearch.URL != "" {
-		services["meilisearch"] = s.checkHTTPService(s.cfg.Meilisearch.URL + "/health")
-	}
-
-	// Check RSS Fetcher status
-	services["rss_fetcher"] = ServiceStatus{
-		Status: s.checkRSSFetcher(),
-	}
-
-	// Determine overall status
 	overallStatus := "healthy"
 	for _, svc := range services {
-		if svc.Status != "up" {
+		if svc.Status != "up" && svc.Status != "disabled" {
 			overallStatus = "degraded"
 			break
 		}
 	}
 
-	// Get statistics from database
 	metrics := map[string]interface{}{
 		"timestamp": time.Now().UTC().Format(time.RFC3339),
 	}
@@ -113,8 +159,6 @@ func (s *HealthService) Detailed() *DetailedHealth {
 	}
 }
 
-// checkN8N checks n8n health via API endpoint with API key authentication.
-// n8n 根路径返回 404 会导致误判，改用 /api/v1/workflows?limit=1 携带 API Key 探测。
 func (s *HealthService) checkN8N() ServiceStatus {
 	url := s.cfg.N8N.APIBaseURL + "/workflows?limit=1"
 	client := httpclient.HealthCheck(time.Duration(defaults.HealthCheckTimeout) * time.Second)
@@ -145,9 +189,16 @@ func (s *HealthService) checkN8N() ServiceStatus {
 	}
 }
 
-// checkHTTPService is a generic HTTP-based health check used by the detailed endpoint.
 func (s *HealthService) checkHTTPService(url string) ServiceStatus {
-	client := httpclient.HealthCheck(time.Duration(defaults.HealthCheckTimeout) * time.Second)
+	return s.checkHTTPServiceWithTimeout(url, 0)
+}
+
+func (s *HealthService) checkHTTPServiceWithTimeout(url string, timeoutSec int) ServiceStatus {
+	timeout := defaults.HealthCheckTimeout
+	if timeoutSec > 0 {
+		timeout = timeoutSec
+	}
+	client := httpclient.HealthCheck(time.Duration(timeout) * time.Second)
 
 	start := time.Now()
 	resp, err := client.Get(url)
@@ -176,12 +227,32 @@ func (s *HealthService) checkHTTPService(url string) ServiceStatus {
 	}
 }
 
-// checkRSSFetcher returns the status of the RSS fetcher service
+func (s *HealthService) checkTCPService(addr string, timeoutSec int) ServiceStatus {
+	timeout := defaults.HealthCheckTimeout
+	if timeoutSec > 0 {
+		timeout = timeoutSec
+	}
+	start := time.Now()
+	conn, err := net.DialTimeout("tcp", addr, time.Duration(timeout)*time.Second)
+	latency := time.Since(start).Milliseconds()
+
+	if err != nil {
+		return ServiceStatus{
+			Status:    "down",
+			LatencyMs: latency,
+			Error:     err.Error(),
+		}
+	}
+	conn.Close()
+	return ServiceStatus{
+		Status:    "up",
+		LatencyMs: latency,
+	}
+}
+
 func (s *HealthService) checkRSSFetcher() string {
-	// If RSS fetcher config is not enabled, report as disabled
 	if !s.cfg.RSSFetcher.Enabled {
 		return "disabled"
 	}
-	// If enabled, report as up (the actual running status is tracked by the service itself)
 	return "up"
 }

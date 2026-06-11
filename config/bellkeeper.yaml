@@ -285,3 +285,31 @@ daily_report:
   timezone: Asia/Shanghai
   report_channel: daily
   alert_channel: alerts
+
+health:
+  services:
+    - name: n8n
+      type: n8n_api
+    - name: meilisearch
+      url: http://sp-meilisearch:7700/health
+      type: http
+    - name: redis
+      url: sp-redis:6379
+      type: tcp
+    - name: memos
+      url: http://sp-memos:5230
+      type: http
+    - name: rsshub
+      url: http://sp-rsshub:1200
+      type: http
+    - name: couchdb
+      url: http://sp-couchdb:5984/_up
+      type: http
+    - name: nats
+      url: sp-nats:4222
+      type: tcp
+    - name: postgres
+      url: sp-bellkeeper-db:5432
+      type: tcp
+    - name: rss_fetcher
+      type: internal
