@@ -48,7 +48,8 @@
         480,
         200
       ],
-      "continueOnFail": true
+      "onError": "continueRegularOutput",
+      "executeOnce": true
     },
     {
       "parameters": {
@@ -75,7 +76,8 @@
         480,
         300
       ],
-      "continueOnFail": true
+      "onError": "continueRegularOutput",
+      "executeOnce": true
     },
     {
       "parameters": {
@@ -102,7 +104,8 @@
         480,
         400
       ],
-      "continueOnFail": true
+      "onError": "continueRegularOutput",
+      "executeOnce": true
     },
     {
       "parameters": {
@@ -129,7 +132,8 @@
         480,
         500
       ],
-      "continueOnFail": true
+      "onError": "continueRegularOutput",
+      "executeOnce": true
     },
     {
       "parameters": {
@@ -156,7 +160,8 @@
         480,
         600
       ],
-      "continueOnFail": true
+      "onError": "continueRegularOutput",
+      "executeOnce": true
     },
     {
       "parameters": {
@@ -183,7 +188,8 @@
         720,
         600
       ],
-      "continueOnFail": true
+      "onError": "continueRegularOutput",
+      "executeOnce": true
     },
     {
       "parameters": {
@@ -210,7 +216,8 @@
         720,
         500
       ],
-      "continueOnFail": true
+      "onError": "continueRegularOutput",
+      "executeOnce": true
     },
     {
       "parameters": {
@@ -237,7 +244,8 @@
         480,
         700
       ],
-      "continueOnFail": true
+      "onError": "continueRegularOutput",
+      "executeOnce": true
     },
     {
       "parameters": {
@@ -264,7 +272,8 @@
         960,
         700
       ],
-      "continueOnFail": true
+      "onError": "continueRegularOutput",
+      "executeOnce": true
     },
     {
       "parameters": {
@@ -291,7 +300,8 @@
         720,
         700
       ],
-      "continueOnFail": true
+      "onError": "continueRegularOutput",
+      "executeOnce": true
     },
     {
       "parameters": {
@@ -318,12 +328,13 @@
         720,
         400
       ],
-      "continueOnFail": true
+      "onError": "continueRegularOutput",
+      "executeOnce": true
     },
     {
       "parameters": {
         "method": "GET",
-        "url": "http://memos:5230/api/v1/memos?filter=type+%3D%3D+%22MEMO%22+%26%26+tag+%3D%3D+%22%E5%BE%85%E5%8A%9E%22&pageSize=100",
+        "url": "http://memos:5230/api/v1/memos?filter=%22%E5%BE%85%E5%8A%9E%22+in+tags&pageSize=100",
         "sendHeaders": true,
         "headerParameters": {
           "parameters": [
@@ -345,7 +356,8 @@
         960,
         400
       ],
-      "continueOnFail": true
+      "onError": "continueRegularOutput",
+      "executeOnce": true
     },
     {
       "parameters": {
@@ -392,7 +404,8 @@
         1440,
         300
       ],
-      "continueOnFail": true
+      "onError": "continueRegularOutput",
+      "executeOnce": true
     },
     {
       "parameters": {
@@ -413,7 +426,8 @@
         1440,
         500
       ],
-      "continueOnFail": true
+      "onError": "continueRegularOutput",
+      "executeOnce": true
     }
   ],
   "connections": {
@@ -424,49 +438,26 @@
             "node": "获取今日采集统计",
             "type": "main",
             "index": 0
-          },
+          }
+        ]
+      ]
+    },
+    "获取今日采集统计": {
+      "main": [
+        [
           {
             "node": "获取RSS采集详情",
             "type": "main",
             "index": 0
-          },
+          }
+        ]
+      ]
+    },
+    "获取RSS采集详情": {
+      "main": [
+        [
           {
             "node": "获取服务状态",
-            "type": "main",
-            "index": 0
-          },
-          {
-            "node": "获取爬取队列统计",
-            "type": "main",
-            "index": 0
-          },
-          {
-            "node": "获取今日失败任务",
-            "type": "main",
-            "index": 0
-          },
-          {
-            "node": "获取今日阻塞任务",
-            "type": "main",
-            "index": 0
-          },
-          {
-            "node": "获取爬取Worker状态",
-            "type": "main",
-            "index": 0
-          },
-          {
-            "node": "获取LLM代理健康",
-            "type": "main",
-            "index": 0
-          },
-          {
-            "node": "获取知识库索引统计",
-            "type": "main",
-            "index": 0
-          },
-          {
-            "node": "获取PKB日报数据",
             "type": "main",
             "index": 0
           }
@@ -499,7 +490,7 @@
       "main": [
         [
           {
-            "node": "构建Markdown摘要",
+            "node": "获取爬取队列统计",
             "type": "main",
             "index": 0
           }
@@ -510,7 +501,7 @@
       "main": [
         [
           {
-            "node": "构建Markdown摘要",
+            "node": "获取今日失败任务",
             "type": "main",
             "index": 0
           }
@@ -521,7 +512,7 @@
       "main": [
         [
           {
-            "node": "构建Markdown摘要",
+            "node": "获取今日阻塞任务",
             "type": "main",
             "index": 0
           }
@@ -532,7 +523,7 @@
       "main": [
         [
           {
-            "node": "构建Markdown摘要",
+            "node": "获取爬取Worker状态",
             "type": "main",
             "index": 0
           }
@@ -543,7 +534,7 @@
       "main": [
         [
           {
-            "node": "构建Markdown摘要",
+            "node": "获取LLM代理健康",
             "type": "main",
             "index": 0
           }
@@ -554,7 +545,7 @@
       "main": [
         [
           {
-            "node": "构建Markdown摘要",
+            "node": "获取知识库索引统计",
             "type": "main",
             "index": 0
           }
@@ -562,6 +553,17 @@
       ]
     },
     "获取知识库索引统计": {
+      "main": [
+        [
+          {
+            "node": "获取PKB日报数据",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "获取PKB日报数据": {
       "main": [
         [
           {
@@ -587,32 +589,11 @@
           }
         ]
       ]
-    },
-    "获取PKB日报数据": {
-      "main": [
-        [
-          {
-            "node": "构建Markdown摘要",
-            "type": "main",
-            "index": 0
-          }
-        ]
-      ]
     }
   },
   "settings": {
     "executionOrder": "v1",
     "saveManualExecutions": true,
     "callerPolicy": "workflowsFromSameOwner"
-  },
-  "staticData": null,
-  "pinData": {},
-  "tags": [
-    {
-      "name": "knowledge"
-    },
-    {
-      "name": "daily"
-    }
-  ]
+  }
 }

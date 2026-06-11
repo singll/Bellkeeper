@@ -46,7 +46,8 @@
         220,
         300
       ],
-      "continueOnFail": true
+      "onError": "continueRegularOutput",
+      "executeOnce": true
     },
     {
       "parameters": {
@@ -121,7 +122,8 @@
         880,
         220
       ],
-      "continueOnFail": true
+      "onError": "continueRegularOutput",
+      "executeOnce": true
     },
     {
       "parameters": {
@@ -168,7 +170,8 @@
         1320,
         120
       ],
-      "continueOnFail": true
+      "onError": "continueRegularOutput",
+      "executeOnce": true
     },
     {
       "parameters": {
@@ -189,7 +192,8 @@
         1320,
         320
       ],
-      "continueOnFail": true
+      "onError": "continueRegularOutput",
+      "executeOnce": true
     }
   ],
   "connections": {
@@ -266,12 +270,10 @@
       ]
     }
   },
-  "active": false,
+  "active": true,
   "settings": {
     "executionOrder": "v1",
     "saveManualExecutions": true,
     "callerPolicy": "workflowsFromSameOwner"
-  },
-  "versionId": "698a004d-5308-468d-a595-8ccd0d936fe7",
-  "id": "e01-daily-digest"
+  }
 }
