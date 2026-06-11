@@ -108,7 +108,6 @@ type DailyReportData struct {
 	PKBCards    []PKBCardSummary           `json:"pkb_cards,omitempty"`
 	LLM         *LLMDashboardStats         `json:"llm,omitempty"`
 	Failures    []FailureDetail            `json:"failures,omitempty"`
-	TodoCount   int                        `json:"todo_count,omitempty"`
 	AISummary   string                     `json:"ai_summary,omitempty"`
 	Errors      []CollectError             `json:"errors,omitempty"`
 }

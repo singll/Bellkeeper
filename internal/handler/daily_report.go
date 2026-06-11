@@ -2,7 +2,8 @@ package handler
 
 import (
 	"context"
-	"fmt"
+	"errors"
+	"io"
 	"time"
 
 	"github.com/gin-gonic/gin"
@@ -30,14 +31,9 @@ func (h *DailyReportHandler) DailyData(c *gin.Context) {
 
 func (h *DailyReportHandler) Generate(c *gin.Context) {
 	var opts service.GenerateOptions
-	if err := c.ShouldBindJSON(&opts); err != nil {
-		if c.Request.ContentLength != 0 && c.Request.Body != nil {
-			buf := make([]byte, 1)
-			if n, _ := c.Request.Body.Read(buf); n > 0 {
-				response.BadRequest(c, fmt.Sprintf("invalid request body: %v", err))
-				return
-			}
-		}
+	if err := c.ShouldBindJSON(&opts); err != nil && !errors.Is(err, io.EOF) {
+		response.BadRequest(c, "invalid request body: "+err.Error())
+		return
 	}
 
 	ctx, cancel := context.WithTimeout(c.Request.Context(), 180*time.Second)
@@ -71,8 +67,8 @@ func (h *DailyReportHandler) BriefData(c *gin.Context) {
 
 func (h *DailyReportHandler) GenerateBrief(c *gin.Context) {
 	var opts service.BriefGenerateOptions
-	if err := c.ShouldBindJSON(&opts); err != nil && err.Error() != "EOF" {
-		response.BadRequest(c, fmt.Sprintf("invalid request body: %v", err))
+	if err := c.ShouldBindJSON(&opts); err != nil && !errors.Is(err, io.EOF) {
+		response.BadRequest(c, "invalid request body: "+err.Error())
 		return
 	}
 
