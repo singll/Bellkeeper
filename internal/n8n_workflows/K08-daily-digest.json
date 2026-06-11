@@ -67,7 +67,7 @@
         },
         "sendBody": true,
         "specifyBody": "json",
-        "jsonBody": "=/*jSON*/\n{\n  \"channel\": \"daily\",\n  \"message\": \"{{ $json.data.markdown }}\",\n  \"message_type\": \"markdown\",\n  \"metadata\": {\n    \"source\": \"brief_report\",\n    \"date\": \"{{ $json.data.date }}\"\n  }\n}"
+        "jsonBody": "={{ JSON.stringify({ channel: 'daily', message: $json.data.markdown, message_type: 'markdown', metadata: { source: 'brief_report', date: $json.data.date } }) }}"
       },
       "id": "k08-0003",
       "name": "推送Matrix通知",
@@ -94,7 +94,7 @@
         },
         "sendBody": true,
         "specifyBody": "json",
-        "jsonBody": "{\n  \"channel\": \"alerts\",\n  \"message\": \"### ❌ 资讯摘要生成失败\\n\\n- 时间: {{ $now.setZone($env.BELLKEEPER_TIMEZONE || 'Asia/Shanghai').toFormat('yyyy-MM-dd HH:mm') }}\\n- 错误: {{ $json.error }}\\n\\n请检查 Bellkeeper 日志和日报服务状态。\",\n  \"message_type\": \"markdown\"\n}"
+        "jsonBody": "={{ JSON.stringify({ channel: 'alerts', message: '### ❌ 资讯摘要生成失败\\n\\n- 时间: ' + $now.setZone($env.BELLKEEPER_TIMEZONE || 'Asia/Shanghai').toFormat('yyyy-MM-dd HH:mm') + '\\n- 错误: ' + (typeof $json.error === 'string' ? $json.error : JSON.stringify($json.error)) + '\\n\\n请检查 Bellkeeper 日志和日报服务状态。', message_type: 'markdown' }) }}"
       },
       "id": "k08-0004",
       "name": "发送失败告警",

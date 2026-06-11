@@ -2,6 +2,7 @@ package handler
 
 import (
 	"context"
+	"fmt"
 	"time"
 
 	"github.com/gin-gonic/gin"
@@ -19,7 +20,7 @@ func NewDailyReportHandler(svc *service.DailyReportService) *DailyReportHandler 
 
 func (h *DailyReportHandler) DailyData(c *gin.Context) {
 	date := c.Query("date")
-	data, err := h.svc.Collect(date)
+	data, err := h.svc.Collect(c.Request.Context(), date)
 	if err != nil {
 		response.BadRequest(c, err.Error())
 		return
@@ -29,7 +30,15 @@ func (h *DailyReportHandler) DailyData(c *gin.Context) {
 
 func (h *DailyReportHandler) Generate(c *gin.Context) {
 	var opts service.GenerateOptions
-	_ = c.ShouldBindJSON(&opts)
+	if err := c.ShouldBindJSON(&opts); err != nil {
+		if c.Request.ContentLength != 0 && c.Request.Body != nil {
+			buf := make([]byte, 1)
+			if n, _ := c.Request.Body.Read(buf); n > 0 {
+				response.BadRequest(c, fmt.Sprintf("invalid request body: %v", err))
+				return
+			}
+		}
+	}
 
 	ctx, cancel := context.WithTimeout(c.Request.Context(), 180*time.Second)
 	defer cancel()
@@ -44,7 +53,7 @@ func (h *DailyReportHandler) Generate(c *gin.Context) {
 
 func (h *DailyReportHandler) BriefData(c *gin.Context) {
 	date := c.Query("date")
-	data, err := h.svc.Collect(date)
+	data, err := h.svc.Collect(c.Request.Context(), date)
 	if err != nil {
 		response.BadRequest(c, err.Error())
 		return
@@ -61,29 +70,19 @@ func (h *DailyReportHandler) BriefData(c *gin.Context) {
 }
 
 func (h *DailyReportHandler) GenerateBrief(c *gin.Context) {
-	date := c.Query("date")
-
-	data, err := h.svc.Collect(date)
-	if err != nil {
-		response.InternalError(c, err.Error())
+	var opts service.BriefGenerateOptions
+	if err := c.ShouldBindJSON(&opts); err != nil && err.Error() != "EOF" {
+		response.BadRequest(c, fmt.Sprintf("invalid request body: %v", err))
 		return
 	}
 
-	if h.svc.LLMClient() != nil {
-		aiSummary, aiErr := h.svc.GenerateAISummary(c.Request.Context(), data)
-		if aiErr != nil {
-			data.AISummary = "(AI总结暂不可用)"
-		} else {
-			data.AISummary = aiSummary
-		}
-	}
+	ctx, cancel := context.WithTimeout(c.Request.Context(), 180*time.Second)
+	defer cancel()
 
-	markdown := service.RenderBriefReport(data)
-
-	result := map[string]interface{}{
-		"date":     data.Date,
-		"markdown": markdown,
-		"data":     data,
+	result, err := h.svc.GenerateBrief(ctx, opts)
+	if err != nil {
+		response.InternalError(c, err.Error())
+		return
 	}
 	response.Success(c, result)
 }

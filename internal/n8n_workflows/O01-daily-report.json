@@ -54,7 +54,7 @@
           "options": {
             "caseSensitive": true,
             "leftValue": "",
-            "typeValidation": "strict"
+            "typeValidation": "loose"
           },
           "conditions": [
             {
@@ -95,7 +95,7 @@
         },
         "sendBody": true,
         "specifyBody": "json",
-        "jsonBody": "{\n  \"channel\": \"alerts\",\n  \"message\": \"### ❌ 日报生成失败\\n\\n- 时间: {{ $now.setZone($env.BELLKEEPER_TIMEZONE || 'Asia/Shanghai').toFormat('yyyy-MM-dd HH:mm') }}\\n- 错误: {{ $json.error }}\\n\\n请检查 Bellkeeper 日志和日报服务状态。\",\n  \"message_type\": \"markdown\"\n}"
+        "jsonBody": "={{ JSON.stringify({ channel: 'alerts', message: '### ❌ 日报生成失败\\n\\n- 时间: ' + $now.setZone($env.BELLKEEPER_TIMEZONE || 'Asia/Shanghai').toFormat('yyyy-MM-dd HH:mm') + '\\n- 错误: ' + (typeof $json.error === 'string' ? $json.error : JSON.stringify($json.error)) + '\\n\\n请检查 Bellkeeper 日志和日报服务状态。', message_type: 'markdown' }) }}"
       },
       "id": "o01-0004",
       "name": "发送告警",

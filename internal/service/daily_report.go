@@ -108,6 +108,7 @@ type DailyReportData struct {
 	PKBCards    []PKBCardSummary           `json:"pkb_cards,omitempty"`
 	LLM         *LLMDashboardStats         `json:"llm,omitempty"`
 	Failures    []FailureDetail            `json:"failures,omitempty"`
+	TodoCount   int                        `json:"todo_count,omitempty"`
 	AISummary   string                     `json:"ai_summary,omitempty"`
 	Errors      []CollectError             `json:"errors,omitempty"`
 }
@@ -118,7 +119,7 @@ type collectorResult struct {
 	err  error
 }
 
-func (s *DailyReportService) Collect(date string) (*DailyReportData, error) {
+func (s *DailyReportService) Collect(ctx context.Context, date string) (*DailyReportData, error) {
 	var dayStart time.Time
 	if date != "" {
 		parsed, err := time.ParseInLocation("2006-01-02", date, s.loc)
@@ -136,47 +137,47 @@ func (s *DailyReportService) Collect(date string) (*DailyReportData, error) {
 
 	type collector struct {
 		name string
-		fn   func() (interface{}, error)
+		fn   func(ctx context.Context) (interface{}, error)
 	}
 
 	collectors := []collector{
-		{name: "health", fn: func() (interface{}, error) {
+		{name: "health", fn: func(ctx context.Context) (interface{}, error) {
 			return s.health.Detailed(), nil
 		}},
-		{name: "crawl", fn: func() (interface{}, error) {
+		{name: "crawl", fn: func(ctx context.Context) (interface{}, error) {
 			stats := &CrawlDashboardStats{}
 			if err := s.dashboard.fillCrawl(stats); err != nil {
 				return nil, err
 			}
 			return stats, nil
 		}},
-		{name: "rss_ingest", fn: func() (interface{}, error) {
+		{name: "rss_ingest", fn: func(ctx context.Context) (interface{}, error) {
 			return s.collectActionStats("rss_fetch", dayStart)
 		}},
-		{name: "file_ingest", fn: func() (interface{}, error) {
+		{name: "file_ingest", fn: func(ctx context.Context) (interface{}, error) {
 			return s.collectFileIngestStats(dayStart)
 		}},
-		{name: "classify", fn: func() (interface{}, error) {
+		{name: "classify", fn: func(ctx context.Context) (interface{}, error) {
 			return s.collectClassifyStats(dayStart)
 		}},
-		{name: "pkb", fn: func() (interface{}, error) {
+		{name: "pkb", fn: func(ctx context.Context) (interface{}, error) {
 			return s.pkbReport.VaultStats()
 		}},
-		{name: "pkb_cards", fn: func() (interface{}, error) {
+		{name: "pkb_cards", fn: func(ctx context.Context) (interface{}, error) {
 			cards, err := s.pkbReport.VaultCardsByDate(dateStr, 10)
 			if err != nil {
 				return nil, err
 			}
 			return cards, nil
 		}},
-		{name: "llm", fn: func() (interface{}, error) {
+		{name: "llm", fn: func(ctx context.Context) (interface{}, error) {
 			stats := &LLMDashboardStats{}
 			if err := s.dashboard.fillLLM(stats); err != nil {
 				return nil, err
 			}
 			return stats, nil
 		}},
-		{name: "failures", fn: func() (interface{}, error) {
+		{name: "failures", fn: func(ctx context.Context) (interface{}, error) {
 			return s.collectFailureDetails(dayStart)
 		}},
 	}
@@ -189,9 +190,14 @@ func (s *DailyReportService) Collect(date string) (*DailyReportData, error) {
 		wg.Add(1)
 		go func(col collector) {
 			defer wg.Done()
-			sem <- struct{}{}
+			select {
+			case sem <- struct{}{}:
+			case <-ctx.Done():
+				ch <- collectorResult{name: col.name, data: nil, err: ctx.Err()}
+				return
+			}
 			defer func() { <-sem }()
-			data, err := col.fn()
+			data, err := col.fn(ctx)
 			ch <- collectorResult{name: col.name, data: data, err: err}
 		}(c)
 	}
@@ -287,14 +293,18 @@ func (s *DailyReportService) collectClassifyStats(since time.Time) ([]ActionStat
 }
 
 func (s *DailyReportService) collectFailureDetails(since time.Time) ([]FailureDetail, error) {
-	rssFailures, err := s.activityRepo.GetRecentFailures("rss_fetch", since, 10)
-	if err != nil {
-		return nil, fmt.Errorf("get rss_fetch failures: %w", err)
-	}
 	var details []FailureDetail
-	for _, f := range rssFailures {
-		details = append(details, FailureDetail{Summary: f.Summary, RefID: f.RefID})
+
+	for _, module := range []string{"rss_fetch", "crawl"} {
+		failures, err := s.activityRepo.GetRecentFailures(module, since, 10)
+		if err != nil {
+			return nil, fmt.Errorf("get %s failures: %w", module, err)
+		}
+		for _, f := range failures {
+			details = append(details, FailureDetail{Summary: f.Summary, RefID: f.RefID})
+		}
 	}
+
 	return details, nil
 }
 
@@ -313,15 +323,14 @@ type GenerateResult struct {
 }
 
 func (s *DailyReportService) Generate(ctx context.Context, opts GenerateOptions) (*GenerateResult, error) {
-	data, err := s.Collect(opts.Date)
+	data, err := s.Collect(ctx, opts.Date)
 	if err != nil {
 		return nil, fmt.Errorf("collect daily report data: %w", err)
 	}
 
-	markdown := RenderDailyReport(data)
-
 	aiSummary, aiErr := s.generateAISummary(ctx, data)
 	if aiErr != nil {
+		log.Printf("[DailyReport] AI summary failed: %v", aiErr)
 		data.Errors = append(data.Errors, CollectError{
 			Source: "ai_summary",
 			Error:  aiErr.Error(),
@@ -329,8 +338,9 @@ func (s *DailyReportService) Generate(ctx context.Context, opts GenerateOptions)
 		data.AISummary = "(AI总结暂不可用)"
 	} else {
 		data.AISummary = aiSummary
-		markdown = RenderDailyReport(data)
 	}
+
+	markdown := RenderDailyReport(data)
 
 	result := &GenerateResult{
 		Data:     data,
@@ -444,6 +454,43 @@ func (s *DailyReportService) CollectBrief(date string) ([]ActionStatEntry, error
 	return s.collectActionStats("rss_fetch", dayStart)
 }
 
+type BriefGenerateOptions struct {
+	Date string `json:"date,omitempty"`
+}
+
+type BriefGenerateResult struct {
+	Date     string           `json:"date"`
+	Markdown string           `json:"markdown"`
+	Data     *DailyReportData `json:"data"`
+}
+
+func (s *DailyReportService) GenerateBrief(ctx context.Context, opts BriefGenerateOptions) (*BriefGenerateResult, error) {
+	data, err := s.Collect(ctx, opts.Date)
+	if err != nil {
+		return nil, fmt.Errorf("collect brief data: %w", err)
+	}
+
+	aiSummary, aiErr := s.generateAISummary(ctx, data)
+	if aiErr != nil {
+		log.Printf("[DailyReport] AI summary failed: %v", aiErr)
+		data.Errors = append(data.Errors, CollectError{
+			Source: "ai_summary",
+			Error:  aiErr.Error(),
+		})
+		data.AISummary = "(AI总结暂不可用)"
+	} else {
+		data.AISummary = aiSummary
+	}
+
+	markdown := RenderBriefReport(data)
+
+	return &BriefGenerateResult{
+		Date:     data.Date,
+		Markdown: markdown,
+		Data:     data,
+	}, nil
+}
+
 type BriefReportData struct {
 	Date      string              `json:"date"`
 	Crawl     *CrawlDashboardStats `json:"crawl,omitempty"`
@@ -452,10 +499,4 @@ type BriefReportData struct {
 	PKBCards  []PKBCardSummary     `json:"pkb_cards,omitempty"`
 }
 
-func (s *DailyReportService) LLMClient() *llmclient.Client {
-	return s.llmClient
-}
 
-func (s *DailyReportService) GenerateAISummary(ctx context.Context, data *DailyReportData) (string, error) {
-	return s.generateAISummary(ctx, data)
-}

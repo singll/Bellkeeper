@@ -195,3 +195,19 @@ spool logs keeper bellkeeper 100         # 查看最近 100 行日志
 ### 5.3 诚实边界（我能做与不能做）
 - 我**无法**逐 token 精确自测用量、也**无法**自行杀掉会话进程；我能做的是：监控 Claude Code 的用量提示、在达阈值时执行上述检查点、并停止接新活、提示用户另起会话。
 - 因此**小步提交 + 每会话先读计划文件**是防溢出的根本手段，阈值检查点是第二道防线。
+
+---
+
+## Agent skills
+
+### Issue tracker
+
+Issues tracked in GitHub (singll/Bellkeeper) via `gh` CLI. See `docs/agents/issue-tracker.md`.
+
+### Triage labels
+
+Using default triage label vocabulary (needs-triage, needs-info, ready-for-agent, ready-for-human, wontfix). See `docs/agents/triage-labels.md`.
+
+### Domain docs
+
+Single-context layout. See `docs/agents/domain.md`.

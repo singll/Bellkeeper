@@ -19,6 +19,7 @@ func RenderDailyReport(data *DailyReportData) string {
 	sb.WriteString(renderPKBSection(data))
 	sb.WriteString(renderLLMSection(data))
 	sb.WriteString(renderFailureSection(data))
+	sb.WriteString(renderTodoSection(data))
 	sb.WriteString(renderAISummarySection(data))
 	sb.WriteString(renderErrorsSection(data))
 
@@ -227,6 +228,10 @@ func renderErrorsSection(data *DailyReportData) string {
 
 func renderErrorSection(title, source string) string {
 	return fmt.Sprintf("\n#### %s\n- ⚠️ 数据获取失败: %s\n", title, source)
+}
+
+func renderTodoSection(data *DailyReportData) string {
+	return "\n#### 待办\n- ⏭️ Memos 待办统计暂未接入（待实现 Memos collector）\n"
 }
 
 func RenderBriefReport(data *DailyReportData) string {
