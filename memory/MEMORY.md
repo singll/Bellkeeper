@@ -4,17 +4,12 @@
 
 ## 当前进度
 
-- **Phase 0-8**: 全部完成 ✅
-- **Phase 9-10 (T5-T8)**: 全部完成 ✅
-  - T5: Agent MVP — llmclient tools 扩展 + AgentService + 6只读工具 + 会话 + 限速
-  - T6: Agent 扩展 — todo写工具 + workflow触发 + 权限护栏
-  - T7: 后端API补齐 — PUT rooms, POST/DELETE channels, PUT commands, POST notifications/retry
-  - T8: 前端API对齐（pnpm build 绿）
-- **Phase 9-10 (T9+收尾)**: 待执行
-  - T9: 文档与收尾
-  - doc/ 进版本库
-  - CLAUDE.md 瘦身
-  - v1.0.0 tag
+- **Phase 0-10**: 全部完成 ✅
+- **T9 文档与收尾**: ✅ 完成
+  - doc/ 进版本库（移除 .gitignore 忽略）
+  - 核心文档以代码为准重写（STATUS/ARCHITECTURE/ROADMAP/API/ARCHITECTURE-EXCEPTIONS）
+  - CLAUDE.md 瘦身（213行→~70行，运维+5红线+指针）
+- **待做**: 打 v1.0.0 tag
 
 ## 关键决策
 
@@ -28,8 +23,9 @@
 
 ## 下一步
 
-1. T9 文档与收尾 + v1.0.0 tag
+1. 打 v1.0.0 tag
 2. 可选：前端 7→3 页重构
+3. ROADMAP P0: PKB 存量批跑 + 提示词 P0 修复
 
 ## 计划文件
 
