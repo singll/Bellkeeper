@@ -163,17 +163,6 @@ func SeedMatrixPlatform(db *gorm.DB) error {
 	log.Println("info: seeding Matrix platform initial data...")
 
 	// Seed rooms from environment variables
-	type roomSeed struct {
-		RoomID   string
-		RoomName string
-		RoomType string
-	}
-
-	// Note: Room IDs will be loaded from environment variables at runtime
-	// For now, we just create the structure. Actual room registration
-	// will happen when the Matrix gateway starts.
-
-	// Seed default channels (logical channels mapped to rooms via env vars)
 	emptyJSON := func(s string) *string { return &s }
 	channels := []MatrixChannel{
 		{ChannelName: "alerts", RoomID: os.Getenv("BELLKEEPER_MATRIX_ROOM_ALERTS"), IsActive: true, Priority: 100, Config: emptyJSON("{}")},

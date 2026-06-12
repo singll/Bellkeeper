@@ -4,6 +4,7 @@ import (
 	"context"
 	"encoding/json"
 	"fmt"
+	"log"
 	"strings"
 	"time"
 
@@ -199,7 +200,9 @@ func (r *Router) loadCommandsFromDB() {
 func (r *Router) createHandlerFromDB(cmd *model.MatrixCommand) Handler {
 	var config map[string]interface{}
 	if cmd.HandlerConfig != nil && *cmd.HandlerConfig != "" {
-		json.Unmarshal([]byte(*cmd.HandlerConfig), &config)
+		if err := json.Unmarshal([]byte(*cmd.HandlerConfig), &config); err != nil {
+			log.Printf("[Router] failed to parse handler config for command %s: %v", cmd.CommandName, err)
+		}
 	}
 
 	switch cmd.HandlerType {

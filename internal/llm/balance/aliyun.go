@@ -69,7 +69,7 @@ func (p *aliyunProvider) Fetch(ctx context.Context) (*Info, error) {
 	if err != nil {
 		return nil, fmt.Errorf("fetch balance: %w", err)
 	}
-	defer resp.Body.Close()
+	defer resp.Body.Close() //nolint:errcheck
 
 	if resp.StatusCode != http.StatusOK {
 		return nil, fmt.Errorf("unexpected status: %d", resp.StatusCode)

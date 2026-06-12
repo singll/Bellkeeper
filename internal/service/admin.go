@@ -3,6 +3,7 @@ package service
 import (
 	"context"
 	"encoding/json"
+	"log"
 	"time"
 
 	"github.com/singll/bellkeeper/internal/matrix/policy"
@@ -103,7 +104,9 @@ func (s *AdminService) ListChannels(ctx context.Context) ([]*ChannelResponse, er
 	for i, c := range channels {
 		var config map[string]interface{}
 		if c.Config != nil {
-			json.Unmarshal([]byte(*c.Config), &config)
+			if err := json.Unmarshal([]byte(*c.Config), &config); err != nil {
+			log.Printf("[Admin] failed to parse channel config for %s: %v", c.ChannelName, err)
+		}
 		}
 
 		result[i] = &ChannelResponse{

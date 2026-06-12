@@ -256,7 +256,7 @@ func TestArticleTagRepository_ListWithFilter(t *testing.T) {
 	assertEqual(t, total, int64(1))
 	assertEqual(t, len(articles), 1)
 
-	articles, total, err = repo.ListWithFilter(ListArticleTagOpts{Keyword: "Go", Page: 1, PerPage: 10})
+	_, total, err = repo.ListWithFilter(ListArticleTagOpts{Keyword: "Go", Page: 1, PerPage: 10})
 	assertNoError(t, err, "ListWithFilter keyword=Go")
 	assertEqual(t, total, int64(1))
 }

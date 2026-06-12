@@ -298,7 +298,7 @@ func (c *Curator) writeDigestRoot(domain Domain, period string, cards []digestCa
 
 	indexPath := filepath.Join(dir, "_index.md")
 	if err := os.Rename(nextPath, indexPath); err != nil {
-		os.Remove(nextPath)
+		_ = os.Remove(nextPath)
 		return fmt.Errorf("rename _index.next.md→_index.md: %w", err)
 	}
 	fmt.Printf("[pkb-digest] → %s\n", indexPath)

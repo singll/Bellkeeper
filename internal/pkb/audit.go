@@ -3,6 +3,7 @@ package pkb
 import (
 	"encoding/json"
 	"fmt"
+	"log"
 	"os"
 	"path/filepath"
 	"strings"
@@ -62,7 +63,7 @@ func (c *Curator) buildAuditGraph() *auditGraph {
 		if _, err := os.Stat(root); os.IsNotExist(err) {
 			continue
 		}
-		filepath.WalkDir(root, func(path string, d os.DirEntry, err error) error {
+		if err := filepath.WalkDir(root, func(path string, d os.DirEntry, err error) error {
 			if err != nil || d.IsDir() || filepath.Ext(d.Name()) != ".md" {
 				return nil
 			}
@@ -106,7 +107,9 @@ func (c *Curator) buildAuditGraph() *auditGraph {
 				conceptIndex[concept] = append(conceptIndex[concept], path)
 			}
 			return nil
-		})
+		}); err != nil {
+			log.Printf("[PKB] failed to walk directory %s: %v", root, err)
+		}
 	}
 
 	validTargets := make(map[string]bool)

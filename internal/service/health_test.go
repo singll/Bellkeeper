@@ -24,7 +24,7 @@ func TestHealthService_Detailed_ConfigProbes(t *testing.T) {
 	go func() {
 		conn, err := ln.Accept()
 		if err == nil {
-			conn.Close()
+			conn.Close() //nolint:errcheck
 		}
 	}()
 	tcpAddr := ln.Addr().String()
@@ -94,11 +94,11 @@ func TestHealthService_checkTCPService(t *testing.T) {
 	if err != nil {
 		t.Fatalf("listen: %v", err)
 	}
-	defer ln.Close()
+	defer ln.Close() //nolint:errcheck
 	go func() {
 		conn, err := ln.Accept()
 		if err == nil {
-			conn.Close()
+			conn.Close() //nolint:errcheck
 		}
 	}()
 

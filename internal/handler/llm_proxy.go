@@ -97,7 +97,7 @@ func (h *LLMProxyHandler) proxyStream(c *gin.Context, path string, body []byte, 
 		response.InternalError(c, err.Error())
 		return
 	}
-	defer result.BodyReader.Close()
+	defer result.BodyReader.Close() //nolint:errcheck
 	defer h.svc.FinalizeStream(result, path, callerID, tokenID)
 
 	// Non-200 responses: read body fully and return as JSON error
@@ -135,7 +135,7 @@ func (h *LLMProxyHandler) streamPassthrough(c *gin.Context, bodyReader io.ReadCl
 	for {
 		n, err := bodyReader.Read(buf)
 		if n > 0 {
-			c.Writer.Write(buf[:n])
+			c.Writer.Write(buf[:n]) //nolint:errcheck
 			flusher.Flush()
 		}
 		if err != nil {
@@ -169,7 +169,7 @@ func (h *LLMProxyHandler) streamAnthropicToOpenAI(c *gin.Context, bodyReader io.
 			data := strings.TrimPrefix(line, "data: ")
 			output := converter.ConvertEvent(eventType, data)
 			if output != "" {
-				c.Writer.Write([]byte(output))
+				c.Writer.Write([]byte(output)) //nolint:errcheck
 				flusher.Flush()
 			}
 			eventType = ""

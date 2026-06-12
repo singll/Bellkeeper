@@ -91,7 +91,7 @@ func (c *Client) ChatCompletion(ctx context.Context, req ChatRequest, opts ChatO
 	if err != nil {
 		return "", fmt.Errorf("llm request: %w", err)
 	}
-	defer resp.Body.Close()
+	defer resp.Body.Close() //nolint:errcheck
 	raw, _ := io.ReadAll(resp.Body)
 	if resp.StatusCode >= 400 {
 		return "", &HTTPError{

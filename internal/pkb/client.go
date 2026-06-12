@@ -90,7 +90,7 @@ func (c *Client) ListRaw(perPage int, excludeProcessed bool) ([]ArticleMeta, err
 	if err != nil {
 		return nil, fmt.Errorf("list raw: %w", err)
 	}
-	defer resp.Body.Close()
+	defer resp.Body.Close() //nolint:errcheck
 	raw, _ := io.ReadAll(resp.Body)
 	if resp.StatusCode >= 400 {
 		return nil, fmt.Errorf("list raw returned %d: %s", resp.StatusCode, string(raw))
@@ -121,7 +121,7 @@ func (c *Client) SearchTitles(query string, layers []string, limit int) ([]strin
 	if err != nil {
 		return nil, fmt.Errorf("search: %w", err)
 	}
-	defer resp.Body.Close()
+	defer resp.Body.Close() //nolint:errcheck
 	raw, _ := io.ReadAll(resp.Body)
 	if resp.StatusCode >= 400 {
 		return nil, fmt.Errorf("search returned %d: %s", resp.StatusCode, string(raw))
@@ -167,7 +167,7 @@ func (c *Client) SearchContent(query string, layers []string, limit int) ([]Cont
 	if err != nil {
 		return nil, fmt.Errorf("search content: %w", err)
 	}
-	defer resp.Body.Close()
+	defer resp.Body.Close() //nolint:errcheck
 	raw, _ := io.ReadAll(resp.Body)
 	if resp.StatusCode >= 400 {
 		return nil, fmt.Errorf("search content returned %d: %s", resp.StatusCode, string(raw))
@@ -216,7 +216,7 @@ func (c *Client) Rebuild() error {
 	if err != nil {
 		return fmt.Errorf("rebuild: %w", err)
 	}
-	defer resp.Body.Close()
+	defer resp.Body.Close() //nolint:errcheck
 	raw, _ := io.ReadAll(resp.Body)
 	if resp.StatusCode >= 400 {
 		return fmt.Errorf("rebuild returned %d: %s", resp.StatusCode, string(raw))

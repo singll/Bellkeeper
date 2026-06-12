@@ -365,7 +365,9 @@ func (s *RSSFetcherService) fetchFeed(ctx context.Context, feed *model.RSSFeed) 
 		// Update last_fetched_at even on error
 		now := time.Now()
 		feed.LastFetchedAt = &now
-		s.rssRepo.Update(feed)
+		if err := s.rssRepo.Update(feed); err != nil {
+			log.Printf("[RSSFetcher] failed to update feed after fetch error: %v", err)
+		}
 
 		// Log activity
 		durationMs := int(time.Since(startTime).Milliseconds())
@@ -444,7 +446,7 @@ func (s *RSSFetcherService) parseFeedWithRetry(ctx context.Context, url string) 
 	if err != nil {
 		return nil, fmt.Errorf("HTTP fetch failed: %w", err)
 	}
-	defer resp.Body.Close()
+	defer resp.Body.Close() //nolint:errcheck
 
 	if resp.StatusCode != http.StatusOK {
 		return nil, fmt.Errorf("HTTP fetch returned status %d", resp.StatusCode)
@@ -512,7 +514,9 @@ func (s *RSSFetcherService) recordSuccess(feed *model.RSSFeed) {
 			feed.ID, 0)
 	}
 
-	s.rssRepo.Update(feed)
+	if err := s.rssRepo.Update(feed); err != nil {
+		log.Printf("[RSSFetcher] failed to update feed after recordSuccess: %v", err)
+	}
 }
 
 // recordFailure updates health tracking after a failed fetch
@@ -540,7 +544,9 @@ func (s *RSSFetcherService) recordFailure(feed *model.RSSFeed, reason string) {
 			feed.ID, 0)
 	}
 
-	s.rssRepo.Update(feed)
+	if err := s.rssRepo.Update(feed); err != nil {
+		log.Printf("[RSSFetcher] failed to update feed after recordFailure: %v", err)
+	}
 
 	// Schedule retry if not already at max and not paused
 	if feed.ConsecutiveFailures <= MaxRetryAttempts && !feed.IsPaused {
@@ -841,7 +847,7 @@ func (s *RSSFetcherService) ValidateFeedURL(ctx context.Context, rawURL string) 
 		result.Error = fmt.Sprintf("fetch failed: %v", err)
 		return result, nil
 	}
-	defer resp.Body.Close()
+	defer resp.Body.Close() //nolint:errcheck
 
 	if resp.StatusCode != http.StatusOK {
 		result.Error = fmt.Sprintf("HTTP %d", resp.StatusCode)

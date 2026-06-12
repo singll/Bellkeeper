@@ -191,7 +191,7 @@ func (s *ExtractorService) extractWithFirecrawl(req *ExtractionRequest) (*Extrac
 	if err != nil {
 		return nil, fmt.Errorf("HTTP request failed: %w", err)
 	}
-	defer resp.Body.Close()
+	defer resp.Body.Close() //nolint:errcheck
 
 	// Read response
 	respBody, err := io.ReadAll(resp.Body)

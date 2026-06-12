@@ -1381,7 +1381,7 @@ func (s *LLMProxyService) tryChannel(
 		}
 
 		// Prepare request body and path for provider-specific conversion
-		forwardBody := body
+		var forwardBody []byte
 		forwardPath := path
 		isGemini := ch.Config.ProviderType == "gemini"
 		realModel := modelName
@@ -1457,7 +1457,7 @@ func (s *LLMProxyService) tryChannel(
 		}
 
 		respBytes, _ := io.ReadAll(resp.Body)
-		resp.Body.Close()
+		resp.Body.Close() //nolint:errcheck
 
 		// Extract token usage. For Anthropic, read it from the RAW body BEFORE
 		// conversion — the OpenAI conversion drops cache_read_input_tokens, which
@@ -2021,7 +2021,7 @@ func (s *LLMProxyService) tryChannelStream(
 
 	if resp.StatusCode >= 400 {
 		respBytes, _ := io.ReadAll(resp.Body)
-		resp.Body.Close()
+		resp.Body.Close() //nolint:errcheck
 
 		// Convert Anthropic error response
 		if isAnthropic {
@@ -2399,10 +2399,10 @@ func (s *LLMProxyService) archiveLogs(retentionDays int) {
 		middleware.GetLogger().Warn("failed to open archive file", zap.String("path", archivePath), zap.Error(err))
 		return
 	}
-	defer file.Close()
+	defer file.Close() //nolint:errcheck
 
 	gzWriter := gzip.NewWriter(file)
-	defer gzWriter.Close()
+	defer gzWriter.Close() //nolint:errcheck
 
 	// Query old logs
 	logs, err := s.repo.GetLogsBefore(cutoff)

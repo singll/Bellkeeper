@@ -368,7 +368,7 @@ func (c *Curator) reconstructToVault(art ArticleMeta, body string, score *ScoreR
 			continue
 		}
 		if err := os.Rename(tmpPath, dst); err != nil {
-			os.Remove(tmpPath)
+			_ = os.Remove(tmpPath)
 			errors = append(errors, fmt.Sprintf("rename %s→%s: %v", tmpPath, dst, err))
 			skipped++
 			continue

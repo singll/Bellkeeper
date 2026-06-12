@@ -65,7 +65,7 @@ func (h *N8NTriggerHandler) Handle(ctx context.Context, cmdCtx *Context) (*Respo
 			Message: fmt.Sprintf("❌ 工作流调用失败: %v", err),
 		}, nil
 	}
-	defer resp.Body.Close()
+	defer resp.Body.Close() //nolint:errcheck
 
 	respBody, _ := io.ReadAll(resp.Body)
 

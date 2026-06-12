@@ -150,13 +150,6 @@ func (h *ChannelHealth) recordFailureLocked(errorType, class string, breakdownDu
 	return false
 }
 
-// tripOpen transitions the circuit to Open state with optional semantic duration.
-func (h *ChannelHealth) tripOpen() {
-	h.mu.Lock()
-	defer h.mu.Unlock()
-	h.tripOpenLocked("", 0)
-}
-
 func (h *ChannelHealth) tripOpenLocked(class string, breakdownDuration time.Duration) {
 	cooldown := time.Duration(h.cfg.CooldownSeconds) * time.Second
 	if breakdownDuration > 0 {

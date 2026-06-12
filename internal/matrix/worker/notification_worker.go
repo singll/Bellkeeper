@@ -127,7 +127,7 @@ func (w *NotificationWorker) processMessage(ctx context.Context, msg *nats.Msg) 
 	var notification service.NotificationQueueMessage
 	if err := json.Unmarshal(msg.Data, &notification); err != nil {
 		middleware.GetLogger().Error("failed to unmarshal notification message", zap.Error(err))
-		msg.Nak()
+		_ = msg.Nak()
 		return
 	}
 
@@ -156,16 +156,16 @@ func (w *NotificationWorker) processMessage(ctx context.Context, msg *nats.Msg) 
 				zap.Int("attempt", deliveryCount),
 				zap.Int("max", w.maxRetry),
 				zap.Duration("delay", delay))
-			msg.NakWithDelay(delay)
+			_ = msg.NakWithDelay(delay)
 		} else {
 			middleware.GetLogger().Warn("notification exceeded max retries",
 				zap.String("notification_id", notification.NotificationID))
-			msg.Ack()
+			_ = msg.Ack()
 		}
 		return
 	}
 
-	msg.Ack()
+	_ = msg.Ack()
 	middleware.GetLogger().Info("notification sent successfully",
 		zap.String("notification_id", notification.NotificationID))
 }

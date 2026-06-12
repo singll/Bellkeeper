@@ -124,7 +124,9 @@ func (s *NotificationSender) RetryFailedNotifications(ctx context.Context, maxRe
 
 		if err := s.Send(ctx, msg); err != nil {
 			log.Printf("[NotifySender] retry failed for %s: %v", n.NotificationID, err)
-			s.repos.MatrixNotification.UpdateStatus(ctx, n.NotificationID, "retrying", err.Error())
+			if err := s.repos.MatrixNotification.UpdateStatus(ctx, n.NotificationID, "retrying", err.Error()); err != nil {
+				log.Printf("[NotifySender] failed to update notification %s status: %v", n.NotificationID, err)
+			}
 		}
 
 		// Rate limit between retries

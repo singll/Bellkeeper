@@ -176,7 +176,7 @@ func (s *HealthService) checkN8N() ServiceStatus {
 	if err != nil {
 		return ServiceStatus{Status: "down", LatencyMs: latency, Error: err.Error()}
 	}
-	defer resp.Body.Close()
+	defer resp.Body.Close() //nolint:errcheck
 
 	if resp.StatusCode >= 200 && resp.StatusCode < 400 {
 		return ServiceStatus{Status: "up", LatencyMs: latency}
@@ -211,7 +211,7 @@ func (s *HealthService) checkHTTPServiceWithTimeout(url string, timeoutSec int) 
 			Error:     err.Error(),
 		}
 	}
-	defer resp.Body.Close()
+	defer resp.Body.Close() //nolint:errcheck
 
 	if resp.StatusCode >= 200 && resp.StatusCode < 400 {
 		return ServiceStatus{
@@ -243,7 +243,7 @@ func (s *HealthService) checkTCPService(addr string, timeoutSec int) ServiceStat
 			Error:     err.Error(),
 		}
 	}
-	conn.Close()
+	_ = conn.Close()
 	return ServiceStatus{
 		Status:    "up",
 		LatencyMs: latency,

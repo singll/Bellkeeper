@@ -109,19 +109,6 @@ func allModels() []interface{} {
 	}
 }
 
-func seedTags(t *testing.T, db *gorm.DB, names ...string) []model.Tag {
-	t.Helper()
-	var tags []model.Tag
-	for _, name := range names {
-		tag := model.Tag{Name: name, Color: "#409EFF"}
-		if err := db.Create(&tag).Error; err != nil {
-			t.Fatalf("seed tag %q: %v", name, err)
-		}
-		tags = append(tags, tag)
-	}
-	return tags
-}
-
 func assertEqual(t *testing.T, got, want interface{}, msg ...string) {
 	t.Helper()
 	prefix := ""

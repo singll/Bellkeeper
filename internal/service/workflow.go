@@ -205,7 +205,7 @@ func (s *WorkflowService) doN8NRequest(method, endpoint string, body interface{}
 	if err != nil {
 		return nil, fmt.Errorf("failed to connect to n8n: %w", err)
 	}
-	defer resp.Body.Close()
+	defer resp.Body.Close() //nolint:errcheck
 
 	respBody, err := io.ReadAll(resp.Body)
 	if err != nil {
@@ -602,7 +602,7 @@ func parseWorkflowStatus(data []byte) (*WorkflowStatus, error) {
 
 	tags := make([]WorkflowTag, len(wf.Tags))
 	for i, t := range wf.Tags {
-		tags[i] = WorkflowTag{ID: t.ID, Name: t.Name}
+		tags[i] = WorkflowTag(t)
 	}
 
 	return &WorkflowStatus{
@@ -632,7 +632,7 @@ func (s *WorkflowService) Status() ([]WorkflowStatus, error) {
 	for i, wf := range n8nResp.Data {
 		tags := make([]WorkflowTag, len(wf.Tags))
 		for j, t := range wf.Tags {
-			tags[j] = WorkflowTag{ID: t.ID, Name: t.Name}
+			tags[j] = WorkflowTag(t)
 		}
 		workflows[i] = WorkflowStatus{
 			ID:        wf.ID,
@@ -690,14 +690,7 @@ func (s *WorkflowService) GetExecutions(workflowID string, limit int) ([]Workflo
 
 	executions := make([]WorkflowExecution, len(n8nResp.Data))
 	for i, ex := range n8nResp.Data {
-		executions[i] = WorkflowExecution{
-			ID:         ex.ID,
-			WorkflowID: ex.WorkflowID,
-			Finished:   ex.Finished,
-			Status:     ex.Status,
-			StartedAt:  ex.StartedAt,
-			StoppedAt:  ex.StoppedAt,
-		}
+		executions[i] = WorkflowExecution(ex)
 	}
 
 	return executions, nil
@@ -725,7 +718,7 @@ func (s *WorkflowService) Trigger(name string, payload map[string]interface{}) (
 	if err != nil {
 		return nil, err
 	}
-	defer resp.Body.Close()
+	defer resp.Body.Close() //nolint:errcheck
 
 	respBody, err := io.ReadAll(resp.Body)
 	if err != nil {

@@ -24,7 +24,6 @@ type NotificationService struct {
 	repos        *repository.Repositories
 	channelsMu   sync.RWMutex
 	channels     map[string]*model.MatrixChannel // cached channel config
-	notifySender *NotificationSender
 
 	// Aggregation
 	aggMu      sync.Mutex
@@ -224,7 +223,9 @@ func (s *NotificationService) Send(ctx context.Context, req *NotificationRequest
 
 	subject := fmt.Sprintf("%s.%s", s.cfg.Streams.Notifications, req.Channel)
 	if err := s.nats.Publish(subject, msgBytes); err != nil {
-		s.repos.MatrixNotification.UpdateStatus(ctx, req.ID, "failed", err.Error())
+		if err := s.repos.MatrixNotification.UpdateStatus(ctx, req.ID, "failed", err.Error()); err != nil {
+			log.Printf("[Notify] failed to update notification %s status to failed: %v", req.ID, err)
+		}
 		return nil, fmt.Errorf("failed to publish to queue: %w", err)
 	}
 

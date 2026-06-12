@@ -148,7 +148,7 @@ func LLMTokenAuth(tokenRepo LLMTokenStore, serverAPIKey string) gin.HandlerFunc 
 			if err == nil && used >= token.QuotaRequestsDaily {
 				resetTime := time.Now().AddDate(0, 0, 1).Truncate(24 * time.Hour)
 				c.Header("X-Quota-Reset", resetTime.Format(time.RFC3339))
-				c.Header("Retry-After", strconv.Itoa(int(resetTime.Sub(time.Now()).Seconds())))
+				c.Header("Retry-After", strconv.Itoa(int(time.Until(resetTime).Seconds())))
 				response.TooManyRequests(c, "daily request quota exceeded")
 				c.Abort()
 				return
@@ -161,7 +161,7 @@ func LLMTokenAuth(tokenRepo LLMTokenStore, serverAPIKey string) gin.HandlerFunc 
 			if err == nil && used >= token.QuotaTokensDaily {
 				resetTime := time.Now().AddDate(0, 0, 1).Truncate(24 * time.Hour)
 				c.Header("X-Quota-Reset", resetTime.Format(time.RFC3339))
-				c.Header("Retry-After", strconv.Itoa(int(resetTime.Sub(time.Now()).Seconds())))
+				c.Header("Retry-After", strconv.Itoa(int(time.Until(resetTime).Seconds())))
 				response.TooManyRequests(c, "daily token quota exceeded")
 				c.Abort()
 				return
@@ -175,7 +175,7 @@ func LLMTokenAuth(tokenRepo LLMTokenStore, serverAPIKey string) gin.HandlerFunc 
 				now := time.Now()
 				resetTime := time.Date(now.Year(), now.Month(), 1, 0, 0, 0, 0, now.Location()).AddDate(0, 1, 0)
 				c.Header("X-Quota-Reset", resetTime.Format(time.RFC3339))
-				c.Header("Retry-After", strconv.Itoa(int(resetTime.Sub(time.Now()).Seconds())))
+				c.Header("Retry-After", strconv.Itoa(int(time.Until(resetTime).Seconds())))
 				response.TooManyRequests(c, "monthly cost quota exceeded")
 				c.Abort()
 				return

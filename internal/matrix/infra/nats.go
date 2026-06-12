@@ -2,6 +2,7 @@ package infra
 
 import (
 	"fmt"
+	"log"
 	"time"
 
 	"github.com/nats-io/nats.go"
@@ -117,7 +118,9 @@ func (n *NATSClient) Subscribe(subject, durableName string) (*nats.Subscription,
 
 // Close closes the NATS connection
 func (n *NATSClient) Close() {
-	n.conn.Drain()
+	if err := n.conn.Drain(); err != nil {
+		log.Printf("[NATS] failed to drain connection: %v", err)
+	}
 }
 
 // JetStream returns the JetStream context for advanced operations

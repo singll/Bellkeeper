@@ -50,7 +50,7 @@ func (h *TodoTxtHandler) Export(c *gin.Context) {
 		response.InternalError(c, "Failed to call Memos API: "+err.Error())
 		return
 	}
-	defer resp.Body.Close()
+	defer resp.Body.Close() //nolint:errcheck
 
 	body, _ := io.ReadAll(resp.Body)
 
@@ -146,7 +146,7 @@ func (h *TodoTxtHandler) ExportPlain(c *gin.Context) {
 		c.String(http.StatusInternalServerError, "Failed to call Memos API")
 		return
 	}
-	defer resp.Body.Close()
+	defer resp.Body.Close() //nolint:errcheck
 
 	body, _ := io.ReadAll(resp.Body)
 

@@ -438,7 +438,9 @@ func (s *CrawlQueueService) processJob(ctx context.Context, job *model.CrawlJob,
 
 	// Layer 3: paywall keyword detection
 	if s.detectPaywallKeywords(content) {
-		s.repo.MarkBlocked(job.ID, "paywall_keywords")
+		if err := s.repo.MarkBlocked(job.ID, "paywall_keywords"); err != nil {
+		log.Printf("[CrawlQueue] failed to mark job %d blocked (paywall_keywords): %v", job.ID, err)
+	}
 		s.logActivity("job_blocked", "blocked",
 			fmt.Sprintf("Paywall keywords detected: %s extractor=%s", job.URL, extractorUsed), job.SourceID)
 		s.notifyBlocked(job.URL, job.SourceDomain, "paywall_keywords")
@@ -469,12 +471,16 @@ func (s *CrawlQueueService) processJob(ctx context.Context, job *model.CrawlJob,
 		"extractor_used": extractorUsed,
 	}
 	if ingestResult.Status == "duplicate" || ingestResult.Status == "duplicate_content" {
-		s.repo.UpdateStatus(job.ID, model.CrawlJobSkipped, updates)
+		if err := s.repo.UpdateStatus(job.ID, model.CrawlJobSkipped, updates); err != nil {
+			log.Printf("[CrawlQueue] failed to update job %d status to skipped: %v", job.ID, err)
+		}
 		s.logActivity("job_skipped", "skipped",
 			fmt.Sprintf("Skipped (duplicate): %s", job.URL), job.SourceID)
 		s.recordDomainOutcome(job, string(model.CrawlJobSkipped), "", "duplicate", nil)
 	} else {
-		s.repo.UpdateStatus(job.ID, model.CrawlJobSuccess, updates)
+		if err := s.repo.UpdateStatus(job.ID, model.CrawlJobSuccess, updates); err != nil {
+			log.Printf("[CrawlQueue] failed to update job %d status to success: %v", job.ID, err)
+		}
 		s.logActivity("job_success", "success",
 			fmt.Sprintf("Success: %s extractor=%s len=%d", job.URL, extractorUsed, len(content)),
 			job.SourceID)
@@ -497,20 +503,26 @@ func (s *CrawlQueueService) handleExtractionFailure(job *model.CrawlJob, err err
 
 	switch errType {
 	case "not_found", "client_error":
-		s.repo.MarkDead(job.ID, errType, errMsg)
+		if err := s.repo.MarkDead(job.ID, errType, errMsg); err != nil {
+			log.Printf("[CrawlQueue] failed to mark job %d dead (%s): %v", job.ID, errType, err)
+		}
 		s.logActivity("job_dead", "dead",
 			fmt.Sprintf("Dead (%s): %s err=%s", errType, job.URL, errMsg), job.SourceID)
 		s.recordDomainOutcome(job, string(model.CrawlJobDead), errType, errMsg, nil)
 	case "forbidden":
 		if job.RetryCount >= 1 {
-			s.repo.MarkBlocked(job.ID, "forbidden")
+			if err := s.repo.MarkBlocked(job.ID, "forbidden"); err != nil {
+				log.Printf("[CrawlQueue] failed to mark job %d blocked (forbidden): %v", job.ID, err)
+			}
 			s.logActivity("job_blocked", "blocked",
 				fmt.Sprintf("Blocked (forbidden after retry): %s err=%s", job.URL, errMsg), job.SourceID)
 			s.notifyBlocked(job.URL, job.SourceDomain, "forbidden")
 			s.recordDomainOutcome(job, string(model.CrawlJobBlocked), errType, errMsg, nil)
 		} else {
 			nextRetry := s.calculateBackoff(job.RetryCount, errType)
-			s.repo.MarkRetry(job.ID, nextRetry, errType, errMsg)
+			if err := s.repo.MarkRetry(job.ID, nextRetry, errType, errMsg); err != nil {
+				log.Printf("[CrawlQueue] failed to mark job %d retry (forbidden): %v", job.ID, err)
+			}
 			s.logActivity("job_retry", "retrying",
 				fmt.Sprintf("Retry (forbidden): %s attempt=%d next=%s err=%s", job.URL, job.RetryCount+1, nextRetry.Format(time.RFC3339), errMsg),
 				job.SourceID)
@@ -518,7 +530,9 @@ func (s *CrawlQueueService) handleExtractionFailure(job *model.CrawlJob, err err
 		}
 	case "rate_limited":
 		if job.RetryCount >= job.MaxRetries {
-			s.repo.MarkDead(job.ID, errType, errMsg)
+			if err := s.repo.MarkDead(job.ID, errType, errMsg); err != nil {
+				log.Printf("[CrawlQueue] failed to mark job %d dead (rate_limited): %v", job.ID, err)
+			}
 			s.logActivity("job_dead", "dead",
 				fmt.Sprintf("Dead (rate_limited max retries): %s retries=%d err=%s", job.URL, job.RetryCount, errMsg), job.SourceID)
 			s.recordDomainOutcome(job, string(model.CrawlJobDead), errType, errMsg, nil)
@@ -527,14 +541,18 @@ func (s *CrawlQueueService) handleExtractionFailure(job *model.CrawlJob, err err
 			if retryAfter, ok := retryAfterFromError(err, time.Now()); ok && retryAfter.After(time.Now()) {
 				nextRetry = retryAfter
 			}
-			s.repo.MarkRetry(job.ID, nextRetry, errType, errMsg)
+			if err := s.repo.MarkRetry(job.ID, nextRetry, errType, errMsg); err != nil {
+				log.Printf("[CrawlQueue] failed to mark job %d retry (rate_limited): %v", job.ID, err)
+			}
 			s.logActivity("job_retry", "retrying",
 				fmt.Sprintf("Retry (rate_limited): %s attempt=%d next=%s err=%s", job.URL, job.RetryCount+1, nextRetry.Format(time.RFC3339), errMsg),
 				job.SourceID)
 			s.recordDomainOutcome(job, string(model.CrawlJobRetrying), errType, errMsg, &nextRetry)
 		}
 	case "paywall":
-		s.repo.MarkBlocked(job.ID, "paywall_detected")
+		if err := s.repo.MarkBlocked(job.ID, "paywall_detected"); err != nil {
+			log.Printf("[CrawlQueue] failed to mark job %d blocked (paywall_detected): %v", job.ID, err)
+		}
 		s.logActivity("job_blocked", "blocked",
 			fmt.Sprintf("Blocked (paywall): %s", job.URL), job.SourceID)
 		s.notifyBlocked(job.URL, job.SourceDomain, "paywall_detected")
@@ -543,13 +561,17 @@ func (s *CrawlQueueService) handleExtractionFailure(job *model.CrawlJob, err err
 	default:
 		// Retryable: timeout, server_error, network, empty_content, unknown
 		if job.RetryCount >= job.MaxRetries {
-			s.repo.MarkDead(job.ID, errType, errMsg)
+			if err := s.repo.MarkDead(job.ID, errType, errMsg); err != nil {
+				log.Printf("[CrawlQueue] failed to mark job %d dead (max retries): %v", job.ID, err)
+			}
 			s.logActivity("job_dead", "dead",
 				fmt.Sprintf("Dead (max retries): %s retries=%d err=%s", job.URL, job.RetryCount, errMsg), job.SourceID)
 			s.recordDomainOutcome(job, string(model.CrawlJobDead), errType, errMsg, nil)
 		} else {
 			nextRetry := s.calculateBackoff(job.RetryCount, errType)
-			s.repo.MarkRetry(job.ID, nextRetry, errType, errMsg)
+			if err := s.repo.MarkRetry(job.ID, nextRetry, errType, errMsg); err != nil {
+				log.Printf("[CrawlQueue] failed to mark job %d retry: %v", job.ID, err)
+			}
 			s.logActivity("job_retry", "retrying",
 				fmt.Sprintf("Retry: %s attempt=%d next=%s err=%s", job.URL, job.RetryCount+1, nextRetry.Format(time.Kitchen), errMsg),
 				job.SourceID)
@@ -563,7 +585,9 @@ func (s *CrawlQueueService) handleEmptyContent(job *model.CrawlJob, extractor st
 	// Check how many times this domain had empty content recently
 	count, _ := s.repo.CountByDomainAndStatus(job.SourceDomain, model.CrawlJobBlocked, time.Now().Add(-24*time.Hour))
 	if int(count)+1 >= s.cfg.PaywallThreshold {
-		s.repo.MarkBlocked(job.ID, "empty_content_repeated")
+		if err := s.repo.MarkBlocked(job.ID, "empty_content_repeated"); err != nil {
+			log.Printf("[CrawlQueue] failed to mark job %d as blocked: %v", job.ID, err)
+		}
 		s.logActivity("job_blocked", "blocked",
 			fmt.Sprintf("Blocked (repeated empty): %s domain=%s count=%d", job.URL, job.SourceDomain, count+1),
 			job.SourceID)
@@ -571,15 +595,18 @@ func (s *CrawlQueueService) handleEmptyContent(job *model.CrawlJob, extractor st
 		s.autoLearnDomain(job.SourceDomain)
 		s.recordDomainOutcome(job, string(model.CrawlJobBlocked), "empty_content_repeated", "repeated empty content", nil)
 	} else {
-		// Retry once to confirm
 		if job.RetryCount >= 1 {
-			s.repo.MarkBlocked(job.ID, "empty_content")
+			if err := s.repo.MarkBlocked(job.ID, "empty_content"); err != nil {
+				log.Printf("[CrawlQueue] failed to mark job %d as blocked: %v", job.ID, err)
+			}
 			s.logActivity("job_blocked", "blocked",
 				fmt.Sprintf("Blocked (empty content): %s", job.URL), job.SourceID)
 			s.recordDomainOutcome(job, string(model.CrawlJobBlocked), "empty_content", "content too short", nil)
 		} else {
 			nextRetry := time.Now().Add(30 * time.Second)
-			s.repo.MarkRetry(job.ID, nextRetry, "empty_content", "content too short")
+			if err := s.repo.MarkRetry(job.ID, nextRetry, "empty_content", "content too short"); err != nil {
+				log.Printf("[CrawlQueue] failed to mark job %d for retry: %v", job.ID, err)
+			}
 			s.logActivity("job_retry", "retrying",
 				fmt.Sprintf("Retry (empty content): %s", job.URL), job.SourceID)
 			s.recordDomainOutcome(job, string(model.CrawlJobRetrying), "empty_content", "content too short", &nextRetry)
@@ -743,13 +770,15 @@ func (s *CrawlQueueService) notifyBlocked(rawURL, domain, reason string) {
 		return
 	}
 	msg := fmt.Sprintf("[CrawlQueue] URL blocked: %s | Domain: %s | Reason: %s", rawURL, domain, reason)
-	s.notification.Send(context.Background(), &NotificationRequest{
+	if _, err := s.notification.Send(context.Background(), &NotificationRequest{
 		Channel:     "alerts",
 		Message:     msg,
 		MessageType: "text",
 		DedupKey:    "crawl_blocked:" + domain,
 		Severity:    "info",
-	})
+	}); err != nil {
+		log.Printf("[CrawlQueue] failed to send blocked notification for %s: %v", domain, err)
+	}
 }
 
 // logActivity logs a crawl queue activity event.

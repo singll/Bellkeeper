@@ -11,8 +11,8 @@ import (
 // use a fresh nonce per call, and treat unprefixed values as plaintext on decrypt.
 func TestEncryptDecryptRoundTrip(t *testing.T) {
 	// Key must be set before any (de)cryption so initCipher latches enabled.
-	os.Setenv(credentialKeyEnv, "test-credential-key-please-rotate")
-	defer os.Unsetenv(credentialKeyEnv)
+	os.Setenv(credentialKeyEnv, "test-credential-key-please-rotate") //nolint:errcheck
+	defer os.Unsetenv(credentialKeyEnv) //nolint:errcheck
 
 	if !Enabled() {
 		t.Fatal("encryption should be enabled when the key is set")

@@ -48,7 +48,7 @@ func renderHealthSection(data *DailyReportData) string {
 
 	for _, name := range names {
 		svc := services[name]
-		icon := "✅"
+		var icon string
 		status := svc.Status
 		switch svc.Status {
 		case "up":

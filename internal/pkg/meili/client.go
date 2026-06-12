@@ -205,15 +205,6 @@ func (c *Client) Search(ctx context.Context, query string, req *SearchRequest) (
 	}, nil
 }
 
-// getMapKeys 获取 map 的所有 key
-func getMapKeys(m map[string]interface{}) []string {
-	keys := make([]string, 0, len(m))
-	for k := range m {
-		keys = append(keys, k)
-	}
-	return keys
-}
-
 // DeleteDocument 删除单个文档
 func (c *Client) DeleteDocument(ctx context.Context, id string) error {
 	_, err := c.Index().DeleteDocument(id, nil)

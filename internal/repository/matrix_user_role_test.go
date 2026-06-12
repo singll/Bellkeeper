@@ -69,7 +69,7 @@ func TestMatrixUserRoleRepository_Upsert(t *testing.T) {
 
 	assertNoError(t, repo.Upsert(ctx, "@u:m.org", "!r1:m.org", "admin"), "Upsert update")
 
-	got, err = repo.GetByUserAndRoom(ctx, "@u:m.org", "!r1:m.org")
+	_, err = repo.GetByUserAndRoom(ctx, "@u:m.org", "!r1:m.org")
 	assertNoError(t, err, "GetByUserAndRoom after update")
 }
 

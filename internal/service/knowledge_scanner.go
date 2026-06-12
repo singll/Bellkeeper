@@ -7,7 +7,6 @@ import (
 	"os"
 	"path/filepath"
 	"regexp"
-	"strconv"
 	"strings"
 
 	"github.com/singll/bellkeeper/internal/config"
@@ -462,12 +461,4 @@ func cleanFrontmatterTag(tag string) string {
 	return tag
 }
 
-// getIntFromMap 安全获取整数
-func getIntFromMap(m map[string]string, key string, defaultVal int) int {
-	if v, ok := m[key]; ok {
-		if i, err := strconv.Atoi(v); err == nil {
-			return i
-		}
-	}
-	return defaultVal
-}
+

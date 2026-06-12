@@ -100,7 +100,7 @@ func (h *DirectMemosHandler) listTodos(ctx context.Context) (*Response, error) {
 			Message: fmt.Sprintf("❌ 调用 Memos API 失败: %v", err),
 		}, nil
 	}
-	defer resp.Body.Close()
+	defer resp.Body.Close() //nolint:errcheck
 
 	respBody, _ := io.ReadAll(resp.Body)
 
@@ -226,7 +226,7 @@ func (h *DirectMemosHandler) addTodo(ctx context.Context, content string) (*Resp
 			Message: fmt.Sprintf("❌ 创建待办失败: %v", err),
 		}, nil
 	}
-	defer resp.Body.Close()
+	defer resp.Body.Close() //nolint:errcheck
 
 	respBody, _ := io.ReadAll(resp.Body)
 
@@ -301,7 +301,7 @@ func (h *DirectMemosHandler) completeTodo(ctx context.Context, idStr string) (*R
 			Message: fmt.Sprintf("❌ 标记完成失败: %v", err),
 		}, nil
 	}
-	defer resp.Body.Close()
+	defer resp.Body.Close() //nolint:errcheck
 
 	respBody, _ := io.ReadAll(resp.Body)
 
@@ -355,7 +355,7 @@ func (h *DirectMemosHandler) deleteTodo(ctx context.Context, idStr string) (*Res
 			Message: fmt.Sprintf("❌ 删除待办失败: %v", err),
 		}, nil
 	}
-	defer resp.Body.Close()
+	defer resp.Body.Close() //nolint:errcheck
 
 	if resp.StatusCode >= 400 && resp.StatusCode != 404 {
 		respBody, _ := io.ReadAll(resp.Body)
@@ -408,7 +408,7 @@ func (h *DirectMemosHandler) showTodo(ctx context.Context, idStr string) (*Respo
 			Message: fmt.Sprintf("❌ 查询待办失败: %v", err),
 		}, nil
 	}
-	defer resp.Body.Close()
+	defer resp.Body.Close() //nolint:errcheck
 
 	respBody, _ := io.ReadAll(resp.Body)
 

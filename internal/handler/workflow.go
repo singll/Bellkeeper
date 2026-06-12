@@ -165,7 +165,10 @@ func (h *WorkflowHandler) Trigger(c *gin.Context) {
 	name := c.Param("name")
 
 	var payload map[string]interface{}
-	c.ShouldBindJSON(&payload)
+	if err := c.ShouldBindJSON(&payload); err != nil {
+		response.BadRequest(c, err.Error())
+		return
+	}
 
 	result, err := h.svc.Trigger(name, payload)
 	if err != nil {

@@ -153,9 +153,6 @@ func (s *CommandService) SetAdminService(adminSvc *AdminService) {
 	s.router.RegisterHandler(command.NewHealthHandler(adminSvc))
 
 	// Register rooms command - need to wrap adminSvc with type conversion
-	type roomLister interface {
-		ListRooms(ctx context.Context) ([]*command.RoomResponse, error)
-	}
 	s.router.RegisterHandler(command.NewRoomsHandler(roomListerAdapter{svc: adminSvc}))
 
 	// Register commands list command

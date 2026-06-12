@@ -90,7 +90,7 @@ func NewApp(cfgFile string) (*App, error) {
 	if cfg.Database.AutoMigrate {
 		if err := model.AutoMigrateWithLLMSeed(db, cfg); err != nil {
 			if sqlDB, e := db.DB(); e == nil {
-				sqlDB.Close()
+				_ = sqlDB.Close()
 			}
 			return nil, fmt.Errorf("migrate: %w", err)
 		}
@@ -470,11 +470,11 @@ func (a *App) Shutdown() error {
 		a.natsClient.Close()
 	}
 	if a.redisClient != nil {
-		a.redisClient.Close()
+		_ = a.redisClient.Close()
 	}
 	if a.db != nil {
 		if sqlDB, err := a.db.DB(); err == nil {
-			sqlDB.Close()
+			_ = sqlDB.Close()
 		}
 	}
 

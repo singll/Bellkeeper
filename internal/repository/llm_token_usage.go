@@ -110,7 +110,7 @@ func (r *LLMTokenUsageRepository) Aggregate(groupBy string, from, to time.Time) 
 	if err != nil {
 		return nil, err
 	}
-	defer rows.Close()
+	defer rows.Close() //nolint:errcheck
 
 	cols, _ := rows.Columns()
 	for rows.Next() {
