@@ -25,6 +25,21 @@ type NotificationService struct {
 	channelsMu   sync.RWMutex
 	channels     map[string]*model.MatrixChannel // cached channel config
 	notifySender *NotificationSender
+
+	// Aggregation
+	aggMu      sync.Mutex
+	aggBuf     map[string]*aggEntry // dedup_key -> aggregated entry
+	aggStopCh  chan struct{}
+	aggWg      sync.WaitGroup
+}
+
+type aggEntry struct {
+	Count     int
+	FirstMsg  string
+	Channel   string
+	RoomID    string
+	Severity  string
+	LastSeen  time.Time
 }
 
 // NotificationRequest represents a notification API request
@@ -35,6 +50,8 @@ type NotificationRequest struct {
 	RoomID      string            `json:"room_id"`      // optional, overrides channel room
 	Metadata    map[string]string `json:"metadata"`     // optional metadata
 	ID          string            `json:"id"`           // idempotency key, auto-generated if empty
+	DedupKey    string            `json:"dedup_key"`    // deduplication key for suppression
+	Severity    string            `json:"severity"`     // severity level: critical, warning, info
 }
 
 // NotificationResponse represents the API response
@@ -54,11 +71,13 @@ func NewNotificationService(
 	repos *repository.Repositories,
 ) *NotificationService {
 	svc := &NotificationService{
-		cfg:      cfg,
-		redis:    redis,
-		nats:     nats,
-		repos:    repos,
-		channels: make(map[string]*model.MatrixChannel),
+		cfg:       cfg,
+		redis:     redis,
+		nats:      nats,
+		repos:     repos,
+		channels:  make(map[string]*model.MatrixChannel),
+		aggBuf:    make(map[string]*aggEntry),
+		aggStopCh: make(chan struct{}),
 	}
 
 	// Load channel config
@@ -134,6 +153,38 @@ func (s *NotificationService) Send(ctx context.Context, req *NotificationRequest
 		req.MessageType = "text"
 	}
 
+	// Dedup suppression: if DedupKey is set and Severity is not "critical", check Redis
+	if req.DedupKey != "" && req.Severity != "critical" {
+		dedupKey := fmt.Sprintf("notify:dedup:%s", req.DedupKey)
+		exists, err := s.redis.IncrRateLimit(ctx, dedupKey, time.Hour)
+		if err != nil {
+			log.Printf("[Notify] dedup check failed: %v", err)
+		} else if exists > 1 {
+			// Aggregate: bump count for summary
+			s.aggMu.Lock()
+			if entry, ok := s.aggBuf[req.DedupKey]; ok {
+				entry.Count++
+				entry.LastSeen = time.Now()
+			} else {
+				s.aggBuf[req.DedupKey] = &aggEntry{
+					Count:    1,
+					FirstMsg: req.Message,
+					Channel:  req.Channel,
+					RoomID:   roomID,
+					Severity: req.Severity,
+					LastSeen: time.Now(),
+				}
+			}
+			s.aggMu.Unlock()
+
+			log.Printf("[Notify] suppressed duplicate (dedup_key=%s, count=%d)", req.DedupKey, exists)
+			return &NotificationResponse{
+				Success: true,
+				Message: "suppressed duplicate",
+			}, nil
+		}
+	}
+
 	// Create notification record
 	metadataJSON, _ := json.Marshal(req.Metadata)
 	metadataStr := string(metadataJSON)
@@ -145,6 +196,8 @@ func (s *NotificationService) Send(ctx context.Context, req *NotificationRequest
 		MessageContent: req.Message,
 		Metadata:       &metadataStr,
 		Status:         "pending",
+		DedupKey:       req.DedupKey,
+		Severity:       req.Severity,
 	}
 
 	// Store in DB for audit
@@ -160,6 +213,8 @@ func (s *NotificationService) Send(ctx context.Context, req *NotificationRequest
 		Message:        req.Message,
 		MessageType:    req.MessageType,
 		RetryCount:     0,
+		DedupKey:       req.DedupKey,
+		Severity:       req.Severity,
 	}
 
 	msgBytes, err := json.Marshal(queueMsg)
@@ -229,4 +284,72 @@ type NotificationQueueMessage struct {
 	Message        string `json:"message"`
 	MessageType    string `json:"message_type"`
 	RetryCount     int    `json:"retry_count"`
+	DedupKey       string `json:"dedup_key,omitempty"`
+	Severity       string `json:"severity,omitempty"`
+}
+
+// Start begins the aggregation flush loop
+func (s *NotificationService) Start() {
+	s.aggWg.Add(1)
+	go s.aggFlushLoop()
+	log.Printf("[Notify] aggregation loop started")
+}
+
+// Stop stops the aggregation flush loop
+func (s *NotificationService) Stop() {
+	close(s.aggStopCh)
+	s.aggWg.Wait()
+	s.flushAggregation()
+	log.Printf("[Notify] aggregation loop stopped")
+}
+
+func (s *NotificationService) aggFlushLoop() {
+	defer s.aggWg.Done()
+	ticker := time.NewTicker(5 * time.Minute)
+	defer ticker.Stop()
+	for {
+		select {
+		case <-ticker.C:
+			s.flushAggregation()
+		case <-s.aggStopCh:
+			return
+		}
+	}
+}
+
+func (s *NotificationService) flushAggregation() {
+	s.aggMu.Lock()
+	entries := make(map[string]*aggEntry, len(s.aggBuf))
+	for k, v := range s.aggBuf {
+		entries[k] = v
+	}
+	s.aggBuf = make(map[string]*aggEntry)
+	s.aggMu.Unlock()
+
+	for dedupKey, entry := range entries {
+		if entry.Count <= 1 {
+			continue
+		}
+		summaryMsg := fmt.Sprintf("%s\n\n(同类通知 ×%d，已合并)", entry.FirstMsg, entry.Count)
+		queueMsg := &NotificationQueueMessage{
+			NotificationID: fmt.Sprintf("agg:%s:%d", dedupKey, time.Now().UnixNano()),
+			RoomID:         entry.RoomID,
+			Message:        summaryMsg,
+			MessageType:    "text",
+			RetryCount:     0,
+			DedupKey:       dedupKey,
+			Severity:       entry.Severity,
+		}
+		msgBytes, err := json.Marshal(queueMsg)
+		if err != nil {
+			log.Printf("[Notify] failed to marshal aggregation summary: %v", err)
+			continue
+		}
+		subject := fmt.Sprintf("%s.%s", s.cfg.Streams.Notifications, entry.Channel)
+		if err := s.nats.Publish(subject, msgBytes); err != nil {
+			log.Printf("[Notify] failed to publish aggregation summary: %v", err)
+		} else {
+			log.Printf("[Notify] sent aggregation summary for dedup_key=%s (×%d)", dedupKey, entry.Count)
+		}
+	}
 }

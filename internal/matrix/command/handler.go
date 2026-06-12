@@ -2,6 +2,7 @@ package command
 
 import (
 	"context"
+	"fmt"
 	"strings"
 )
 
@@ -104,6 +105,9 @@ func (h *HelpHandler) Handle(ctx context.Context, cmdCtx *Context) (*Response, e
 // StatusHandler handles !status command
 type StatusHandler struct {
 	BaseHandler
+	healthChecker interface {
+		Check(ctx context.Context) (map[string]interface{}, error)
+	}
 }
 
 // NewStatusHandler creates a status handler
@@ -117,14 +121,66 @@ func NewStatusHandler() *StatusHandler {
 	}
 }
 
+// NewStatusHandlerWithChecker creates a status handler with a health checker
+func NewStatusHandlerWithChecker(checker interface {
+	Check(ctx context.Context) (map[string]interface{}, error)
+}) *StatusHandler {
+	return &StatusHandler{
+		BaseHandler: BaseHandler{
+			name:        "status",
+			description: "显示系统状态",
+			usage:       "",
+		},
+		healthChecker: checker,
+	}
+}
+
 func (h *StatusHandler) Handle(ctx context.Context, cmdCtx *Context) (*Response, error) {
+	if h.healthChecker == nil {
+		return &Response{
+			Success: true,
+			Message: "⚠️ 健康检查服务未配置",
+			IsHTML:  false,
+		}, nil
+	}
+
+	result, err := h.healthChecker.Check(ctx)
+	if err != nil {
+		return &Response{
+			Success: false,
+			Message: "❌ 健康检查失败: " + err.Error(),
+		}, nil
+	}
+
+	var sb strings.Builder
+	sb.WriteString("**Bellkeeper 健康状态**\n\n")
+
+	if status, ok := result["status"].(string); ok {
+		icon := "✅"
+		if status != "healthy" {
+			icon = "⚠️"
+		}
+		sb.WriteString(icon + " 整体状态: " + status + "\n\n")
+	}
+
+	if services, ok := result["services"].(map[string]interface{}); ok {
+		sb.WriteString("**服务状态:**\n")
+		for name, svc := range services {
+			sb.WriteString("- " + name + ": " + fmt.Sprint(svc) + "\n")
+		}
+	}
+
+	if metrics, ok := result["metrics"].(map[string]interface{}); ok {
+		sb.WriteString("\n**指标:**\n")
+		for k, v := range metrics {
+			sb.WriteString("- " + k + ": " + fmt.Sprint(v) + "\n")
+		}
+	}
+
 	return &Response{
 		Success: true,
-		Message: "✅ Bellkeeper 运行正常\n\n" +
-			"- Matrix Gateway: 在线\n" +
-			"- Notification Gateway: 在线\n" +
-			"- Command Router: 在线",
-		IsHTML: false,
+		Message: sb.String(),
+		IsHTML:  true,
 	}, nil
 }
 
@@ -241,41 +297,17 @@ func (h *HealthHandler) Handle(ctx context.Context, cmdCtx *Context) (*Response,
 	msg := "**Bellkeeper 健康状态**\n\n" +
 		"✅ 服务运行正常\n\n" +
 		"**统计信息:**\n" +
-		"- 房间数: " + formatInt(stats["rooms"]) + "\n" +
-		"- 活跃房间: " + formatInt(stats["active_rooms"]) + "\n" +
-		"- 命令数: " + formatInt(stats["commands"]) + "\n" +
-		"- 24h 事件数: " + formatInt(stats["events_24h"]) + "\n" +
-		"- 24h 通知数: " + formatInt(stats["notifications_24h"])
+		"- 房间数: " + fmt.Sprint(stats["rooms"]) + "\n" +
+		"- 活跃房间: " + fmt.Sprint(stats["active_rooms"]) + "\n" +
+		"- 命令数: " + fmt.Sprint(stats["commands"]) + "\n" +
+		"- 24h 事件数: " + fmt.Sprint(stats["events_24h"]) + "\n" +
+		"- 24h 通知数: " + fmt.Sprint(stats["notifications_24h"])
 
 	return &Response{
 		Success: true,
 		Message: msg,
 		IsHTML:  true,
 	}, nil
-}
-
-func formatInt(v interface{}) string {
-	if n, ok := v.(int); ok {
-		return string(rune('0'+n%10)) + formatIntHelper(n/10)
-	}
-	if n64, ok := v.(int64); ok {
-		return formatIntHelper64(n64)
-	}
-	return "0"
-}
-
-func formatIntHelper(n int) string {
-	if n == 0 {
-		return ""
-	}
-	return formatIntHelper(n/10) + string(rune('0'+n%10))
-}
-
-func formatIntHelper64(n int64) string {
-	if n == 0 {
-		return ""
-	}
-	return formatIntHelper64(n/10) + string(rune('0'+int(n%10)))
 }
 
 // RoomsHandler handles !rooms command - lists Matrix rooms
@@ -374,7 +406,7 @@ func (h *CommandsHandler) Handle(ctx context.Context, cmdCtx *Context) (*Respons
 	}
 
 	var sb strings.Builder
-	sb.WriteString("**可用命令 (" + formatInt(len(cmds)) + ")**\n\n")
+	sb.WriteString("**可用命令 (" + fmt.Sprint(len(cmds)) + ")**\n\n")
 	for _, cmd := range cmds {
 		sb.WriteString("• " + cmd + "\n")
 	}

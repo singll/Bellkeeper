@@ -109,3 +109,12 @@ func (c *Checker) RemoveUserRole(ctx context.Context, userID, roomID string) err
 func (c *Checker) IsAdmin(userID string) bool {
 	return c.adminUsers[userID]
 }
+
+// IsRoomEnabled checks if a room is in the whitelist and active
+func (c *Checker) IsRoomEnabled(ctx context.Context, roomID string) bool {
+	room, err := c.repos.MatrixRoom.GetByRoomID(roomID)
+	if err != nil || room == nil {
+		return false
+	}
+	return room.IsActive
+}

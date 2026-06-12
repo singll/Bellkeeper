@@ -4,27 +4,30 @@ import (
 	"github.com/microcosm-cc/bluemonday"
 )
 
-// StrictPolicy creates a policy that only allows safe formatting tags
-// (bold, italic, etc.) but strips all scripts and potentially dangerous content.
-var StrictPolicy = bluemonday.StrictPolicy()
+var htmlPolicy *bluemonday.Policy
 
-// RelaxedPolicy creates a policy that allows more formatting but still
-// strips scripts and dangerous content. Suitable for user-generated content.
-var RelaxedPolicy = bluemonday.UGCPolicy()
+func init() {
+	p := bluemonday.NewPolicy()
 
-// Sanitize removes potentially dangerous HTML content and returns safe HTML.
-// Use StrictPolicy for untrusted content.
-func Sanitize(html string) string {
-	return StrictPolicy.Sanitize(html)
+	p.AllowElements(
+		"p", "b", "i", "strong", "em", "a", "code", "pre",
+		"ul", "ol", "li",
+		"h1", "h2", "h3", "h4", "h5", "h6",
+		"br", "hr",
+		"table", "thead", "tbody", "tfoot", "td", "th", "tr",
+		"blockquote", "dl", "dt", "dd",
+		"span", "div",
+	)
+
+	p.AllowAttrs("href").OnElements("a")
+	p.AllowAttrs("src", "alt").OnElements("img")
+	p.AllowAttrs("colspan", "rowspan").OnElements("td", "th")
+
+	p.RequireNoFollowOnLinks(true)
+
+	htmlPolicy = p
 }
 
-// SanitizeRelaxed removes dangerous HTML but allows safe formatting.
-// Use for content that should preserve some formatting.
-func SanitizeRelaxed(html string) string {
-	return RelaxedPolicy.Sanitize(html)
-}
-
-// StripAllHTML removes all HTML tags, returning plain text.
-func StripAllHTML(html string) string {
-	return StrictPolicy.Sanitize(html)
+func SanitizeHTML(html string) string {
+	return htmlPolicy.Sanitize(html)
 }

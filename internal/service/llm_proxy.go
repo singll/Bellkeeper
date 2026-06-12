@@ -1084,7 +1084,7 @@ func (s *LLMProxyService) ProxyRequest(
 
 	// --- Task type detection (drives task-aware tiered routing in proxyViaGroup) ---
 	headerMap := headerToMap(headers)
-	taskType := s.taskRouter.DetectTaskType(headerMap, modelName, body, 0)
+	taskType := s.taskRouter.DetectTaskType(headerMap, modelName, body, estimateTokens(body))
 
 	// --- Conversation binding (sticky session) ---
 	convID := s.convMgr.ImplicitConversationID(headerMap, body)
@@ -1238,7 +1238,7 @@ func (s *LLMProxyService) codingPref(body []byte) string {
 	}
 	strategy := s.taskRouter.GetCodingStrategy()
 	if strategy == "complexity_aware" {
-		return string(s.taskRouter.DetectComplexity(nil, body, 0))
+		return string(s.taskRouter.DetectComplexity(nil, body, estimateTokens(body)))
 	}
 	return strategy
 }
@@ -1868,7 +1868,7 @@ func (s *LLMProxyService) ProxyStreamRequest(
 
 	// --- Conversation binding (sticky session) ---
 	headerMap := headerToMap(headers)
-	taskType := s.taskRouter.DetectTaskType(headerMap, modelName, body, 0)
+	taskType := s.taskRouter.DetectTaskType(headerMap, modelName, body, estimateTokens(body))
 	convID := s.convMgr.ImplicitConversationID(headerMap, body)
 	allowSwitch := headers.Get("X-Allow-Channel-Switch") == "true"
 
@@ -2431,4 +2431,17 @@ func (s *LLMProxyService) archiveLogs(retentionDays int) {
 		zap.Int("count", len(logs)),
 		zap.String("archive", archivePath),
 		zap.Time("cutoff", cutoff))
+}
+
+func estimateTokens(body []byte) int {
+	runes := len([]rune(string(body)))
+	if runes == 0 {
+		return 0
+	}
+	estimated := runes / 2
+	byteLen := len(body)
+	if byteLen/runes < 2 {
+		estimated = byteLen / 4
+	}
+	return estimated
 }

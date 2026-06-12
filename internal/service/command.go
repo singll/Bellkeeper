@@ -7,6 +7,7 @@ import (
 	"github.com/singll/bellkeeper/internal/config"
 	"github.com/singll/bellkeeper/internal/matrix/command"
 	"github.com/singll/bellkeeper/internal/matrix/gateway"
+	"github.com/singll/bellkeeper/internal/pkg/defaults"
 	"github.com/singll/bellkeeper/internal/repository"
 )
 
@@ -31,7 +32,7 @@ func NewCommandService(
 ) *CommandService {
 	// Use provided adminUsers or fallback to default
 	if len(adminUsers) == 0 {
-		adminUsers = []string{"@singll:matrix.singll.net"}
+		adminUsers = []string{"@singll:" + defaults.DefaultMatrixDomain}
 	}
 
 	svc := &CommandService{
@@ -161,6 +162,32 @@ func (s *CommandService) SetAdminService(adminSvc *AdminService) {
 	s.router.RegisterHandler(command.NewCommandsHandler(s.ListCommands))
 
 	log.Printf("[Command] registered admin commands")
+}
+
+// SetHealthChecker sets the health service and registers the status handler with real health check
+func (s *CommandService) SetHealthChecker(hs *HealthService) {
+	s.router.RegisterHandler(command.NewStatusHandlerWithChecker(healthCheckerAdapter{svc: hs}))
+	log.Printf("[Command] registered status handler with health checker")
+}
+
+// healthCheckerAdapter adapts HealthService.Detailed() to the healthChecker interface
+type healthCheckerAdapter struct {
+	svc *HealthService
+}
+
+func (a healthCheckerAdapter) Check(ctx context.Context) (map[string]interface{}, error) {
+	detailed := a.svc.Detailed()
+	result := map[string]interface{}{
+		"status":  detailed.Status,
+		"version": detailed.Version,
+	}
+	if len(detailed.Services) > 0 {
+		result["services"] = detailed.Services
+	}
+	if len(detailed.Metrics) > 0 {
+		result["metrics"] = detailed.Metrics
+	}
+	return result, nil
 }
 
 // roomListerAdapter adapts AdminService.ListRooms to use command.RoomResponse

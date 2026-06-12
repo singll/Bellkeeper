@@ -59,7 +59,7 @@ func ConvertOpenAIToAnthropic(body []byte) ([]byte, error) {
 	if mt, ok := req["max_tokens"]; ok {
 		anthropic["max_tokens"] = mt
 	} else {
-		anthropic["max_tokens"] = 4096
+		anthropic["max_tokens"] = 8192
 	}
 
 	// Direct pass-through fields
@@ -77,6 +77,10 @@ func ConvertOpenAIToAnthropic(body []byte) ([]byte, error) {
 	// Convert functions/tools
 	if tools := convertTools(req); tools != nil {
 		anthropic["tools"] = tools
+	}
+
+	if tc, ok := req["tool_choice"]; ok {
+		anthropic["tool_choice"] = convertToolChoice(tc)
 	}
 
 	return json.Marshal(anthropic)
@@ -512,7 +516,6 @@ func convertToolResultMsg(msg map[string]interface{}) map[string]interface{} {
 func convertTools(req map[string]interface{}) []interface{} {
 	var tools []interface{}
 
-	// OpenAI tools format
 	if rawTools, ok := req["tools"].([]interface{}); ok {
 		for _, t := range rawTools {
 			if tool, ok := t.(map[string]interface{}); ok {
@@ -532,7 +535,6 @@ func convertTools(req map[string]interface{}) []interface{} {
 		}
 	}
 
-	// Deprecated functions format
 	if rawFns, ok := req["functions"].([]interface{}); ok {
 		for _, f := range rawFns {
 			if fn, ok := f.(map[string]interface{}); ok {
@@ -547,6 +549,36 @@ func convertTools(req map[string]interface{}) []interface{} {
 	}
 
 	return tools
+}
+
+func convertToolChoice(tc interface{}) interface{} {
+	switch v := tc.(type) {
+	case string:
+		switch v {
+		case "auto":
+			return map[string]interface{}{"type": "auto"}
+		case "none":
+			return map[string]interface{}{"type": "none"}
+		case "required":
+			return map[string]interface{}{"type": "any"}
+		default:
+			return map[string]interface{}{"type": "auto"}
+		}
+	case map[string]interface{}:
+		if v["type"] == "function" {
+			if fn, ok := v["function"].(map[string]interface{}); ok {
+				if name, ok := fn["name"].(string); ok {
+					return map[string]interface{}{
+						"type": "tool",
+						"name": name,
+					}
+				}
+			}
+		}
+		return map[string]interface{}{"type": "auto"}
+	default:
+		return map[string]interface{}{"type": "auto"}
+	}
 }
 
 func normalizeStopSequences(stop interface{}) []string {

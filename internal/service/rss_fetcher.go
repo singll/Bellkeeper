@@ -71,7 +71,6 @@ type retryItem struct {
 type RSSFetcherService struct {
 	cfg        RSSFetcherConfig
 	rssRepo    *repository.RSSRepository
-	ingestion  *FileIngestionService
 	activity   *ActivityLogService
 	fetcher    *gofeed.Parser
 	httpClient *http.Client
@@ -111,7 +110,6 @@ func (s *semaphore) release() { <-s.ch }
 func NewRSSFetcherService(
 	cfg RSSFetcherConfig,
 	rssRepo *repository.RSSRepository,
-	ingestion *FileIngestionService,
 ) *RSSFetcherService {
 	if cfg.CheckInterval <= 0 {
 		cfg.CheckInterval = 60
@@ -129,7 +127,6 @@ func NewRSSFetcherService(
 	return &RSSFetcherService{
 		cfg:        cfg,
 		rssRepo:    rssRepo,
-		ingestion:  ingestion,
 		fetcher:    gofeed.NewParser(),
 		httpClient: &http.Client{Timeout: time.Duration(cfg.Timeout) * time.Second},
 		stopCh:     make(chan struct{}),
@@ -407,7 +404,6 @@ func (s *RSSFetcherService) fetchFeed(ctx context.Context, feed *model.RSSFeed) 
 			continue
 		}
 
-		// Use crawl queue if available (async, fast enqueue)
 		if s.crawlQueue != nil {
 			_, err := s.crawlQueue.Enqueue(feed.ID, item.Link, item.Title, "auto", nil)
 			if err != nil {
@@ -422,38 +418,6 @@ func (s *RSSFetcherService) fetchFeed(ctx context.Context, feed *model.RSSFeed) 
 					fmt.Sprintf("Enqueued: %s", item.Link),
 					feed.ID, 0)
 			}
-			continue
-		}
-
-		// Fallback: direct ingestion (backward compatible)
-		if s.ingestion == nil {
-			continue
-		}
-
-		ingestResult, err := s.ingestion.IngestURL(&IngestURLRequest{
-			URL:   item.Link,
-			Title: item.Title,
-		})
-		if err != nil {
-			log.Printf("[RSSFetcher] failed to ingest %s: %v", item.Link, err)
-			s.logActivity("rss_fetch", "ingest", "failure",
-				fmt.Sprintf("Ingest failed for %s: %v", item.Link, err),
-				feed.ID, 0)
-			continue
-		}
-
-		if ingestResult.Status == "duplicate" {
-			result.ItemsDup++
-			log.Printf("[RSSFetcher] skipped duplicate: %s", item.Link)
-			s.logActivity("rss_fetch", "ingest", "duplicate",
-				fmt.Sprintf("Duplicate skipped: %s", item.Link),
-				feed.ID, 0)
-		} else if ingestResult.Status == "success" {
-			result.ItemsNew++
-			log.Printf("[RSSFetcher] ingested: %s -> %s", item.Link, ingestResult.FilePath)
-			s.logActivity("rss_fetch", "ingest", "success",
-				fmt.Sprintf("New article ingested: %s", item.Link),
-				feed.ID, 0)
 		}
 	}
 

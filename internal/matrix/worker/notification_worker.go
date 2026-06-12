@@ -127,35 +127,44 @@ func (w *NotificationWorker) processMessage(ctx context.Context, msg *nats.Msg) 
 	var notification service.NotificationQueueMessage
 	if err := json.Unmarshal(msg.Data, &notification); err != nil {
 		middleware.GetLogger().Error("failed to unmarshal notification message", zap.Error(err))
-		msg.Nak() // negative ack, will be redelivered
+		msg.Nak()
 		return
+	}
+
+	metadata, _ := msg.Metadata()
+	deliveryCount := 1
+	if metadata != nil {
+		deliveryCount = int(metadata.NumDelivered)
 	}
 
 	middleware.GetLogger().Info("processing notification",
 		zap.String("notification_id", notification.NotificationID),
-		zap.Int("retry_count", notification.RetryCount))
+		zap.Int("delivery_count", deliveryCount))
 
 	if err := w.sender.Send(ctx, &notification); err != nil {
 		middleware.GetLogger().Error("failed to send notification",
 			zap.String("notification_id", notification.NotificationID),
 			zap.Error(err))
 
-		if notification.RetryCount < w.maxRetry {
-			// Will be retried via dead letter or re-queued
-			middleware.GetLogger().Warn("notification will be retried",
+		if deliveryCount <= w.maxRetry {
+			delay := time.Duration(deliveryCount) * 5 * time.Second
+			if delay > 30*time.Second {
+				delay = 30 * time.Second
+			}
+			middleware.GetLogger().Warn("notification will be retried with backoff",
 				zap.String("notification_id", notification.NotificationID),
-				zap.Int("attempt", notification.RetryCount+1),
-				zap.Int("max", w.maxRetry))
-			msg.Nak() // negative ack for redelivery
+				zap.Int("attempt", deliveryCount),
+				zap.Int("max", w.maxRetry),
+				zap.Duration("delay", delay))
+			msg.NakWithDelay(delay)
 		} else {
 			middleware.GetLogger().Warn("notification exceeded max retries",
 				zap.String("notification_id", notification.NotificationID))
-			msg.Ack() // ack to prevent infinite redelivery
+			msg.Ack()
 		}
 		return
 	}
 
-	// Success
 	msg.Ack()
 	middleware.GetLogger().Info("notification sent successfully",
 		zap.String("notification_id", notification.NotificationID))

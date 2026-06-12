@@ -22,7 +22,6 @@ type DatasetRequest struct {
 	Description string `json:"description"`
 	IsDefault   *bool  `json:"is_default"`
 	IsActive    *bool  `json:"is_active"`
-	ParserID    string `json:"parser_id"`
 	TagIDs      []uint `json:"tag_ids"`
 }
 
@@ -76,7 +75,6 @@ func (h *DatasetHandler) Create(c *gin.Context) {
 		Description: req.Description,
 		IsDefault:   isDefault,
 		IsActive:    isActive,
-		ParserID:    req.ParserID,
 	}
 
 	if err := h.svc.Create(mapping, req.TagIDs); err != nil {
@@ -115,7 +113,6 @@ func (h *DatasetHandler) Update(c *gin.Context) {
 	if req.IsActive != nil {
 		mapping.IsActive = *req.IsActive
 	}
-	mapping.ParserID = req.ParserID
 
 	if err := h.svc.Update(mapping, req.TagIDs); err != nil {
 		response.InternalError(c, err.Error())

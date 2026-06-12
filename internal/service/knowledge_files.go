@@ -9,6 +9,7 @@ import (
 	"time"
 
 	"github.com/singll/bellkeeper/internal/config"
+	"github.com/singll/bellkeeper/internal/pkg/sanitizer"
 )
 
 // KnowledgeFilesService provides file browsing and management for the knowledge base
@@ -264,7 +265,7 @@ func (s *KnowledgeFilesService) ReadFile(relativePath string) (*FileContent, err
 	return &FileContent{
 		Path:     relativePath,
 		Name:     info.Name(),
-		Content:  string(content),
+		Content:  sanitizer.SanitizeHTML(string(content)),
 		Size:     info.Size(),
 		Modified: info.ModTime(),
 	}, nil

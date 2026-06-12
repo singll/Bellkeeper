@@ -4,6 +4,8 @@ import (
 	"context"
 	"encoding/json"
 	"fmt"
+	"sync"
+	"sync/atomic"
 	"time"
 
 	"maunium.net/go/mautrix"
@@ -16,13 +18,16 @@ import (
 
 // SyncLoop manages the Matrix sync loop
 type SyncLoop struct {
-	client         *Client
-	syncer         *mautrix.DefaultSyncer
-	stopCh         chan struct{}
-	stopped        bool
-	commandService interface {
+	client            *Client
+	syncer            *mautrix.DefaultSyncer
+	stopCh            chan struct{}
+	stopped           atomic.Bool
+	dbPersistFailSince time.Time
+	commandService    interface {
 		ExecuteMessage(ctx context.Context, roomID, sender, eventID, content string) error
 	}
+	dispatcherWg sync.WaitGroup
+	dispatchSem  chan struct{}
 }
 
 // NewSyncLoop creates a new sync loop
@@ -30,9 +35,10 @@ func NewSyncLoop(client *Client) *SyncLoop {
 	syncer := client.client.Syncer.(*mautrix.DefaultSyncer)
 
 	loop := &SyncLoop{
-		client: client,
-		syncer: syncer,
-		stopCh: make(chan struct{}),
+		client:      client,
+		syncer:      syncer,
+		stopCh:      make(chan struct{}),
+		dispatchSem: make(chan struct{}, 8),
 	}
 
 	// Register event handlers
@@ -87,6 +93,9 @@ func (s *SyncLoop) Start(ctx context.Context) error {
 		s.client.client.Store.SaveNextBatch(context.Background(), s.client.client.UserID, syncState.NextBatch)
 	}
 
+	// Room auto-discovery: upsert joined rooms
+	s.discoverJoinedRooms(ctx)
+
 	// Start sync in background
 	go func() {
 		middleware.GetLogger().Info("starting sync loop")
@@ -103,11 +112,12 @@ func (s *SyncLoop) Start(ctx context.Context) error {
 
 // Stop stops the sync loop
 func (s *SyncLoop) Stop() {
-	if s.stopped {
+	if s.stopped.Load() {
 		return
 	}
-	s.stopped = true
+	s.stopped.Store(true)
 	close(s.stopCh)
+	s.dispatcherWg.Wait()
 	s.client.client.StopSync()
 	middleware.GetLogger().Info("sync loop stopped")
 }
@@ -121,7 +131,16 @@ func (s *SyncLoop) persistTokenPeriodically(ctx context.Context) {
 		select {
 		case <-ticker.C:
 			if err := s.persistToken(ctx); err != nil {
-				middleware.GetLogger().Warn("failed to persist sync token", zap.Error(err))
+				if s.dbPersistFailSince.IsZero() {
+					s.dbPersistFailSince = time.Now()
+				}
+				if time.Since(s.dbPersistFailSince) > 10*time.Minute {
+					middleware.GetLogger().Error("sync token persistence failing for over 10 minutes", zap.Error(err), zap.Duration("duration", time.Since(s.dbPersistFailSince)))
+				} else {
+					middleware.GetLogger().Warn("failed to persist sync token", zap.Error(err))
+				}
+			} else {
+				s.dbPersistFailSince = time.Time{}
 			}
 		case <-s.stopCh:
 			// Final save before exit
@@ -166,6 +185,13 @@ func (s *SyncLoop) handleRoomMessage(ctx context.Context, evt *event.Event) erro
 		return nil
 	}
 
+	// Room whitelist check
+	roomID := evt.RoomID.String()
+	if !s.isRoomEnabled(ctx, roomID) {
+		middleware.GetLogger().Debug("skipping message from non-whitelisted room", zap.String("room", roomID))
+		return nil
+	}
+
 	// Check if event already processed (deduplication)
 	processed, err := s.client.redis.CheckEventProcessed(ctx, evt.ID.String())
 	if err != nil {
@@ -195,7 +221,6 @@ func (s *SyncLoop) handleRoomMessage(ctx context.Context, evt *event.Event) erro
 
 	if err := s.client.repos.MatrixEvent.Create(matrixEvent); err != nil {
 		middleware.GetLogger().Warn("failed to store event in DB", zap.Error(err))
-		// Don't return error, continue processing
 	}
 
 	// Extract message content
@@ -209,21 +234,66 @@ func (s *SyncLoop) handleRoomMessage(ctx context.Context, evt *event.Event) erro
 		zap.String("sender", evt.Sender.String()),
 		zap.String("body", content.Body))
 
-	// Route to command handler if command service is set
+	// Dispatch command execution asynchronously with bounded worker pool
 	if s.commandService != nil {
-		if err := s.commandService.ExecuteMessage(ctx, evt.RoomID.String(), evt.Sender.String(), evt.ID.String(), content.Body); err != nil {
-			middleware.GetLogger().Warn("command execution failed", zap.Error(err))
-			s.client.repos.MatrixEvent.UpdateStatus(evt.ID.String(), "failed", err.Error())
-			return nil
-		}
-	}
-
-	// Mark as processed
-	if err := s.client.repos.MatrixEvent.UpdateStatus(evt.ID.String(), "processed", ""); err != nil {
-		middleware.GetLogger().Warn("failed to update event status", zap.Error(err))
+		s.dispatchCommand(ctx, evt, content.Body)
 	}
 
 	return nil
+}
+
+// isRoomEnabled checks if a room is in the whitelist
+func (s *SyncLoop) isRoomEnabled(ctx context.Context, roomID string) bool {
+	room, err := s.client.repos.MatrixRoom.GetByRoomID(roomID)
+	if err != nil || room == nil {
+		return false
+	}
+	return room.IsActive
+}
+
+// dispatchCommand dispatches command execution to the bounded worker pool
+func (s *SyncLoop) dispatchCommand(ctx context.Context, evt *event.Event, body string) {
+	s.dispatchSem <- struct{}{}
+	s.dispatcherWg.Add(1)
+	go func() {
+		defer func() {
+			<-s.dispatchSem
+			s.dispatcherWg.Done()
+		}()
+		if err := s.commandService.ExecuteMessage(ctx, evt.RoomID.String(), evt.Sender.String(), evt.ID.String(), body); err != nil {
+			middleware.GetLogger().Warn("command execution failed", zap.Error(err))
+			s.client.repos.MatrixEvent.UpdateStatus(evt.ID.String(), "failed", err.Error())
+			return
+		}
+		if err := s.client.repos.MatrixEvent.UpdateStatus(evt.ID.String(), "processed", ""); err != nil {
+			middleware.GetLogger().Warn("failed to update event status", zap.Error(err))
+		}
+	}()
+}
+
+// discoverJoinedRooms upserts all joined rooms into the database
+func (s *SyncLoop) discoverJoinedRooms(ctx context.Context) {
+	rooms, err := s.client.JoinedRooms(ctx)
+	if err != nil {
+		middleware.GetLogger().Warn("failed to discover joined rooms", zap.Error(err))
+		return
+	}
+
+	count := 0
+	for _, roomID := range rooms {
+		room := &model.MatrixRoom{
+			RoomID:   roomID,
+			RoomType: "command",
+			IsActive: true,
+		}
+		if err := s.client.repos.MatrixRoom.Upsert(ctx, room); err != nil {
+			middleware.GetLogger().Warn("failed to upsert room", zap.String("room_id", roomID), zap.Error(err))
+		} else {
+			count++
+		}
+	}
+
+	middleware.GetLogger().Info("discovered joined rooms", zap.Int("count", count))
 }
 
 // handleMemberEvent processes room member events (invites, joins, leaves)

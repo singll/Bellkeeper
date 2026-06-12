@@ -231,12 +231,13 @@ type MeilisearchConfig struct {
 
 // KnowledgeConfig 知识库索引配置
 type KnowledgeConfig struct {
-	Enabled      bool            `mapstructure:"enabled"`
-	BasePath     string          `mapstructure:"base_path"`
-	ScanDirs     []ScanDirConfig `mapstructure:"scan_dirs"`
-	ScanInterval int             `mapstructure:"scan_interval"`
-	ChunkMinSize int             `mapstructure:"chunk_min_size"`
-	ChunkMaxSize int             `mapstructure:"chunk_max_size"`
+	Enabled        bool            `mapstructure:"enabled"`
+	BasePath       string          `mapstructure:"base_path"`
+	ScanDirs       []ScanDirConfig `mapstructure:"scan_dirs"`
+	ScanInterval   int             `mapstructure:"scan_interval"`
+	ChunkMinSize   int             `mapstructure:"chunk_min_size"`
+	ChunkMaxSize   int             `mapstructure:"chunk_max_size"`
+	MaxContextRunes int            `mapstructure:"max_context_runes"`
 }
 
 // RSSFetcherConfig RSS 抓取器配置
@@ -272,6 +273,8 @@ type CrawlQueueConfig struct {
 	RuleMaxTrials            int      `mapstructure:"rule_max_trials"`
 	RuleSampleSize           int      `mapstructure:"rule_sample_size"`
 	RuleQualityMinChars      int      `mapstructure:"rule_quality_min_chars"`
+	RuleOptimizerModel       string   `mapstructure:"rule_optimizer_model"`
+	RuleOptimizerTemperature float64  `mapstructure:"rule_optimizer_temperature"`
 }
 
 // DailyReportConfig controls the n8n-backed daily report handoff and watchdog.
@@ -571,6 +574,8 @@ func setDefaults(v *viper.Viper) {
 	v.SetDefault("crawl_queue.rule_max_trials", 3)
 	v.SetDefault("crawl_queue.rule_sample_size", 5)
 	v.SetDefault("crawl_queue.rule_quality_min_chars", 200)
+	v.SetDefault("crawl_queue.rule_optimizer_model", "pool-chat-free")
+	v.SetDefault("crawl_queue.rule_optimizer_temperature", 0.3)
 
 	// Daily report
 	v.SetDefault("daily_report.enabled", true)

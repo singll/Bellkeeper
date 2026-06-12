@@ -4,12 +4,12 @@ import (
 	"context"
 	"encoding/json"
 	"fmt"
-	"strings"
 	"time"
 
 	"github.com/singll/bellkeeper/internal/config"
 	"github.com/singll/bellkeeper/internal/llmclient"
 	"github.com/singll/bellkeeper/internal/model"
+	"github.com/singll/bellkeeper/internal/pkg/textutil"
 )
 
 // ClassifyService handles article classification using LLM
@@ -89,8 +89,8 @@ func (s *ClassifyService) ClassifyArticle(req *ClassifyRequest) (*ClassifyRespon
 	start := time.Now()
 	// Truncate content to configured max length
 	content := req.Content
-	if len(content) > s.cfg.MaxContentLen {
-		content = content[:s.cfg.MaxContentLen]
+	if len([]rune(content)) > s.cfg.MaxContentLen {
+		content = string([]rune(content)[:s.cfg.MaxContentLen])
 	}
 
 	// Build prompt — use configured prompt if set, otherwise built-in default
@@ -177,17 +177,7 @@ func (s *ClassifyService) callLLM(prompt string) (string, error) {
 }
 
 func (s *ClassifyService) parseClassifyResponse(content string) (*ClassifyResponse, error) {
-	// Extract JSON from markdown code block if present
-	content = strings.TrimSpace(content)
-	if strings.HasPrefix(content, "```json") {
-		content = strings.TrimPrefix(content, "```json")
-		content = strings.TrimSuffix(content, "```")
-		content = strings.TrimSpace(content)
-	} else if strings.HasPrefix(content, "```") {
-		content = strings.TrimPrefix(content, "```")
-		content = strings.TrimSuffix(content, "```")
-		content = strings.TrimSpace(content)
-	}
+	content = textutil.StripJSONFence(content)
 
 	var result struct {
 		PrimaryDomain  string             `json:"primary_domain"`

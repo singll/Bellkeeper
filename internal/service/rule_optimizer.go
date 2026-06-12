@@ -219,10 +219,18 @@ Rules:
 - Do NOT suggest strategies that bypass paywalls or login.
 - If you cannot suggest a rule, return {"strategy":"none"}.`, domain, string(samplesJSON))
 
+	llmModel := s.cfg.RuleOptimizerModel
+	if llmModel == "" {
+		llmModel = "pool-chat-free"
+	}
+	temp := s.cfg.RuleOptimizerTemperature
+	if temp <= 0 {
+		temp = 0.3
+	}
 	resp, err := s.llmClient.ChatCompletion(ctx, llmclient.ChatRequest{
-		Model:       "gpt-4o-mini",
+		Model:       llmModel,
 		Messages:    []llmclient.ChatMessage{{Role: "user", Content: prompt}},
-		Temperature: 0.3,
+		Temperature: temp,
 	}, llmclient.ChatOptions{CallerID: "rule_optimizer", TaskType: "rule_generation"})
 	if err != nil {
 		return nil, fmt.Errorf("LLM call failed: %w", err)
@@ -449,8 +457,9 @@ func (s *RuleOptimizerService) logActivity(action, status, summary string) {
 }
 
 func truncateStr(s string, maxLen int) string {
-	if len(s) <= maxLen {
+	r := []rune(s)
+	if len(r) <= maxLen {
 		return s
 	}
-	return s[:maxLen]
+	return string(r[:maxLen])
 }

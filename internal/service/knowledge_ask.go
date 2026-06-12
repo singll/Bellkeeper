@@ -7,7 +7,6 @@ import (
 	"time"
 
 	"github.com/singll/bellkeeper/internal/llmclient"
-	"github.com/singll/bellkeeper/internal/model"
 )
 
 // AskRequest 问答请求
@@ -33,23 +32,16 @@ type Reference struct {
 	Snippet   string `json:"snippet"`
 }
 
-// AskService 问答服务
 type AskService struct {
-	searchService *FileSearchService
-	llmClient     *llmclient.Client
-	llmJobs       *LLMJobQueueService
-	allowedLayers map[string]struct{}
+	searchService   *FileSearchService
+	llmClient       *llmclient.Client
+	allowedLayers   map[string]struct{}
+	maxContextRunes int
 }
 
-// NewAskService 创建问答服务
-func NewAskService(search *FileSearchService, llmProxyURL, apiKey string, queue ...*LLMJobQueueService) *AskService {
-	var llmJobs *LLMJobQueueService
-	if len(queue) > 0 {
-		llmJobs = queue[0]
-	}
+func NewAskService(search *FileSearchService, llmProxyURL, apiKey string) *AskService {
 	return &AskService{
 		searchService: search,
-		llmJobs:       llmJobs,
 		llmClient: llmclient.New(llmclient.Options{
 			BaseURL: llmProxyURL,
 			APIKey:  apiKey,
@@ -65,6 +57,10 @@ func (s *AskService) SetAllowedLayers(layers []string) {
 			s.allowedLayers[layer] = struct{}{}
 		}
 	}
+}
+
+func (s *AskService) SetMaxContextRunes(n int) {
+	s.maxContextRunes = n
 }
 
 // Ask 问答
@@ -133,7 +129,11 @@ func (s *AskService) Ask(ctx context.Context, req AskRequest) (*AskResponse, err
 
 // buildContext 构建 LLM 上下文
 func (s *AskService) buildContext(files []FileHit) string {
-	const maxLen = 6000
+	const defaultMaxLen = 6000
+	maxLen := defaultMaxLen
+	if s.maxContextRunes > 0 {
+		maxLen = s.maxContextRunes
+	}
 	var ctx bytes.Buffer
 
 	for _, f := range files {
@@ -144,15 +144,14 @@ func (s *AskService) buildContext(files []FileHit) string {
 		ctx.WriteString("\n\n")
 	}
 
-	content := ctx.String()
-	if len(content) > maxLen {
-		content = content[:maxLen]
+	runes := []rune(ctx.String())
+	if len(runes) > maxLen {
+		runes = runes[:maxLen]
 	}
 
-	return content
+	return string(runes)
 }
 
-// callLLM 调用 LLM
 func (s *AskService) callLLM(ctx context.Context, question, contextContent string) (string, error) {
 	systemPrompt := `你是一个知识库助手。基于以下知识库内容回答问题。
 要求:
@@ -163,28 +162,6 @@ func (s *AskService) callLLM(ctx context.Context, question, contextContent strin
 	messages := []llmclient.ChatMessage{
 		{Role: "system", Content: systemPrompt},
 		{Role: "user", Content: fmt.Sprintf("问题: %s\n\n相关文档:\n%s", question, contextContent)},
-	}
-	if s.llmJobs != nil {
-		job, err := s.llmJobs.EnqueueChat(EnqueueLLMChatOptions{
-			TaskType:       "qa",
-			CallerID:       "knowledge-ask",
-			Model:          "pool-chat-balanced",
-			Messages:       messages,
-			Temperature:    0.3,
-			Priority:       50,
-			IdempotencyKey: llmJobIdempotencyKey("qa", "pool-chat-balanced", question, contextContent),
-		})
-		if err != nil {
-			return "", err
-		}
-		done, err := s.llmJobs.Wait(ctx, job.ID, time.Second)
-		if err != nil {
-			return "", err
-		}
-		if done.Status != model.LLMJobSuccess {
-			return "", LLMJobTerminalError(done)
-		}
-		return done.ResponseText, nil
 	}
 	return s.llmClient.ChatCompletion(
 		ctx,

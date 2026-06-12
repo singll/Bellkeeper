@@ -90,6 +90,8 @@ type MatrixNotification struct {
 	RetryCount     int       `gorm:"default:0" json:"retry_count"`
 	LastError      string    `gorm:"type:text" json:"last_error,omitempty"`
 	SentEventID    string    `gorm:"size:255" json:"sent_event_id,omitempty"`
+	DedupKey       string    `gorm:"size:255;index" json:"dedup_key,omitempty"`
+	Severity       string    `gorm:"size:50;default:info" json:"severity,omitempty"`
 	SentAt         time.Time `json:"sent_at,omitempty"`
 	CreatedAt      time.Time `gorm:"index" json:"created_at"`
 	UpdatedAt      time.Time `json:"updated_at"`

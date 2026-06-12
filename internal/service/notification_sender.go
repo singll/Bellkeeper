@@ -9,7 +9,9 @@ import (
 	"sync"
 	"time"
 
+	"github.com/microcosm-cc/bluemonday"
 	"github.com/singll/bellkeeper/internal/matrix/gateway"
+	"github.com/singll/bellkeeper/internal/pkg/sanitizer"
 	"github.com/singll/bellkeeper/internal/repository"
 	"github.com/yuin/goldmark"
 )
@@ -51,8 +53,7 @@ func (s *NotificationSender) Send(ctx context.Context, msg *NotificationQueueMes
 
 	switch msg.MessageType {
 	case "html":
-		// Assume message is HTML, extract plain text
-		htmlBody = msg.Message
+		htmlBody = sanitizer.SanitizeHTML(msg.Message)
 		textBody = stripHTML(msg.Message)
 	case "markdown":
 		// Convert markdown to HTML
@@ -79,63 +80,9 @@ func (s *NotificationSender) Send(ctx context.Context, msg *NotificationQueueMes
 	return nil
 }
 
-// stripHTML removes HTML tags from a string (basic implementation)
 func stripHTML(html string) string {
-	// Simple implementation - remove common tags
-	html = strings.ReplaceAll(html, "<br>", "\n")
-	html = strings.ReplaceAll(html, "<br/>", "\n")
-	html = strings.ReplaceAll(html, "<p>", "")
-	html = strings.ReplaceAll(html, "</p>", "\n")
-	html = strings.ReplaceAll(html, "<b>", "")
-	html = strings.ReplaceAll(html, "</b>", "")
-	html = strings.ReplaceAll(html, "<strong>", "")
-	html = strings.ReplaceAll(html, "</strong>", "")
-	html = strings.ReplaceAll(html, "<i>", "")
-	html = strings.ReplaceAll(html, "</i>", "")
-	html = strings.ReplaceAll(html, "<em>", "")
-	html = strings.ReplaceAll(html, "</em>", "")
-	html = strings.ReplaceAll(html, "<code>", "")
-	html = strings.ReplaceAll(html, "</code>", "")
-	html = strings.ReplaceAll(html, "<pre>", "")
-	html = strings.ReplaceAll(html, "</pre>", "")
-	html = strings.ReplaceAll(html, "<li>", "• ")
-	html = strings.ReplaceAll(html, "</li>", "\n")
-	html = strings.ReplaceAll(html, "<ul>", "")
-	html = strings.ReplaceAll(html, "</ul>", "")
-	html = strings.ReplaceAll(html, "<ol>", "")
-	html = strings.ReplaceAll(html, "</ol>", "")
-	html = strings.ReplaceAll(html, "<a href=\"", "")
-	html = strings.ReplaceAll(html, "\">", " (")
-	html = strings.ReplaceAll(html, "</a>", ")")
-	html = strings.ReplaceAll(html, "<span>", "")
-	html = strings.ReplaceAll(html, "</span>", "")
-	html = strings.ReplaceAll(html, "<div>", "")
-	html = strings.ReplaceAll(html, "</div>", "")
-	html = strings.ReplaceAll(html, "<h1>", "# ")
-	html = strings.ReplaceAll(html, "</h1>", "")
-	html = strings.ReplaceAll(html, "<h2>", "## ")
-	html = strings.ReplaceAll(html, "</h2>", "")
-	html = strings.ReplaceAll(html, "<h3>", "### ")
-	html = strings.ReplaceAll(html, "</h3>", "")
-
-	// Remove any remaining tags
-	inTag := false
-	result := make([]byte, 0, len(html))
-	for i := 0; i < len(html); i++ {
-		if html[i] == '<' {
-			inTag = true
-			continue
-		}
-		if html[i] == '>' {
-			inTag = false
-			continue
-		}
-		if !inTag {
-			result = append(result, html[i])
-		}
-	}
-
-	return strings.TrimSpace(string(result))
+	stripped := bluemonday.StripTagsPolicy().Sanitize(html)
+	return strings.TrimSpace(stripped)
 }
 
 // markdownToHTML converts markdown to HTML using goldmark.

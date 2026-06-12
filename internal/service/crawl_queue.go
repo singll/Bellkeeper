@@ -747,6 +747,8 @@ func (s *CrawlQueueService) notifyBlocked(rawURL, domain, reason string) {
 		Channel:     "alerts",
 		Message:     msg,
 		MessageType: "text",
+		DedupKey:    "crawl_blocked:" + domain,
+		Severity:    "info",
 	})
 }
 

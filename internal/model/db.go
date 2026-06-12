@@ -71,7 +71,6 @@ func AutoMigrate(db *gorm.DB) error {
 		&MatrixCommandLog{},
 		&MatrixSyncState{},
 		&MatrixUserRole{},
-		&CrawlSource{},
 		&CrawlDomainProfile{},
 		&CrawlExtractionRule{},
 		&CrawlRuleTrial{},
@@ -334,10 +333,9 @@ func SeedDatasetMappings(db *gorm.DB) error {
 			mapping = DatasetMapping{
 				Name:        s.Name,
 				DisplayName: s.DisplayName,
-				DatasetID:   "", // placeholder — fill via UI/API
+				DatasetID:   "",
 				IsDefault:   s.IsDefault,
 				IsActive:    true,
-				ParserID:    "naive",
 			}
 			if err := db.Create(&mapping).Error; err != nil {
 				middleware.GetLogger().Warn("failed to seed dataset mapping",

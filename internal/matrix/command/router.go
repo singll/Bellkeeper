@@ -21,7 +21,6 @@ type Router struct {
 	parser     *Parser
 	repos      *repository.Repositories
 	policy     *policy.Checker
-	adminUsers map[string]bool // set of admin user IDs (deprecated, use policy.Checker)
 	n8nCfg     config.N8NConfig
 	memosCfg   config.MemosConfig
 }
@@ -44,7 +43,6 @@ func NewRouterWithConfig(prefixes string, repos *repository.Repositories, adminU
 		parser:    NewParser(prefixes),
 		repos:     repos,
 		policy:    policy.NewChecker(repos, adminUsers),
-		adminUsers: make(map[string]bool),
 		n8nCfg:   cfg.N8NConfig,
 		memosCfg: cfg.MemosConfig,
 	}
@@ -171,20 +169,6 @@ func (r *Router) checkPermission(ctx context.Context, cmdCtx *Context) bool {
 	return allowed
 }
 
-// isAdmin checks if user is a global admin (deprecated, use policy.Checker.IsAdmin)
-func (r *Router) isAdmin(userID string) bool {
-	return r.adminUsers[userID] || r.policy.IsAdmin(userID)
-}
-
-// SetAdminUsers sets the list of admin users (updates both router and policy)
-func (r *Router) SetAdminUsers(users []string) {
-	r.adminUsers = make(map[string]bool)
-	for _, u := range users {
-		r.adminUsers[u] = true
-	}
-	r.policy.SetAdminUsers(users)
-}
-
 // loadCommandsFromDB loads commands from database and registers handlers
 func (r *Router) loadCommandsFromDB() {
 	commands, err := r.repos.MatrixCommand.List(true) // activeOnly = true
@@ -220,12 +204,10 @@ func (r *Router) createHandlerFromDB(cmd *model.MatrixCommand) Handler {
 
 	switch cmd.HandlerType {
 	case "n8n_webhook":
-		// Get webhook URL from config or build from N8N base URL
 		webhookURL := ""
 		if url, ok := config["webhook_url"].(string); ok && url != "" {
 			webhookURL = url
 		} else if r.n8nCfg.WebhookBaseURL != "" {
-			// Try to find webhook path in config
 			if path, ok := config["webhook_path"].(string); ok {
 				webhookURL = r.n8nCfg.WebhookBaseURL + path
 			}
@@ -236,43 +218,13 @@ func (r *Router) createHandlerFromDB(cmd *model.MatrixCommand) Handler {
 		}
 		return NewN8NTriggerHandler(cmd.CommandName, webhookURL)
 
-	case "memos_todo":
-		// Direct Memos handler
-		if r.memosCfg.Enabled && r.memosCfg.BaseURL != "" {
-			return NewDirectMemosHandler(r.memosCfg.BaseURL, r.memosCfg.APIToken)
-		}
-		// Fall back to n8n webhook
-		if r.n8nCfg.WebhookBaseURL != "" {
-			return NewN8NTriggerHandler(cmd.CommandName, r.n8nCfg.WebhookBaseURL+"/memos-todo")
-		}
-		middleware.GetLogger().Warn("skip command: Memos not configured", zap.String("command", cmd.CommandName))
-		return nil
-
-	case "memos_list":
-		if r.memosCfg.Enabled && r.memosCfg.BaseURL != "" {
-			return NewDirectMemosHandler(r.memosCfg.BaseURL, r.memosCfg.APIToken)
-		}
-		if r.n8nCfg.WebhookBaseURL != "" {
-			return NewN8NTriggerHandler(cmd.CommandName, r.n8nCfg.WebhookBaseURL+"/memos-todo")
-		}
-		return nil
-
 	case "knowledge_qa", "knowledge_search":
-		// QA / search handlers are registered at runtime via SetKnowledgeHandlers
-		// (CommandService wires AskServiceAdapter + SearchServiceAdapter directly to the router)
 		return nil
 
-	case "builtin_ping":
-		return NewPingHandler()
-
-	case "builtin_status":
-		return NewStatusHandler()
-
-	case "builtin_help":
-		return NewHelpHandler(r)
+	case "builtin_ping", "builtin_status", "builtin_help", "builtin_health", "builtin_rooms", "builtin_commands":
+		return nil
 
 	default:
-		// Generic webhook handler
 		if webhookURL, ok := config["webhook_url"].(string); ok && webhookURL != "" {
 			return NewN8NTriggerHandler(cmd.CommandName, webhookURL)
 		}

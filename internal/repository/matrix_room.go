@@ -1,8 +1,12 @@
 package repository
 
 import (
+	"context"
+	"time"
+
 	"github.com/singll/bellkeeper/internal/model"
 	"gorm.io/gorm"
+	"gorm.io/gorm/clause"
 )
 
 type MatrixRoomRepository struct {
@@ -47,4 +51,12 @@ func (r *MatrixRoomRepository) Update(room *model.MatrixRoom) error {
 
 func (r *MatrixRoomRepository) Delete(roomID string) error {
 	return r.db.Where("room_id = ?", roomID).Delete(&model.MatrixRoom{}).Error
+}
+
+func (r *MatrixRoomRepository) Upsert(ctx context.Context, room *model.MatrixRoom) error {
+	room.UpdatedAt = time.Now()
+	return r.db.WithContext(ctx).Clauses(clause.OnConflict{
+		Columns:   []clause.Column{{Name: "room_id"}},
+		DoUpdates: clause.AssignmentColumns([]string{"room_name", "room_type", "is_active", "updated_at"}),
+	}).Create(room).Error
 }

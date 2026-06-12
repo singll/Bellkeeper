@@ -190,7 +190,7 @@ func (c *Curator) collectDigestCards(domain Domain, since time.Time, maxCards in
 			strings.HasPrefix(filepath.Base(path), "_") {
 			return nil
 		}
-		card, ok := c.readDigestCard(path, since)
+		card, ok := c.readDigestCard(path, since, domain)
 		if ok {
 			cards = append(cards, card)
 		}
@@ -211,7 +211,7 @@ func (c *Curator) collectDigestCards(domain Domain, since time.Time, maxCards in
 	return cards, nil
 }
 
-func (c *Curator) readDigestCard(path string, since time.Time) (digestCard, bool) {
+func (c *Curator) readDigestCard(path string, since time.Time, domain Domain) (digestCard, bool) {
 	data, err := os.ReadFile(path)
 	if err != nil {
 		return digestCard{}, false
@@ -219,7 +219,7 @@ func (c *Curator) readDigestCard(path string, since time.Time) (digestCard, bool
 	content := string(data)
 	fm := parseFrontmatterMap(content)
 	score := parseDigestScore(firstNonEmpty(fm["pkb_score"], fm["score"]))
-	if score < 7.0 {
+	if score < domain.VaultThresholdOr(c.domains.Defaults) {
 		return digestCard{}, false
 	}
 	info, err := os.Stat(path)

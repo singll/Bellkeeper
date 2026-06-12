@@ -121,3 +121,16 @@ func (c *Client) GetRedis() *infra.RedisClient {
 func (c *Client) GetRepos() *repository.Repositories {
 	return c.repos
 }
+
+// JoinedRooms returns the list of rooms the bot has joined
+func (c *Client) JoinedRooms(ctx context.Context) ([]string, error) {
+	resp, err := c.client.JoinedRooms(ctx)
+	if err != nil {
+		return nil, fmt.Errorf("failed to get joined rooms: %w", err)
+	}
+	rooms := make([]string, len(resp.JoinedRooms))
+	for i, roomID := range resp.JoinedRooms {
+		rooms[i] = roomID.String()
+	}
+	return rooms, nil
+}

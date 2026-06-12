@@ -85,7 +85,6 @@ func NewServices(repos *repository.Repositories, cfg *config.Config, version str
 			ProbeIntervalMinutes: cfg.RSSFetcher.ProbeIntervalMinutes,
 		},
 		repos.RSS,
-		fileIngestionSvc,
 	)
 
 	// Wire activity log into RSS fetcher
@@ -117,11 +116,13 @@ func NewServices(repos *repository.Repositories, cfg *config.Config, version str
 	dashboardSvc := NewDashboardService(repos.CrawlJob, repos.RSS, repos.LLMProxy, pkbReportSvc, cfg.DailyReport)
 	healthSvc := NewHealthService(cfg, version, repos.Tag, repos.RSS, repos.DatasetMapping)
 
-	// DEVIATION: 计划要求「直接调用进程内 LLMProxyService(不走 HTTP 回环)」，
-	// 实际走 localhost HTTP 回环。原因：复用 llmclient 的重试/超时/日志逻辑，
-	// 避免在 DailyReportService 中重复实现 LLM 调用适配层。
-	// 如需改为进程内调用，需将 LLMProxyService 的 chatCompletion 方法抽为接口注入。
+	// LLM call rule: batch processing → llm_jobs queue, interactive → llmclient direct call.
+	// Determined at compile time (constructor), not runtime conditionals.
 	llmProxyURL := fmt.Sprintf("http://localhost:%d/api/llm/v1", cfg.Server.Port)
+	var dailyReportLLMJobs *LLMJobQueueService
+	if cfg.LLMJobQueue.Enabled {
+		dailyReportLLMJobs = llmJobQueueSvc
+	}
 	dailyReportSvc := NewDailyReportService(
 		healthSvc,
 		dashboardSvc,
@@ -133,6 +134,7 @@ func NewServices(repos *repository.Repositories, cfg *config.Config, version str
 		cfg.DailyReport,
 		llmProxyURL,
 		cfg.Server.APIKey,
+		dailyReportLLMJobs,
 	)
 
 	return &Services{

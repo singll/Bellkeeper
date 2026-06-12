@@ -79,31 +79,15 @@ func (s *CrawlService) FetchAllActiveSources(ctx context.Context) (*FetchAllResu
 // This is called internally by RSSFetcherService.fetchFeed, but can also be invoked
 // manually for ad-hoc article processing.
 func (s *CrawlService) ProcessArticle(ctx context.Context, sourceID uint, url, title string) (*IngestURLResponse, error) {
-	if s.rssFetcher.ingestion == nil {
-		return nil, fmt.Errorf("file ingestion service not available")
+	if s.rssFetcher.crawlQueue != nil {
+		_, err := s.rssFetcher.crawlQueue.Enqueue(sourceID, url, title, "auto", nil)
+		if err != nil {
+			return nil, fmt.Errorf("failed to enqueue: %w", err)
+		}
+		return &IngestURLResponse{Status: "queued"}, nil
 	}
 
-	feed, err := s.rssRepo.GetByID(sourceID)
-	if err != nil {
-		return nil, fmt.Errorf("failed to get source: %w", err)
-	}
-
-	result, err := s.rssFetcher.ingestion.IngestURL(&IngestURLRequest{
-		URL:   url,
-		Title: title,
-	})
-	if err != nil {
-		s.logActivity("crawl", "process_article", "failure",
-			fmt.Sprintf("Article %s from source %s failed: %v", url, feed.Name, err),
-			sourceID, 0)
-		return nil, err
-	}
-
-	s.logActivity("crawl", "process_article", result.Status,
-		fmt.Sprintf("Article %s from source %s: %s", url, feed.Name, result.Status),
-		sourceID, 0)
-
-	return result, nil
+	return nil, fmt.Errorf("crawl queue not available")
 }
 
 // CheckSourceHealth evaluates source health status and returns details

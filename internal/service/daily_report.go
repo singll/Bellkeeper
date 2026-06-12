@@ -9,6 +9,7 @@ import (
 
 	"github.com/singll/bellkeeper/internal/config"
 	"github.com/singll/bellkeeper/internal/llmclient"
+	"github.com/singll/bellkeeper/internal/model"
 	"github.com/singll/bellkeeper/internal/repository"
 )
 
@@ -21,6 +22,7 @@ type DailyReportService struct {
 	notify       *NotificationService
 	report       *ReportService
 	llmClient    *llmclient.Client
+	llmJobs      *LLMJobQueueService
 	cfg          config.DailyReportConfig
 	loc          *time.Location
 }
@@ -36,6 +38,7 @@ func NewDailyReportService(
 	cfg config.DailyReportConfig,
 	llmProxyURL string,
 	apiKey string,
+	llmJobs *LLMJobQueueService,
 ) *DailyReportService {
 	loc := time.Local
 	if cfg.Timezone != "" {
@@ -60,6 +63,7 @@ func NewDailyReportService(
 		notify:       notify,
 		report:       report,
 		llmClient:    llmClient,
+		llmJobs:      llmJobs,
 		cfg:          cfg,
 		loc:          loc,
 	}
@@ -383,10 +387,6 @@ func (s *DailyReportService) Generate(ctx context.Context, opts GenerateOptions)
 }
 
 func (s *DailyReportService) generateAISummary(ctx context.Context, data *DailyReportData) (string, error) {
-	if s.llmClient == nil {
-		return "", fmt.Errorf("llm client not available")
-	}
-
 	var topics []string
 	for _, card := range data.PKBCards {
 		if card.Title != "" {
@@ -406,14 +406,44 @@ func (s *DailyReportService) generateAISummary(ctx context.Context, data *DailyR
 		formatTopicsForPrompt(topics),
 	)
 
+	messages := []llmclient.ChatMessage{
+		{Role: "user", Content: prompt},
+	}
+
+	if s.llmJobs != nil {
+		job, err := s.llmJobs.EnqueueChat(EnqueueLLMChatOptions{
+			TaskType:       "summary",
+			CallerID:       "daily-report-service",
+			Model:          "pool-summary",
+			Messages:       messages,
+			Temperature:    0.3,
+			Priority:       30,
+			IdempotencyKey: llmJobIdempotencyKey("daily-summary", data.Date),
+		})
+		if err != nil {
+			return "", fmt.Errorf("enqueue llm job: %w", err)
+		}
+		summarizeCtx, cancel := context.WithTimeout(ctx, 120*time.Second)
+		defer cancel()
+		done, err := s.llmJobs.Wait(summarizeCtx, job.ID, time.Second)
+		if err != nil {
+			return "", fmt.Errorf("wait llm job: %w", err)
+		}
+		if done.Status != model.LLMJobSuccess {
+			return "", LLMJobTerminalError(done)
+		}
+		return done.ResponseText, nil
+	}
+
+	log.Printf("[DailyReport] llm_jobs not configured, falling back to direct LLM call")
+	if s.llmClient == nil {
+		return "", fmt.Errorf("llm client not available")
+	}
 	summarizeCtx, cancel := context.WithTimeout(ctx, 120*time.Second)
 	defer cancel()
-
 	resp, err := s.llmClient.ChatCompletion(summarizeCtx, llmclient.ChatRequest{
-		Model: "pool-summary",
-		Messages: []llmclient.ChatMessage{
-			{Role: "user", Content: prompt},
-		},
+		Model:       "pool-summary",
+		Messages:    messages,
 		Temperature: 0.3,
 	}, llmclient.ChatOptions{
 		CallerID: "daily-report-service",

@@ -42,7 +42,7 @@ func TestProbeURL(t *testing.T) {
 	}))
 	defer failSrv.Close()
 
-	svc := NewRSSFetcherService(RSSFetcherConfig{Timeout: 5}, nil, nil)
+	svc := NewRSSFetcherService(RSSFetcherConfig{Timeout: 5}, nil)
 	ctx := context.Background()
 
 	if !svc.probeURL(ctx, okSrv.URL) {

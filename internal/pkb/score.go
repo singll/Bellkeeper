@@ -4,6 +4,8 @@ import (
 	"encoding/json"
 	"fmt"
 	"strings"
+
+	"github.com/singll/bellkeeper/internal/pkg/textutil"
 )
 
 // ScoreResult 打分结果（LLM 返回的三维分 + matched_domains + 依据）
@@ -66,7 +68,7 @@ func (c *Curator) scoreArticle(art ArticleMeta, body string) (*ScoreResult, erro
 	}
 
 	var sr ScoreResult
-	if err := json.Unmarshal([]byte(stripJSONFence(out)), &sr); err != nil {
+	if err := json.Unmarshal([]byte(textutil.StripJSONFence(out)), &sr); err != nil {
 		return nil, fmt.Errorf("parse score json (%q): %w", truncate(out, 200), err)
 	}
 	sr.Relevance = clamp10(sr.Relevance)
@@ -76,19 +78,6 @@ func (c *Curator) scoreArticle(art ArticleMeta, body string) (*ScoreResult, erro
 	sr.Novelty = clamp10(sr.Novelty)
 	sr.AtomicPotential = clamp10(sr.AtomicPotential)
 	return &sr, nil
-}
-
-// stripJSONFence 剥掉 markdown 代码围栏（抄 classify.go 的容错）
-func stripJSONFence(content string) string {
-	content = strings.TrimSpace(content)
-	if strings.HasPrefix(content, "```json") {
-		content = strings.TrimPrefix(content, "```json")
-		content = strings.TrimSuffix(content, "```")
-	} else if strings.HasPrefix(content, "```") {
-		content = strings.TrimPrefix(content, "```")
-		content = strings.TrimSuffix(content, "```")
-	}
-	return strings.TrimSpace(content)
 }
 
 func clamp10(v int) int {

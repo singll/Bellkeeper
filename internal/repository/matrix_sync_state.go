@@ -6,6 +6,7 @@ import (
 
 	"github.com/singll/bellkeeper/internal/model"
 	"gorm.io/gorm"
+	"gorm.io/gorm/clause"
 )
 
 type MatrixSyncStateRepository struct {
@@ -37,5 +38,8 @@ func (r *MatrixSyncStateRepository) GetByUserID(ctx context.Context, botUserID s
 
 func (r *MatrixSyncStateRepository) Upsert(ctx context.Context, state *model.MatrixSyncState) error {
 	state.UpdatedAt = time.Now()
-	return r.db.WithContext(ctx).Where("bot_user_id = ?", state.BotUserID).Assign(state).FirstOrCreate(state).Error
+	return r.db.WithContext(ctx).Clauses(clause.OnConflict{
+		Columns:   []clause.Column{{Name: "bot_user_id"}},
+		DoUpdates: clause.AssignmentColumns([]string{"next_batch", "last_sync_at", "updated_at"}),
+	}).Create(state).Error
 }

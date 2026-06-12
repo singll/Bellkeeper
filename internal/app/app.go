@@ -154,19 +154,17 @@ func (a *App) setupKnowledge() error {
 
 	knowledgeIndexSvc := service.NewKnowledgeIndexService(a.cfg.Knowledge, meiliClient)
 	knowledgeSearchSvc := service.NewFileSearchService(meiliClient)
-	var askQueue *service.LLMJobQueueService
-	if a.cfg.LLMJobQueue.Enabled {
-		askQueue = a.services.LLMJobQueue
-	}
 	askSvc := service.NewAskService(knowledgeSearchSvc,
 		fmt.Sprintf("http://localhost:%d/api/llm/v1", a.cfg.Server.Port),
-		a.cfg.Server.APIKey,
-		askQueue)
+		a.cfg.Server.APIKey)
 	askLayers := make([]string, 0, len(a.cfg.Knowledge.ScanDirs))
 	for _, dir := range a.cfg.Knowledge.ScanDirs {
 		askLayers = append(askLayers, dir.Layer)
 	}
 	askSvc.SetAllowedLayers(askLayers)
+	if a.cfg.Knowledge.MaxContextRunes > 0 {
+		askSvc.SetMaxContextRunes(a.cfg.Knowledge.MaxContextRunes)
+	}
 
 	knowledgeSearchAdapter := service.NewSearchServiceAdapter(knowledgeSearchSvc)
 	knowledgeAskAdapter := service.NewAskServiceAdapter(askSvc)
@@ -206,6 +204,7 @@ func (a *App) setupMatrixInfra() error {
 	// Notification service
 	notifySvc := service.NewNotificationService(a.cfg.NATS, a.redisClient, a.natsClient, a.repos)
 	a.services.SetNotificationService(notifySvc)
+	notifySvc.Start()
 	a.handlers.MatrixNotify = handler.NewMatrixNotifyHandler(notifySvc)
 
 	// Wire notification into crawl queue
@@ -256,6 +255,10 @@ func (a *App) setupMatrixGateway() error {
 
 	if a.services.MatrixAdmin != nil {
 		commandSvc.SetAdminService(a.services.MatrixAdmin)
+	}
+
+	if a.services.Health != nil {
+		commandSvc.SetHealthChecker(a.services.Health)
 	}
 
 	a.matrixSyncLoop.SetCommandService(commandSvc)
@@ -431,6 +434,9 @@ func (a *App) Shutdown() error {
 	}
 
 	// Core services
+	if a.services.Notification != nil {
+		a.services.Notification.Stop()
+	}
 	if a.services.CrawlQueue != nil {
 		a.services.CrawlQueue.Stop()
 	}

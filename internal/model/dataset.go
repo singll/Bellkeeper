@@ -17,7 +17,6 @@ type DatasetMapping struct {
 	Description string         `gorm:"type:text" json:"description"`
 	IsDefault   bool           `gorm:"default:false" json:"is_default"`
 	IsActive    bool           `gorm:"default:true" json:"is_active"`
-	ParserID    string         `gorm:"size:50;default:'naive'" json:"parser_id"`
 	Metadata    datatypes.JSON `gorm:"type:jsonb" json:"metadata,omitempty"`
 	CreatedAt   time.Time      `json:"created_at"`
 	UpdatedAt   time.Time      `json:"updated_at"`
