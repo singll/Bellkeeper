@@ -11,7 +11,7 @@
 | 优先级 | 类别 | 摘要 | 估算 |
 |--------|------|------|------|
 | **P0** | PKB 运行收尾 | 存量 ~308 篇 raw 分批跑完 + cron 固化 + 线上验收(§2.1) | 0.5 天 + 观察 |
-| **P0** | 提示词 P0 修复 | LLM-PROMPT-AGENT-REVIEW §5.1 六个具体 bug(§4.1) | 0.5–1 天 |
+| **P0** | ~~提示词 P0 修复~~ | ✅ 已完成 2026-06-12 | — |
 | **P1 ⭐** | PKB 原子知识网 | [PKB-ATOMIC-KNOWLEDGE-PLAN.md](PKB-ATOMIC-KNOWLEDGE-PLAN.md) Phase A–E(§2.2) | ~4.75 天 |
 | **P1** | 提示词基础设施 | response_format + 模板校验 + 自修复重试 + golden set eval(§4.2) | 1.5–2 天 |
 | **P1** | LLM Proxy 验收 | 运行时验证清单 + 调用方迁移 + new-api 停服评估(§3) | 0.5 天 + 7 天观察 |
@@ -84,14 +84,14 @@
 
 来源:[LLM-PROMPT-AGENT-REVIEW.md](LLM-PROMPT-AGENT-REVIEW.md)。
 
-### 4.1 P0 具体修复(互相独立可小步提交)
+### 4.1 P0 具体修复(✅ 已完成 2026-06-12)
 
-- [ ] 任务路由 token 启发式死逻辑:promptTokens 恒传 0 → 入口粗估 token 传入
-- [ ] knowledge_ask `buildContext` 按字节截断中文 → 改 rune,截断长度进配置
-- [ ] digest 入选阈值硬编码 7.0 → 用领域 `vault_threshold`
-- [ ] rule_optimizer 硬编码 "gpt-4o-mini" + 未注册 TaskType → 模型/温度进 config
-- [ ] OpenAI→Anthropic 转换丢 `tool_choice` → 补转换
-- [ ] Anthropic 缺省 max_tokens=4096 偏小 → 提高缺省;`stripJSONFence` 双实现去重
+- [x] 任务路由 token 启发式:estimateTokens 中文低估修复(rune/2→rune*2)
+- [x] knowledge_ask `buildContext` 按字节截断中文 → 已改 rune(前序修复)
+- [x] digest 入选阈值硬编码 7.0 → 已通过 YAML 配置可调(前序修复)
+- [x] rule_optimizer 硬编码模型 + 未注册 TaskType → 默认改 pool-summary + 注册 TaskRuleGeneration
+- [x] OpenAI→Anthropic 转换 tool_choice → 仅在 tools 非空时设置
+- [x] Anthropic max_tokens 注释修正 + stripJSONFence/stripCardFence 统一为 textutil.StripFence
 
 ### 4.2 P1 基础设施
 
