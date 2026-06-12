@@ -221,7 +221,7 @@ Rules:
 
 	llmModel := s.cfg.RuleOptimizerModel
 	if llmModel == "" {
-		llmModel = "pool-chat-free"
+		llmModel = "pool-summary"
 	}
 	temp := s.cfg.RuleOptimizerTemperature
 	if temp <= 0 {
@@ -231,7 +231,7 @@ Rules:
 		Model:       llmModel,
 		Messages:    []llmclient.ChatMessage{{Role: "user", Content: prompt}},
 		Temperature: temp,
-	}, llmclient.ChatOptions{CallerID: "rule_optimizer", TaskType: "rule_generation"})
+	}, llmclient.ChatOptions{CallerID: "rule_optimizer", TaskType: string(TaskRuleGeneration)})
 	if err != nil {
 		return nil, fmt.Errorf("LLM call failed: %w", err)
 	}

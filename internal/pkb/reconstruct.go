@@ -5,6 +5,8 @@ import (
 	"regexp"
 	"strconv"
 	"strings"
+
+	"github.com/singll/bellkeeper/internal/pkg/textutil"
 )
 
 var wikilinkRe = regexp.MustCompile(`\[\[([^\]]+)\]\]`)
@@ -53,7 +55,7 @@ func (c *Curator) reconstructCard(art ArticleMeta, body string, score *ScoreResu
 	if err != nil {
 		return nil, nil, fmt.Errorf("reconstruct llm: %w", err)
 	}
-	raw := stripCardFence(out)
+	raw := textutil.StripFence(out)
 
 	cards := splitCards(raw)
 	if len(cards) == 0 {
@@ -162,18 +164,6 @@ func buildValidLinkSet(vaultCandidates, batchConcepts []string, cards []string) 
 	return result
 }
 
-// stripCardFence 去掉整卡被 ``` 包裹的情况（保留卡内 frontmatter 的 ---）
-func stripCardFence(s string) string {
-	s = strings.TrimSpace(s)
-	if strings.HasPrefix(s, "```markdown") {
-		s = strings.TrimPrefix(s, "```markdown")
-		s = strings.TrimSuffix(s, "```")
-	} else if strings.HasPrefix(s, "```") {
-		s = strings.TrimPrefix(s, "```")
-		s = strings.TrimSuffix(s, "```")
-	}
-	return strings.TrimSpace(s)
-}
 
 // pruneWikilinks 移除指向不存在卡片的 [[wikilink]]（候选为空则全部降级为纯文本）。
 func pruneWikilinks(card string, candidates []string) string {

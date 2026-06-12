@@ -2438,10 +2438,10 @@ func estimateTokens(body []byte) int {
 	if runes == 0 {
 		return 0
 	}
-	estimated := runes / 2
 	byteLen := len(body)
-	if byteLen/runes < 2 {
-		estimated = byteLen / 4
+	avgBytesPerRune := byteLen / runes
+	if avgBytesPerRune >= 3 {
+		return runes * 2
 	}
-	return estimated
+	return byteLen / 4
 }

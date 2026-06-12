@@ -14,12 +14,13 @@ import (
 type TaskType string
 
 const (
-	TaskCoding      TaskType = "coding"
-	TaskClassify    TaskType = "classify"
-	TaskSummary     TaskType = "summary"
-	TaskQA          TaskType = "qa"
-	TaskLongContext TaskType = "long_context"
-	TaskChat        TaskType = "chat"
+	TaskCoding        TaskType = "coding"
+	TaskClassify      TaskType = "classify"
+	TaskSummary       TaskType = "summary"
+	TaskQA            TaskType = "qa"
+	TaskLongContext   TaskType = "long_context"
+	TaskChat          TaskType = "chat"
+	TaskRuleGeneration TaskType = "rule_generation"
 )
 
 // TaskRouter determines which pool of channels to use based on task type.
@@ -167,7 +168,7 @@ func (r *TaskRouter) SetCodingStrategy(strategy string) {
 // IsTaskRoutable returns true if the task type should bypass normal model-group routing.
 func IsTaskRoutable(tt TaskType) bool {
 	switch tt {
-	case TaskCoding, TaskClassify, TaskSummary, TaskQA, TaskLongContext:
+	case TaskCoding, TaskClassify, TaskSummary, TaskQA, TaskLongContext, TaskRuleGeneration:
 		return true
 	default:
 		return false

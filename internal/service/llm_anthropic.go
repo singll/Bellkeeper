@@ -55,7 +55,6 @@ func ConvertOpenAIToAnthropic(body []byte) ([]byte, error) {
 		anthropic["system"] = strings.Join(systemParts, "\n\n")
 	}
 
-	// max_tokens: Anthropic requires it, default to 4096
 	if mt, ok := req["max_tokens"]; ok {
 		anthropic["max_tokens"] = mt
 	} else {
@@ -77,10 +76,9 @@ func ConvertOpenAIToAnthropic(body []byte) ([]byte, error) {
 	// Convert functions/tools
 	if tools := convertTools(req); tools != nil {
 		anthropic["tools"] = tools
-	}
-
-	if tc, ok := req["tool_choice"]; ok {
-		anthropic["tool_choice"] = convertToolChoice(tc)
+		if tc, ok := req["tool_choice"]; ok {
+			anthropic["tool_choice"] = convertToolChoice(tc)
+		}
 	}
 
 	return json.Marshal(anthropic)

@@ -9,6 +9,8 @@ import (
 	"strconv"
 	"strings"
 	"time"
+
+	"github.com/singll/bellkeeper/internal/pkg/textutil"
 )
 
 // DigestOptions controls one low-frequency global-structure synthesis pass.
@@ -280,7 +282,7 @@ func (c *Curator) writeDigestRoot(domain Domain, period string, cards []digestCa
 	if err != nil {
 		return fmt.Errorf("digest llm: %w", err)
 	}
-	card := stripCardFence(out)
+	card := textutil.StripFence(out)
 	card = pruneWikilinks(card, digestTitles(cards))
 	if err := validateDigestWithMode(card, digestModeRoot); err != nil {
 		return err
@@ -324,7 +326,7 @@ func (c *Curator) writeDigestTopic(domain Domain, topic string, cards []digestCa
 	if err != nil {
 		return fmt.Errorf("topic moc llm: %w", err)
 	}
-	card := stripCardFence(out)
+	card := textutil.StripFence(out)
 	card = pruneWikilinks(card, digestTitles(cards))
 	if err := validateDigestWithMode(card, digestModeTopic); err != nil {
 		return err
