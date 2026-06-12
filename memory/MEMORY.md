@@ -4,25 +4,32 @@
 
 ## 当前进度
 
-- **Phase 0-6**: 全部完成 ✅
-- **Phase 7 (测试)**: 全部完成 ✅ — 核心链路审查无假测试 + LLM 协议转换测试(Anthropic 30+/Gemini 10) + 日报纯逻辑测试
-- **Phase 8 (lint)**: 全部完成 ✅ — golangci-lint v2.1.0 从87→3(仅staticcheck warning)
-- **Phase 9-10**: 待执行
+- **Phase 0-8**: 全部完成 ✅
+- **Phase 9-10 (T5-T8)**: 全部完成 ✅
+  - T5: Agent MVP — llmclient tools 扩展 + AgentService + 6只读工具 + 会话 + 限速
+  - T6: Agent 扩展 — todo写工具 + workflow触发 + 权限护栏
+  - T7: 后端API补齐 — PUT rooms, POST/DELETE channels, PUT commands, POST notifications/retry
+  - T8: 前端API对齐（pnpm build 绿）
+- **Phase 9-10 (T9+收尾)**: 待执行
+  - T9: 文档与收尾
+  - doc/ 进版本库
+  - CLAUDE.md 瘦身
+  - v1.0.0 tag
 
 ## 关键决策
 
-- 测试基础设施从 SQLite 切换到 **Docker PostgreSQL** (`bellkeeper-test-postgres`, `localhost:15432`, user=`bellkeeper`, password=`testpass`, db=`bellkeeper_test`)
-- 共享 schema `repo_test`，每个测试前后 TRUNCATE 隔离
-- 仅 3 个 LLMChannelCredential 方法因依赖 crypto 包而 skip
-- `go build ./...` + `go vet ./...` 绿色
-- `go test ./...` 全部通过（Repository 测试较慢，约 4-5 分钟）
-- golangci-lint v2.1.0（Go 1.25 编译），仅 3 个 staticcheck warning（SA1019 deprecated + SA9003 empty branch）
-- Phase 7 新增：`llm_anthropic_test.go`（30+用例）、`gemini_test.go`（10用例）、`daily_report_test.go`（11用例）
-- Phase 8 修复：7 unused + 3 ineffassign + 8 staticcheck + 关键 errcheck，`//nolint:errcheck` 用于 defer Close/Writer.Write
+- Agent 通过 llmclient.ChatCompletionFull 支持 function calling（OpenAI schema 直通 LLM Proxy）
+- 工具权限分级：readonly（所有人）/ write（admin）/ danger（需确认，T2 实现）
+- 会话存 Redis（matrix:agent:session:<roomID>），TTL 30min，上限 20 条
+- 限速每房间 30 回合/小时（Redis INCR + 1h 窗口）
+- 命令消息（!开头）走 Router，普通消息走 Agent
+- Agent 工具调用写 matrix_command_logs（handler_type=agent_tool）
+- Memos todo 工具直接走 HTTP API（不走 CommandService）
 
 ## 下一步
 
-1. Phase 9-10: Matrix T5-T9 (Agent MVP/扩展 + API补齐 + 前端重构 + 文档) + v1.0.0 tag
+1. T9 文档与收尾 + v1.0.0 tag
+2. 可选：前端 7→3 页重构
 
 ## 计划文件
 
@@ -33,3 +40,5 @@
 - Docker 已可用（ubuntu 用户已加入 docker 组）
 - 测试 PG 容器：`docker ps` 应显示 `bellkeeper-test-postgres`
 - 启动命令：`docker run -d --name bellkeeper-test-postgres -e POSTGRES_DB=bellkeeper_test -e POSTGRES_USER=bellkeeper -e POSTGRES_PASSWORD=testpass -p 15432:5432 postgres:16-alpine`
+- Agent 配置项：`matrix.agent.enabled/model/max_turns_per_hour/session_ttl/max_tool_iterations/system_prompt`
+- bellkeeper-init.sh 已新增 Agent 环境变量导出

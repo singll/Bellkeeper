@@ -55,3 +55,7 @@ func (r *MatrixChannelRepository) Create(channel *model.MatrixChannel) error {
 func (r *MatrixChannelRepository) Update(channel *model.MatrixChannel) error {
 	return r.db.Save(channel).Error
 }
+
+func (r *MatrixChannelRepository) Delete(id uint) error {
+	return r.db.Delete(&model.MatrixChannel{}, id).Error
+}

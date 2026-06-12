@@ -323,3 +323,94 @@ func (h *MatrixAdminHandler) ListCommandLogs(c *gin.Context) {
 
 	response.Page(c, logs, total, page, perPage)
 }
+
+// UpdateRoom handles PUT /api/matrix/admin/rooms/:id
+func (h *MatrixAdminHandler) UpdateRoom(c *gin.Context) {
+	roomID := c.Param("id")
+	if roomID == "" {
+		response.BadRequest(c, "room id required")
+		return
+	}
+
+	var updates map[string]interface{}
+	if err := c.ShouldBindJSON(&updates); err != nil {
+		response.BadRequest(c, err.Error())
+		return
+	}
+
+	if err := h.adminSvc.UpdateRoom(c.Request.Context(), roomID, updates); err != nil {
+		response.InternalError(c, err.Error())
+		return
+	}
+	response.Message(c, "room updated")
+}
+
+// CreateChannel handles POST /api/matrix/admin/channels
+func (h *MatrixAdminHandler) CreateChannel(c *gin.Context) {
+	var req struct {
+		Name     string `json:"name" binding:"required"`
+		RoomID   string `json:"room_id"`
+		Priority int    `json:"priority"`
+	}
+	if err := c.ShouldBindJSON(&req); err != nil {
+		response.BadRequest(c, err.Error())
+		return
+	}
+
+	if err := h.adminSvc.CreateChannel(c.Request.Context(), req.Name, req.RoomID, req.Priority); err != nil {
+		response.InternalError(c, err.Error())
+		return
+	}
+	response.Raw(c, http.StatusCreated, gin.H{"message": "channel created"})
+}
+
+// DeleteChannel handles DELETE /api/matrix/admin/channels/:name
+func (h *MatrixAdminHandler) DeleteChannel(c *gin.Context) {
+	name := c.Param("name")
+	if name == "" {
+		response.BadRequest(c, "channel name required")
+		return
+	}
+
+	if err := h.adminSvc.DeleteChannel(c.Request.Context(), name); err != nil {
+		response.InternalError(c, err.Error())
+		return
+	}
+	response.Message(c, "channel deleted")
+}
+
+// UpdateCommand handles PUT /api/matrix/admin/commands/:name
+func (h *MatrixAdminHandler) UpdateCommand(c *gin.Context) {
+	name := c.Param("name")
+	if name == "" {
+		response.BadRequest(c, "command name required")
+		return
+	}
+
+	var updates map[string]interface{}
+	if err := c.ShouldBindJSON(&updates); err != nil {
+		response.BadRequest(c, err.Error())
+		return
+	}
+
+	if err := h.adminSvc.UpdateCommand(c.Request.Context(), name, updates); err != nil {
+		response.InternalError(c, err.Error())
+		return
+	}
+	response.Message(c, "command updated")
+}
+
+// RetryNotification handles POST /api/matrix/admin/notifications/:id/retry
+func (h *MatrixAdminHandler) RetryNotification(c *gin.Context) {
+	id := c.Param("id")
+	if id == "" {
+		response.BadRequest(c, "notification id required")
+		return
+	}
+
+	if err := h.adminSvc.RetryNotification(c.Request.Context(), id); err != nil {
+		response.InternalError(c, err.Error())
+		return
+	}
+	response.Message(c, "notification queued for retry")
+}

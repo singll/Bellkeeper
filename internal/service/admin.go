@@ -3,6 +3,7 @@ package service
 import (
 	"context"
 	"encoding/json"
+	"fmt"
 	"log"
 	"time"
 
@@ -82,6 +83,24 @@ func (s *AdminService) DeleteRoom(ctx context.Context, roomID string) error {
 	return s.repos.MatrixRoom.Delete(roomID)
 }
 
+// UpdateRoom updates a room's configuration
+func (s *AdminService) UpdateRoom(ctx context.Context, roomID string, updates map[string]interface{}) error {
+	room, err := s.repos.MatrixRoom.GetByRoomID(roomID)
+	if err != nil || room == nil {
+		return fmt.Errorf("room not found: %w", err)
+	}
+	if name, ok := updates["name"].(string); ok {
+		room.RoomName = name
+	}
+	if roomType, ok := updates["room_type"].(string); ok {
+		room.RoomType = roomType
+	}
+	if active, ok := updates["is_active"].(bool); ok {
+		room.IsActive = active
+	}
+	return s.repos.MatrixRoom.Update(room)
+}
+
 // ============ Channel Management ============
 
 // ChannelResponse represents channel info for API response
@@ -140,6 +159,26 @@ func (s *AdminService) UpdateChannel(ctx context.Context, name string, updates m
 	return s.repos.MatrixChannel.Update(channel)
 }
 
+// CreateChannel creates a new notification channel
+func (s *AdminService) CreateChannel(ctx context.Context, name, roomID string, priority int) error {
+	channel := &model.MatrixChannel{
+		ChannelName: name,
+		RoomID:      roomID,
+		IsActive:    true,
+		Priority:    priority,
+	}
+	return s.repos.MatrixChannel.Create(channel)
+}
+
+// DeleteChannel deletes a notification channel by name
+func (s *AdminService) DeleteChannel(ctx context.Context, name string) error {
+	channel, err := s.repos.MatrixChannel.GetByName(name)
+	if err != nil || channel == nil {
+		return fmt.Errorf("channel not found: %w", err)
+	}
+	return s.repos.MatrixChannel.Delete(channel.ID)
+}
+
 // ============ Command Management ============
 
 // CommandResponse represents command info for API response
@@ -169,6 +208,33 @@ func (s *AdminService) ListCommands(ctx context.Context) ([]*CommandResponse, er
 		}
 	}
 	return result, nil
+}
+
+// UpdateCommand updates a command's strategy configuration
+func (s *AdminService) UpdateCommand(ctx context.Context, name string, updates map[string]interface{}) error {
+	cmd, err := s.repos.MatrixCommand.GetByName(name)
+	if err != nil || cmd == nil {
+		return fmt.Errorf("command not found: %w", err)
+	}
+	if active, ok := updates["is_active"].(bool); ok {
+		cmd.IsActive = active
+	}
+	if perm, ok := updates["permission_level"].(string); ok {
+		cmd.PermissionLevel = perm
+	}
+	if desc, ok := updates["description"].(string); ok {
+		cmd.Description = desc
+	}
+	return s.repos.MatrixCommand.Update(cmd)
+}
+
+// RetryNotification retries a failed notification
+func (s *AdminService) RetryNotification(ctx context.Context, id string) error {
+	notif, err := s.repos.MatrixNotification.GetByNotificationID(ctx, id)
+	if err != nil || notif == nil {
+		return fmt.Errorf("notification not found: %w", err)
+	}
+	return s.repos.MatrixNotification.UpdateStatus(ctx, id, "pending", "")
 }
 
 // ============ Audit ============

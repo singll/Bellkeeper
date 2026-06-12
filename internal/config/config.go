@@ -189,14 +189,24 @@ type FirecrawlConfig struct {
 }
 
 type MatrixConfig struct {
-	HomeserverURL  string   `mapstructure:"homeserver_url"`
-	BotUserID      string   `mapstructure:"bot_user_id"`
-	BotAccessToken string   `mapstructure:"bot_access_token"`
-	DeviceID       string   `mapstructure:"device_id"`
-	SyncTimeout    int      `mapstructure:"sync_timeout"`   // milliseconds
-	CommandPrefix  string   `mapstructure:"command_prefix"` // comma-separated prefixes
-	MaxRetry       int      `mapstructure:"max_retry"`
-	AdminUsers     []string `mapstructure:"admin_users"` // list of admin user IDs
+	HomeserverURL  string        `mapstructure:"homeserver_url"`
+	BotUserID      string        `mapstructure:"bot_user_id"`
+	BotAccessToken string        `mapstructure:"bot_access_token"`
+	DeviceID       string        `mapstructure:"device_id"`
+	SyncTimeout    int           `mapstructure:"sync_timeout"`   // milliseconds
+	CommandPrefix  string        `mapstructure:"command_prefix"` // comma-separated prefixes
+	MaxRetry       int           `mapstructure:"max_retry"`
+	AdminUsers     []string      `mapstructure:"admin_users"` // list of admin user IDs
+	Agent          MatrixAgentConfig `mapstructure:"agent"`
+}
+
+type MatrixAgentConfig struct {
+	Enabled             bool   `mapstructure:"enabled"`
+	Model               string `mapstructure:"model"`
+	MaxTurnsPerHour     int    `mapstructure:"max_turns_per_hour"`
+	SessionTTL          string `mapstructure:"session_ttl"`
+	MaxToolIterations   int    `mapstructure:"max_tool_iterations"`
+	SystemPrompt        string `mapstructure:"system_prompt"`
 }
 
 type RedisConfig struct {
@@ -504,6 +514,12 @@ func setDefaults(v *viper.Viper) {
 	v.SetDefault("matrix.command_prefix", "!,！")
 	v.SetDefault("matrix.max_retry", 3)
 	v.SetDefault("matrix.admin_users", []string{"@singll:matrix.singll.net"})
+	v.SetDefault("matrix.agent.enabled", false)
+	v.SetDefault("matrix.agent.model", "pool-chat-balanced")
+	v.SetDefault("matrix.agent.max_turns_per_hour", 30)
+	v.SetDefault("matrix.agent.session_ttl", "30m")
+	v.SetDefault("matrix.agent.max_tool_iterations", 5)
+	v.SetDefault("matrix.agent.system_prompt", "")
 
 	// Redis
 	v.SetDefault("redis.host", "sp-redis")

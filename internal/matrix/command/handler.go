@@ -418,3 +418,42 @@ func (h *CommandsHandler) Handle(ctx context.Context, cmdCtx *Context) (*Respons
 		IsHTML:  true,
 	}, nil
 }
+
+type ResetHandler struct {
+	BaseHandler
+	agent interface {
+		ResetSession(ctx context.Context, roomID string) error
+	}
+}
+
+func NewResetHandler(agentSvc interface {
+	ResetSession(ctx context.Context, roomID string) error
+}) *ResetHandler {
+	return &ResetHandler{
+		BaseHandler: BaseHandler{
+			name:        "reset",
+			description: "重置 AI Agent 会话上下文",
+			usage:       "",
+		},
+		agent: agentSvc,
+	}
+}
+
+func (h *ResetHandler) Handle(ctx context.Context, cmdCtx *Context) (*Response, error) {
+	if h.agent == nil {
+		return &Response{
+			Success: false,
+			Message: "Agent 未启用",
+		}, nil
+	}
+	if err := h.agent.ResetSession(ctx, cmdCtx.RoomID); err != nil {
+		return &Response{
+			Success: false,
+			Message: "重置失败: " + err.Error(),
+		}, nil
+	}
+	return &Response{
+		Success: true,
+		Message: "✅ Agent 会话已重置",
+	}, nil
+}

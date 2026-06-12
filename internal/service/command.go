@@ -3,6 +3,7 @@ package service
 import (
 	"context"
 	"log"
+	"strings"
 
 	"github.com/singll/bellkeeper/internal/config"
 	"github.com/singll/bellkeeper/internal/matrix/command"
@@ -11,14 +12,25 @@ import (
 	"github.com/singll/bellkeeper/internal/repository"
 )
 
+type AgentTurnResult struct {
+	Reply     string
+	UsedTools bool
+}
+
+type AgentHandler interface {
+	HandleMessage(ctx context.Context, roomID, sender, content string) (*AgentTurnResult, error)
+	ResetSession(ctx context.Context, roomID string) error
+}
+
 // CommandService handles Matrix command execution
 type CommandService struct {
-	cfg    config.MatrixConfig
-	n8nCfg config.N8NConfig
+	cfg      config.MatrixConfig
+	n8nCfg   config.N8NConfig
 	memosCfg config.MemosConfig
-	router *command.Router
-	client *gateway.Client
-	repos  *repository.Repositories
+	router   *command.Router
+	client   *gateway.Client
+	repos    *repository.Repositories
+	agent    AgentHandler
 }
 
 // NewCommandService creates a new command service
@@ -108,30 +120,48 @@ func (s *CommandService) SetKnowledgeHandlers(askHandler command.AskHandler, sea
 
 // ExecuteMessage processes a Matrix message and executes if it's a command
 func (s *CommandService) ExecuteMessage(ctx context.Context, roomID, sender, eventID, content string) error {
-	// Parse and route command
-	response, isCommand, err := s.router.ExecuteFromMessage(ctx, roomID, sender, eventID, content)
-	if err != nil {
-		return err
-	}
+	trimmed := strings.TrimSpace(content)
 
-	if !isCommand {
-		return nil // Not a command
-	}
+	if strings.HasPrefix(trimmed, "!") || strings.HasPrefix(trimmed, "！") {
+		response, isCommand, err := s.router.ExecuteFromMessage(ctx, roomID, sender, eventID, content)
+		if err != nil {
+			return err
+		}
 
-	// Send response back to room
-	if response == nil {
+		if !isCommand {
+			return nil
+		}
+
+		if response == nil {
+			return nil
+		}
+
+		if response.IsHTML {
+			_, err = s.client.SendHTMLMessage(ctx, roomID, response.Message, stripHTML(response.Message))
+		} else {
+			_, err = s.client.SendMessage(ctx, roomID, response.Message)
+		}
+
+		if err != nil {
+			log.Printf("[Command] failed to send response: %v", err)
+			return err
+		}
+
 		return nil
 	}
 
-	if response.IsHTML {
-		_, err = s.client.SendHTMLMessage(ctx, roomID, response.Message, stripHTML(response.Message))
-	} else {
-		_, err = s.client.SendMessage(ctx, roomID, response.Message)
-	}
-
-	if err != nil {
-		log.Printf("[Command] failed to send response: %v", err)
-		return err
+	if s.agent != nil {
+		result, err := s.agent.HandleMessage(ctx, roomID, sender, trimmed)
+		if err != nil {
+			log.Printf("[Agent] failed to handle message: %v", err)
+			return err
+		}
+		if result != nil && result.Reply != "" {
+			if _, err := s.client.SendMessage(ctx, roomID, result.Reply); err != nil {
+				log.Printf("[Agent] failed to send reply: %v", err)
+				return err
+			}
+		}
 	}
 
 	return nil
@@ -165,6 +195,12 @@ func (s *CommandService) SetAdminService(adminSvc *AdminService) {
 func (s *CommandService) SetHealthChecker(hs *HealthService) {
 	s.router.RegisterHandler(command.NewStatusHandlerWithChecker(healthCheckerAdapter{svc: hs}))
 	log.Printf("[Command] registered status handler with health checker")
+}
+
+func (s *CommandService) SetAgent(agentSvc AgentHandler) {
+	s.agent = agentSvc
+	s.router.RegisterHandler(command.NewResetHandler(agentSvc))
+	log.Printf("[Command] registered agent and reset command")
 }
 
 // healthCheckerAdapter adapts HealthService.Detailed() to the healthChecker interface

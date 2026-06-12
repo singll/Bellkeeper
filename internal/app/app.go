@@ -12,6 +12,7 @@ import (
 	"github.com/gin-gonic/gin"
 	"github.com/singll/bellkeeper/internal/config"
 	"github.com/singll/bellkeeper/internal/handler"
+	"github.com/singll/bellkeeper/internal/matrix/agent"
 	"github.com/singll/bellkeeper/internal/matrix/gateway"
 	"github.com/singll/bellkeeper/internal/matrix/infra"
 	"github.com/singll/bellkeeper/internal/matrix/policy"
@@ -59,6 +60,10 @@ type App struct {
 	// Knowledge adapters (wired to Matrix command service later)
 	knowledgeAskAdapter    *service.AskServiceAdapter
 	knowledgeSearchAdapter *service.SearchServiceAdapter
+
+	// Knowledge service instances (for Agent tool wiring)
+	knowledgeSearchSvc *service.FileSearchService
+	knowledgeAskSvc    *service.AskService
 
 	// HTTP server
 	httpSrv *http.Server
@@ -176,6 +181,8 @@ func (a *App) setupKnowledge() error {
 	// Store adapters for wiring in setupMatrixGateway
 	a.knowledgeAskAdapter = knowledgeAskAdapter
 	a.knowledgeSearchAdapter = knowledgeSearchAdapter
+	a.knowledgeSearchSvc = knowledgeSearchSvc
+	a.knowledgeAskSvc = askSvc
 
 	a.knowledgeIndexSvc = knowledgeIndexSvc
 	a.logger.Info("[Knowledge] knowledge services initialized")
@@ -268,6 +275,51 @@ func (a *App) setupMatrixGateway() error {
 	// Wire knowledge handlers if available
 	if a.knowledgeSearchAdapter != nil && a.knowledgeAskAdapter != nil {
 		commandSvc.SetKnowledgeHandlers(a.knowledgeAskAdapter, a.knowledgeSearchAdapter)
+	}
+
+	// Wire Agent if enabled
+	if a.cfg.Matrix.Agent.Enabled && a.redisClient != nil {
+		toolRegistry := agent.NewToolRegistry()
+		toolDeps := agent.BuildToolDependencies(
+			a.services.Health,
+			a.services.Dashboard,
+			a.knowledgeSearchSvc,
+			a.knowledgeAskSvc,
+			a.repos.LLMProxy,
+			a.services.CrawlQueue,
+		)
+		agent.RegisterReadonlyTools(toolRegistry, toolDeps)
+
+		writeDeps := agent.BuildWriteToolDependencies(
+			a.cfg.Memos.BaseURL,
+			a.cfg.Memos.APIToken,
+			a.services.Workflow,
+		)
+		agent.RegisterWriteTools(toolRegistry, writeDeps)
+
+		adminUsers := a.cfg.Matrix.AdminUsers
+		if len(adminUsers) == 0 {
+			adminUsers = []string{"@singll:" + defaults.DefaultMatrixDomain}
+		}
+		agentPolicy := policy.NewChecker(a.repos, adminUsers)
+
+		llmProxyURL := fmt.Sprintf("http://localhost:%d/api/llm/v1", a.cfg.Server.Port)
+		agentSvc := agent.NewAgentService(
+			a.cfg.Matrix.Agent,
+			llmProxyURL,
+			a.cfg.Server.APIKey,
+			a.redisClient.GetClient(),
+			a.matrixClient,
+			a.repos,
+			agentPolicy,
+			toolRegistry,
+		)
+		if agentSvc != nil {
+			commandSvc.SetAgent(&agentServiceAdapter{svc: agentSvc})
+			a.logger.Info("[Matrix] Agent service initialized")
+		}
+	} else if a.cfg.Matrix.Agent.Enabled {
+		a.logger.Warn("[Matrix] Agent enabled but Redis unavailable, skipping")
 	}
 
 	if err := a.matrixSyncLoop.Start(context.Background()); err != nil {
@@ -483,3 +535,25 @@ func (a *App) Shutdown() error {
 }
 
 const version = "1.0.0"
+
+type agentServiceAdapter struct {
+	svc *agent.AgentService
+}
+
+func (a *agentServiceAdapter) HandleMessage(ctx context.Context, roomID, sender, content string) (*service.AgentTurnResult, error) {
+	result, err := a.svc.HandleMessage(ctx, roomID, sender, content)
+	if err != nil {
+		return nil, err
+	}
+	if result == nil {
+		return nil, nil
+	}
+	return &service.AgentTurnResult{
+		Reply:     result.Reply,
+		UsedTools: result.UsedTools,
+	}, nil
+}
+
+func (a *agentServiceAdapter) ResetSession(ctx context.Context, roomID string) error {
+	return a.svc.ResetSession(ctx, roomID)
+}

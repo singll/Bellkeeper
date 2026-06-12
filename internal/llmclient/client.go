@@ -29,16 +29,49 @@ type ChatRequest struct {
 	Model       string        `json:"model"`
 	Messages    []ChatMessage `json:"messages"`
 	Temperature float64       `json:"temperature,omitempty"`
+	Tools       []Tool        `json:"tools,omitempty"`
+	ToolChoice  interface{}   `json:"tool_choice,omitempty"`
+}
+
+type Tool struct {
+	Type     string   `json:"type"` // "function"
+	Function Function `json:"function"`
+}
+
+type Function struct {
+	Name        string                 `json:"name"`
+	Description string                 `json:"description"`
+	Parameters  map[string]interface{} `json:"parameters"`
 }
 
 type ChatMessage struct {
-	Role    string `json:"role"`
-	Content string `json:"content"`
+	Role       string     `json:"role"`
+	Content    string     `json:"content,omitempty"`
+	ToolCalls  []ToolCall `json:"tool_calls,omitempty"`
+	ToolCallID string     `json:"tool_call_id,omitempty"`
+}
+
+type ToolCall struct {
+	ID       string       `json:"id"`
+	Type     string       `json:"type"` // "function"
+	Function FunctionCall `json:"function"`
+}
+
+type FunctionCall struct {
+	Name      string `json:"name"`
+	Arguments string `json:"arguments"`
 }
 
 type ChatOptions struct {
-	CallerID string
-	TaskType string
+	CallerID       string
+	TaskType       string
+	ConversationID string
+}
+
+type ChatResponse struct {
+	Content   string     `json:"content"`
+	ToolCalls []ToolCall `json:"tool_calls,omitempty"`
+	FinishReason string  `json:"finish_reason,omitempty"`
 }
 
 type HTTPError struct {
@@ -67,13 +100,21 @@ func New(opts Options) *Client {
 }
 
 func (c *Client) ChatCompletion(ctx context.Context, req ChatRequest, opts ChatOptions) (string, error) {
-	body, err := json.Marshal(req)
+	resp, err := c.ChatCompletionFull(ctx, req, opts)
 	if err != nil {
 		return "", err
 	}
+	return resp.Content, nil
+}
+
+func (c *Client) ChatCompletionFull(ctx context.Context, req ChatRequest, opts ChatOptions) (*ChatResponse, error) {
+	body, err := json.Marshal(req)
+	if err != nil {
+		return nil, err
+	}
 	httpReq, err := http.NewRequestWithContext(ctx, http.MethodPost, c.baseURL+"/chat/completions", bytes.NewReader(body))
 	if err != nil {
-		return "", err
+		return nil, err
 	}
 	httpReq.Header.Set("Content-Type", "application/json")
 	if c.apiKey != "" {
@@ -86,15 +127,18 @@ func (c *Client) ChatCompletion(ctx context.Context, req ChatRequest, opts ChatO
 	if opts.TaskType != "" {
 		httpReq.Header.Set("X-Task-Type", opts.TaskType)
 	}
+	if opts.ConversationID != "" {
+		httpReq.Header.Set("X-Conversation-ID", opts.ConversationID)
+	}
 
 	resp, err := c.httpClient.Do(httpReq)
 	if err != nil {
-		return "", fmt.Errorf("llm request: %w", err)
+		return nil, fmt.Errorf("llm request: %w", err)
 	}
 	defer resp.Body.Close() //nolint:errcheck
 	raw, _ := io.ReadAll(resp.Body)
 	if resp.StatusCode >= 400 {
-		return "", &HTTPError{
+		return nil, &HTTPError{
 			StatusCode: resp.StatusCode,
 			Body:       string(raw),
 			RetryAfter: ParseRetryAfter(resp.Header.Get("Retry-After")),
@@ -103,17 +147,24 @@ func (c *Client) ChatCompletion(ctx context.Context, req ChatRequest, opts ChatO
 	var out struct {
 		Choices []struct {
 			Message struct {
-				Content string `json:"content"`
+				Content    string     `json:"content"`
+				ToolCalls  []ToolCall `json:"tool_calls"`
 			} `json:"message"`
+			FinishReason string `json:"finish_reason"`
 		} `json:"choices"`
 	}
 	if err := json.Unmarshal(raw, &out); err != nil {
-		return "", fmt.Errorf("decode llm response: %w", err)
+		return nil, fmt.Errorf("decode llm response: %w", err)
 	}
 	if len(out.Choices) == 0 {
-		return "", fmt.Errorf("llm returned no choices")
+		return nil, fmt.Errorf("llm returned no choices")
 	}
-	return out.Choices[0].Message.Content, nil
+	choice := out.Choices[0]
+	return &ChatResponse{
+		Content:      choice.Message.Content,
+		ToolCalls:    choice.Message.ToolCalls,
+		FinishReason: choice.FinishReason,
+	}, nil
 }
 
 func ParseRetryAfter(raw string) time.Duration {
