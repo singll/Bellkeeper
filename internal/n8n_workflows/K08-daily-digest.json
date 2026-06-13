@@ -18,7 +18,10 @@
       "name": "每日20点触发",
       "type": "n8n-nodes-base.scheduleTrigger",
       "typeVersion": 1.2,
-      "position": [240, 300]
+      "position": [
+        240,
+        300
+      ]
     },
     {
       "parameters": {
@@ -45,7 +48,10 @@
       "name": "调用资讯摘要生成",
       "type": "n8n-nodes-base.httpRequest",
       "typeVersion": 4.2,
-      "position": [480, 300],
+      "position": [
+        480,
+        300
+      ],
       "onError": "continueErrorOutput"
     },
     {
@@ -73,7 +79,10 @@
       "name": "推送Matrix通知",
       "type": "n8n-nodes-base.httpRequest",
       "typeVersion": 4.2,
-      "position": [720, 300]
+      "position": [
+        720,
+        300
+      ]
     },
     {
       "parameters": {
@@ -100,7 +109,10 @@
       "name": "发送失败告警",
       "type": "n8n-nodes-base.httpRequest",
       "typeVersion": 4.2,
-      "position": [720, 500]
+      "position": [
+        720,
+        500
+      ]
     }
   ],
   "connections": {
@@ -136,6 +148,7 @@
   },
   "active": true,
   "settings": {
-    "executionOrder": "v1"
+    "executionOrder": "v1",
+    "errorWorkflow": "DDPUVypFAgyDOXgn"
   }
 }

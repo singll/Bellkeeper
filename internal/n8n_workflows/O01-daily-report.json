@@ -18,7 +18,10 @@
       "name": "每日21点触发",
       "type": "n8n-nodes-base.scheduleTrigger",
       "typeVersion": 1.2,
-      "position": [240, 300]
+      "position": [
+        240,
+        300
+      ]
     },
     {
       "parameters": {
@@ -45,7 +48,10 @@
       "name": "调用日报生成",
       "type": "n8n-nodes-base.httpRequest",
       "typeVersion": 4.2,
-      "position": [480, 300],
+      "position": [
+        480,
+        300
+      ],
       "onError": "continueErrorOutput"
     },
     {
@@ -74,7 +80,10 @@
       "name": "生成失败?",
       "type": "n8n-nodes-base.if",
       "typeVersion": 2,
-      "position": [720, 300]
+      "position": [
+        720,
+        300
+      ]
     },
     {
       "parameters": {
@@ -101,7 +110,10 @@
       "name": "发送告警",
       "type": "n8n-nodes-base.httpRequest",
       "typeVersion": 4.2,
-      "position": [960, 180]
+      "position": [
+        960,
+        180
+      ]
     },
     {
       "parameters": {
@@ -128,7 +140,10 @@
       "name": "记录成功日志",
       "type": "n8n-nodes-base.httpRequest",
       "typeVersion": 4.2,
-      "position": [960, 420]
+      "position": [
+        960,
+        420
+      ]
     }
   ],
   "connections": {
@@ -182,6 +197,7 @@
   },
   "active": true,
   "settings": {
-    "executionOrder": "v1"
+    "executionOrder": "v1",
+    "errorWorkflow": "DDPUVypFAgyDOXgn"
   }
 }

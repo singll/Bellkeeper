@@ -179,11 +179,13 @@ func (s *RSSFetcherService) runLoop(ctx context.Context) {
 	defer s.wg.Done()
 
 	ticker := time.NewTicker(time.Duration(s.cfg.CheckInterval) * time.Second)
-	retryTicker := time.NewTicker(30 * time.Second) // check retry queue every 30s
+	retryTicker := time.NewTicker(30 * time.Second)    // check retry queue every 30s
 	probeTicker := time.NewTicker(time.Duration(s.cfg.ProbeIntervalMinutes) * time.Minute)
+	heartbeat := time.NewTicker(5 * time.Minute)
 	defer ticker.Stop()
 	defer retryTicker.Stop()
 	defer probeTicker.Stop()
+	defer heartbeat.Stop()
 
 	for {
 		select {
@@ -193,6 +195,8 @@ func (s *RSSFetcherService) runLoop(ctx context.Context) {
 			s.processRetryQueue(ctx)
 		case <-probeTicker.C:
 			s.probePausedFeeds(ctx)
+		case <-heartbeat.C:
+			s.logActivity("heartbeat", "rss_fetcher", "success", "RSSFetcher alive", 0, 0)
 		case <-s.stopCh:
 			return
 		case <-ctx.Done():

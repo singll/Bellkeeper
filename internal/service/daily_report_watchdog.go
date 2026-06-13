@@ -152,7 +152,10 @@ func (w *DailyReportWatchdog) CheckOnce(ctx context.Context, now time.Time) (boo
 	}
 	w.mu.Unlock()
 
-	if w.reportExists(date) {
+	exists := w.reportExists(date)
+	log.Printf("[DailyReportWatchdog] checked: date=%s, exists=%v", date, exists)
+
+	if exists {
 		w.markChecked(date)
 		return false, nil
 	}
@@ -184,11 +187,14 @@ func (w *DailyReportWatchdog) CheckOnce(ctx context.Context, now time.Time) (boo
 		},
 	})
 	if err != nil {
+		log.Printf("[DailyReportWatchdog] checked: date=%s, exists=false, alert_sent=false, error=%v", date, err)
 		return true, err
 	}
 	if resp != nil && !resp.Success {
+		log.Printf("[DailyReportWatchdog] checked: date=%s, exists=false, alert_sent=false, reason=%s", date, resp.Message)
 		return true, fmt.Errorf("send daily report watchdog alert: %s", resp.Message)
 	}
+	log.Printf("[DailyReportWatchdog] checked: date=%s, exists=false, alert_sent=true", date)
 	w.markChecked(date)
 	return true, nil
 }

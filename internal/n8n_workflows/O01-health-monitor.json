@@ -18,7 +18,10 @@
       "name": "每5分钟触发",
       "type": "n8n-nodes-base.scheduleTrigger",
       "typeVersion": 1.2,
-      "position": [240, 300]
+      "position": [
+        240,
+        300
+      ]
     },
     {
       "parameters": {
@@ -38,7 +41,10 @@
       "name": "获取服务状态",
       "type": "n8n-nodes-base.httpRequest",
       "typeVersion": 4.2,
-      "position": [480, 300]
+      "position": [
+        480,
+        300
+      ]
     },
     {
       "parameters": {
@@ -48,7 +54,10 @@
       "name": "汇总并对比状态",
       "type": "n8n-nodes-base.code",
       "typeVersion": 2,
-      "position": [720, 300]
+      "position": [
+        720,
+        300
+      ]
     },
     {
       "parameters": {
@@ -76,7 +85,10 @@
       "name": "有状态变化?",
       "type": "n8n-nodes-base.if",
       "typeVersion": 2,
-      "position": [960, 300]
+      "position": [
+        960,
+        300
+      ]
     },
     {
       "parameters": {
@@ -103,14 +115,20 @@
       "name": "发送告警通知",
       "type": "n8n-nodes-base.httpRequest",
       "typeVersion": 4.2,
-      "position": [1200, 200]
+      "position": [
+        1200,
+        200
+      ]
     },
     {
       "id": "health-0006",
       "name": "无变化跳过",
       "type": "n8n-nodes-base.noOp",
       "typeVersion": 1,
-      "position": [1200, 420]
+      "position": [
+        1200,
+        420
+      ]
     }
   ],
   "connections": {
@@ -168,6 +186,7 @@
   },
   "active": true,
   "settings": {
-    "executionOrder": "v1"
+    "executionOrder": "v1",
+    "errorWorkflow": "DDPUVypFAgyDOXgn"
   }
 }

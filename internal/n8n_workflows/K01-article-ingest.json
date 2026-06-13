@@ -58,8 +58,7 @@
       "position": [
         480,
         300
-      ],
-      "continueOnFail": true
+      ]
     },
     {
       "parameters": {
@@ -128,8 +127,7 @@
       "position": [
         960,
         440
-      ],
-      "continueOnFail": true
+      ]
     },
     {
       "parameters": {
@@ -220,8 +218,7 @@
       "position": [
         1680,
         560
-      ],
-      "continueOnFail": true
+      ]
     },
     {
       "parameters": {
@@ -251,7 +248,7 @@
         1920,
         560
       ],
-      "continueOnFail": true
+      "onError": "continueErrorOutput"
     },
     {
       "parameters": {
@@ -293,8 +290,7 @@
       "position": [
         2400,
         560
-      ],
-      "continueOnFail": true
+      ]
     },
     {
       "parameters": {
@@ -478,7 +474,8 @@
   "settings": {
     "executionOrder": "v1",
     "saveManualExecutions": true,
-    "callerPolicy": "workflowsFromSameOwner"
+    "callerPolicy": "workflowsFromSameOwner",
+    "errorWorkflow": "DDPUVypFAgyDOXgn"
   },
   "tags": []
 }

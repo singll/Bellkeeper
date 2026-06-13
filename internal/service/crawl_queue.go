@@ -226,6 +226,10 @@ func (s *CrawlQueueService) Start(ctx context.Context) {
 	s.wg.Add(1)
 	go s.staleJobRecoveryLoop(ctx)
 
+	// Launch heartbeat goroutine
+	s.wg.Add(1)
+	go s.heartbeatLoop(ctx)
+
 	// Launch workers
 	s.startWorkers(ctx, "firecrawl", s.cfg.FirecrawlWorkers)
 	s.startWorkers(ctx, "trafilatura", s.cfg.TrafilaturaWorkers)
@@ -266,6 +270,21 @@ func (s *CrawlQueueService) staleJobRecoveryLoop(ctx context.Context) {
 			if recovered > 0 {
 				log.Printf("[CrawlQueue] recovered %d stale running jobs (stale>%s)", recovered, staleTimeout)
 			}
+		}
+	}
+}
+
+// heartbeatLoop writes a heartbeat activity_log every 5 minutes.
+func (s *CrawlQueueService) heartbeatLoop(ctx context.Context) {
+	defer s.wg.Done()
+	ticker := time.NewTicker(5 * time.Minute)
+	defer ticker.Stop()
+	for {
+		select {
+		case <-ctx.Done():
+			return
+		case <-ticker.C:
+			s.logActivity("crawl_queue", "success", "CrawlQueue alive", 0)
 		}
 	}
 }

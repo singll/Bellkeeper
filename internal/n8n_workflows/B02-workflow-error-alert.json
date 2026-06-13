@@ -28,7 +28,7 @@
     {
       "parameters": {
         "method": "POST",
-        "url": "http://localhost:5678/webhook/notify",
+        "url": "={{ $env.BELLKEEPER_URL }}/api/matrix/notify",
         "sendHeaders": true,
         "headerParameters": {
           "parameters": [
@@ -40,7 +40,7 @@
         },
         "sendBody": true,
         "specifyBody": "json",
-        "jsonBody": "={{ JSON.stringify({ room: $json.room, markdown: $json.markdown }) }}",
+        "jsonBody": "={{ JSON.stringify({ channel: \"alerts\", message: $json.markdown, message_type: \"markdown\" }) }}",
         "options": {
           "timeout": 30000
         }
@@ -82,6 +82,7 @@
   "settings": {
     "executionOrder": "v1",
     "saveManualExecutions": true,
-    "callerPolicy": "workflowsFromSameOwner"
+    "callerPolicy": "any",
+    "errorWorkflow": "DDPUVypFAgyDOXgn"
   }
 }

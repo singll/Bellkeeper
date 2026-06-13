@@ -43,3 +43,15 @@ _Avoid_: 命令分发、命令处理
 **通知网关**:
 NATS 队列 → Worker → Matrix 消息投递的管道
 _Avoid_: 通知管道、消息网关
+
+**工作流漂移**:
+本地 `internal/n8n_workflows/*.json` 与 n8n 运行态的工作流定义不一致
+_Avoid_: 工作流不同步、定义偏差
+
+**心跳**:
+Go 后台服务定期写 activity_logs 的存活信号（module=heartbeat），超过 15 分钟无心跳视为异常
+_Avoid_: 存活检测、健康探针
+
+**错误传播**:
+n8n 节点失败后错误是否向上传播到工作流整体 error 状态；加 onError 则吞错误（不传播），不加则传播（触发 B02）
+_Avoid_: 错误冒泡、失败透传

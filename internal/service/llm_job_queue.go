@@ -117,6 +117,9 @@ func (s *LLMJobQueueService) Start(ctx context.Context) {
 	}
 	s.wg.Add(1)
 	go s.recoveryLoop(ctx)
+	// Heartbeat goroutine
+	s.wg.Add(1)
+	go s.heartbeatLoop(ctx)
 	workers := s.cfg.Workers
 	if workers <= 0 {
 		workers = 1
@@ -211,6 +214,20 @@ func (s *LLMJobQueueService) recoveryLoop(ctx context.Context) {
 			} else if recovered > 0 {
 				log.Printf("[LLMJobQueue] recovered %d stale running jobs", recovered)
 			}
+		}
+	}
+}
+
+func (s *LLMJobQueueService) heartbeatLoop(ctx context.Context) {
+	defer s.wg.Done()
+	ticker := time.NewTicker(5 * time.Minute)
+	defer ticker.Stop()
+	for {
+		select {
+		case <-ctx.Done():
+			return
+		case <-ticker.C:
+			log.Printf("[LLMJobQueue] heartbeat: alive")
 		}
 	}
 }
