@@ -568,15 +568,15 @@ func (s *WorkflowService) PushAllWorkflowDefinitions() ([]WorkflowDefinitionPush
 }
 
 func prepareWorkflowPushPayload(content map[string]interface{}, runtime *WorkflowStatus, create bool) map[string]interface{} {
-	payload := make(map[string]interface{}, len(content)+2)
-	for key, value := range content {
-		payload[key] = value
-	}
+	payload := make(map[string]interface{}, 4)
 
-	for _, key := range []string{"id", "createdAt", "updatedAt", "versionId", "triggerCount", "shared", "tags", "meta"} {
-		delete(payload, key)
+	// 只保留 n8n API 接受的四个字段，丢弃所有内部字段
+	// （staticData、pinData、ownedBy、usedCredentials 等会导致 n8n 400）
+	for _, key := range []string{"name", "nodes", "connections", "settings"} {
+		if v, ok := content[key]; ok {
+			payload[key] = v
+		}
 	}
-	delete(payload, "active")
 
 	if _, ok := payload["connections"]; !ok {
 		payload["connections"] = map[string]interface{}{}
