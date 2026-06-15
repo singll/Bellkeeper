@@ -33,6 +33,12 @@ const (
 
 	// 连续失败暂停阈值：5次连续失败才自动暂停（独立于重试调度）
 	PauseThreshold = 5
+
+	// Feed-domain cooling bounds for the shared crawl_domain_profiles cooling
+	// (exponential base*2^(n-1) capped at max). Feeds tolerate a longer ceiling
+	// than article crawls since a broken feed host should back off for hours.
+	FeedCoolingBase = 1 * time.Minute
+	FeedCoolingMax  = 24 * time.Hour
 )
 
 // retryBackoff returns the delay for a given retry attempt using exponential backoff.
@@ -79,14 +85,12 @@ type RSSFetcherService struct {
 	running    bool
 	mu         sync.RWMutex
 
-	// Crawl queue (optional, set via SetCrawlQueueService)
 	crawlQueue *CrawlQueueService
+	domainRepo *repository.CrawlDomainProfileRepository
 
-	// Retry queue
 	retryQueue []retryItem
 	retryMu    sync.Mutex
 
-	// Per-source concurrency semaphores
 	semaphores map[uint]*semaphore
 	semMu      sync.Mutex
 }
@@ -144,6 +148,11 @@ func (s *RSSFetcherService) SetCrawlQueueService(cq *CrawlQueueService) {
 	s.crawlQueue = cq
 }
 
+// SetDomainRepo sets the domain profile repository for unified DB-backed cooling.
+func (s *RSSFetcherService) SetDomainRepo(repo *repository.CrawlDomainProfileRepository) {
+	s.domainRepo = repo
+}
+
 // Start starts the RSS fetcher background loop
 func (s *RSSFetcherService) Start(ctx context.Context) {
 	s.mu.Lock()
@@ -179,12 +188,10 @@ func (s *RSSFetcherService) runLoop(ctx context.Context) {
 	defer s.wg.Done()
 
 	ticker := time.NewTicker(time.Duration(s.cfg.CheckInterval) * time.Second)
-	retryTicker := time.NewTicker(30 * time.Second)    // check retry queue every 30s
-	probeTicker := time.NewTicker(time.Duration(s.cfg.ProbeIntervalMinutes) * time.Minute)
+	retryTicker := time.NewTicker(30 * time.Second)
 	heartbeat := time.NewTicker(5 * time.Minute)
 	defer ticker.Stop()
 	defer retryTicker.Stop()
-	defer probeTicker.Stop()
 	defer heartbeat.Stop()
 
 	for {
@@ -193,8 +200,6 @@ func (s *RSSFetcherService) runLoop(ctx context.Context) {
 			s.fetchAllActive(ctx)
 		case <-retryTicker.C:
 			s.processRetryQueue(ctx)
-		case <-probeTicker.C:
-			s.probePausedFeeds(ctx)
 		case <-heartbeat.C:
 			s.logActivity("heartbeat", "rss_fetcher", "success", "RSSFetcher alive", 0, 0)
 		case <-s.stopCh:
@@ -221,6 +226,16 @@ func (s *RSSFetcherService) fetchAllActive(ctx context.Context) {
 	dueFeeds := make([]model.RSSFeed, 0, len(feeds))
 	for _, feed := range feeds {
 		if due, next := isRSSFeedDue(feed, now); due {
+			if s.domainRepo != nil && feed.URL != "" {
+				if feedDomain := extractRSSDomain(feed.URL); feedDomain != "" {
+					if cooling, err := s.domainRepo.IsCooling(feedDomain); err != nil {
+						log.Printf("[RSSFetcher] cooling check failed for %s: %v", feedDomain, err)
+					} else if cooling {
+						log.Printf("[RSSFetcher] skipping feed %d (%s): domain cooling", feed.ID, feed.Name)
+						continue
+					}
+				}
+			}
 			dueFeeds = append(dueFeeds, feed)
 		} else {
 			log.Printf("[RSSFetcher] skipping feed %d (%s): next fetch at %s", feed.ID, feed.Name, next.Format(time.RFC3339))
@@ -341,6 +356,17 @@ func (s *RSSFetcherService) resolveFeedURL(feed *model.RSSFeed) string {
 		feedURL = s.appendRSSHubParams(feedURL, feed.RSSHubParams)
 	}
 	return feedURL
+}
+
+func extractRSSDomain(rawURL string) string {
+	if strings.HasPrefix(rawURL, "/") {
+		return ""
+	}
+	u, err := url.Parse(rawURL)
+	if err != nil {
+		return ""
+	}
+	return u.Hostname()
 }
 
 // fetchFeed fetches and processes a single RSS feed with health tracking
@@ -492,13 +518,11 @@ func stripInvalidXMLChars(s string) string {
 // recordSuccess updates health tracking after a successful fetch
 func (s *RSSFetcherService) recordSuccess(feed *model.RSSFeed) {
 	if feed.ConsecutiveFailures > 0 {
-		// Recovery: bump health by recovery step
 		feed.HealthScore += HealthScoreRecoveryStep
 		if feed.HealthScore > HealthScoreMax {
 			feed.HealthScore = HealthScoreMax
 		}
 	} else {
-		// Steady success: small bump
 		feed.HealthScore += HealthScoreIncrement
 		if feed.HealthScore > HealthScoreMax {
 			feed.HealthScore = HealthScoreMax
@@ -508,7 +532,6 @@ func (s *RSSFetcherService) recordSuccess(feed *model.RSSFeed) {
 	feed.LastFailureReason = ""
 	feed.TotalFetched++
 
-	// Auto-unpause if health recovers above threshold
 	if feed.IsPaused && feed.HealthScore >= HealthScoreThreshold+10 {
 		feed.IsPaused = false
 		feed.PausedAt = nil
@@ -516,6 +539,15 @@ func (s *RSSFetcherService) recordSuccess(feed *model.RSSFeed) {
 		s.logActivity("rss_fetch", "health", "auto_unpause",
 			fmt.Sprintf("Feed %s auto-unpaused, health_score=%d", feed.Name, feed.HealthScore),
 			feed.ID, 0)
+	}
+
+	if s.domainRepo != nil {
+		feedDomain := extractRSSDomain(feed.URL)
+		if feedDomain != "" {
+			if err := s.domainRepo.ClearCooling(feedDomain); err != nil {
+				log.Printf("[RSSFetcher] clear cooling for %s failed: %v", feedDomain, err)
+			}
+		}
 	}
 
 	if err := s.rssRepo.Update(feed); err != nil {
@@ -536,8 +568,6 @@ func (s *RSSFetcherService) recordFailure(feed *model.RSSFeed, reason string) {
 	}
 	feed.TotalFailed++
 
-	// Auto-pause when consecutive failures reach PauseThreshold (默认5次)
-	// 重试调度使用 MaxRetryAttempts，暂停阈值独立控制
 	if !feed.IsPaused && feed.ConsecutiveFailures >= PauseThreshold {
 		feed.IsPaused = true
 		now := time.Now()
@@ -548,11 +578,19 @@ func (s *RSSFetcherService) recordFailure(feed *model.RSSFeed, reason string) {
 			feed.ID, 0)
 	}
 
+	if s.domainRepo != nil {
+		feedDomain := extractRSSDomain(feed.URL)
+		if feedDomain != "" {
+			if err := s.domainRepo.EnterCooling(feedDomain, FeedCoolingBase, FeedCoolingMax); err != nil {
+				log.Printf("[RSSFetcher] enter cooling for %s failed: %v", feedDomain, err)
+			}
+		}
+	}
+
 	if err := s.rssRepo.Update(feed); err != nil {
 		log.Printf("[RSSFetcher] failed to update feed after recordFailure: %v", err)
 	}
 
-	// Schedule retry if not already at max and not paused
 	if feed.ConsecutiveFailures <= MaxRetryAttempts && !feed.IsPaused {
 		s.scheduleRetry(feed.ID, feed.ConsecutiveFailures-1)
 	}

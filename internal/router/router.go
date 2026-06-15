@@ -45,6 +45,11 @@ func Setup(r *gin.Engine, handlers *handler.Handlers, mode string, apiKey string
 		registerCrawlQueueRoutes(api, handlers.CrawlQueue)
 	}
 
+	// Crawl failure routes
+	if handlers.CrawlFailure != nil {
+		registerCrawlFailureRoutes(api, handlers.CrawlFailure)
+	}
+
 	// Extraction rule routes
 	if handlers.ExtractionRule != nil {
 		registerExtractionRuleRoutes(api, handlers.ExtractionRule)
@@ -375,6 +380,7 @@ func registerCrawlQueueRoutes(api *gin.RouterGroup, h *handler.CrawlQueueHandler
 	queue.GET("/blocked", h.Blocked)
 	queue.POST("/blocked/:id/unblock", h.Unblock)
 	queue.POST("/enqueue", h.Enqueue)
+	queue.POST("/cleanup", h.Cleanup)
 }
 
 func registerLogCenterRoutes(api *gin.RouterGroup, h *handler.LogCenterHandler) {
@@ -405,4 +411,12 @@ func registerExtractionRuleRoutes(api *gin.RouterGroup, h *handler.ExtractionRul
 	rules.GET("/domain/:domain", h.GetRule)
 	rules.PUT("/:id/status", h.UpdateRuleStatus)
 	rules.GET("/:id/trials", h.ListTrials)
+}
+
+func registerCrawlFailureRoutes(api *gin.RouterGroup, h *handler.CrawlFailureHandler) {
+	failures := api.Group("/crawl/failures")
+	failures.GET("", h.List)
+	failures.GET("/:id", h.Get)
+	failures.POST("/:id/retry", h.Retry)
+	failures.POST("/:id/abandon", h.Abandon)
 }

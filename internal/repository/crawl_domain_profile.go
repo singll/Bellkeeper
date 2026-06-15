@@ -5,6 +5,7 @@ import (
 	"time"
 
 	"github.com/singll/bellkeeper/internal/model"
+	"gorm.io/datatypes"
 	"gorm.io/gorm"
 )
 
@@ -148,4 +149,102 @@ func (r *CrawlDomainProfileRepository) List(page, limit int) ([]model.CrawlDomai
 		return nil, 0, err
 	}
 	return profiles, total, nil
+}
+
+// FindByDomain returns the profile for a domain, or (nil, nil) if none exists.
+// Unlike FindOrCreate it never inserts a row — safe to call on the hot path.
+func (r *CrawlDomainProfileRepository) FindByDomain(domain string) (*model.CrawlDomainProfile, error) {
+	var profile model.CrawlDomainProfile
+	err := r.db.Where("domain = ?", domain).First(&profile).Error
+	if errors.Is(err, gorm.ErrRecordNotFound) {
+		return nil, nil
+	}
+	if err != nil {
+		return nil, err
+	}
+	return &profile, nil
+}
+
+// FindCoolingWithoutOverrides returns domains currently cooling (next_allowed_at
+// in the future) that have no request_overrides yet — i.e. candidates for the
+// rule optimizer to analyze. Ordered by failure_count so the worst offenders go first.
+func (r *CrawlDomainProfileRepository) FindCoolingWithoutOverrides(limit int) ([]string, error) {
+	if limit <= 0 {
+		limit = 50
+	}
+	var domains []string
+	err := r.db.Model(&model.CrawlDomainProfile{}).
+		Where("next_allowed_at IS NOT NULL AND next_allowed_at > ?", time.Now()).
+		Where("request_overrides IS NULL OR request_overrides::text IN ('null', '{}')").
+		Order("failure_count DESC").
+		Limit(limit).
+		Pluck("domain", &domains).Error
+	return domains, err
+}
+
+// EnterCooling marks a domain as cooling: increments failure_count and pushes
+// next_allowed_at out by exponential backoff (base*2^(n-1), capped at max).
+func (r *CrawlDomainProfileRepository) EnterCooling(domain string, base, max time.Duration) error {
+	if _, err := r.FindOrCreate(domain, 0, 0); err != nil {
+		return err
+	}
+	if err := r.db.Model(&model.CrawlDomainProfile{}).
+		Where("domain = ?", domain).
+		Update("failure_count", gorm.Expr("failure_count + 1")).Error; err != nil {
+		return err
+	}
+
+	var profile model.CrawlDomainProfile
+	if err := r.db.Where("domain = ?", domain).First(&profile).Error; err != nil {
+		return err
+	}
+
+	dur := base
+	for i := 1; i < profile.FailureCount; i++ {
+		dur *= 2
+		if dur >= max {
+			dur = max
+			break
+		}
+	}
+	if dur <= 0 || dur > max {
+		dur = max
+	}
+
+	next := time.Now().Add(dur)
+	return r.db.Model(&model.CrawlDomainProfile{}).
+		Where("domain = ?", domain).
+		Updates(map[string]interface{}{
+			"next_allowed_at": next,
+			"last_status":     "cooling",
+		}).Error
+}
+
+// ClearCooling resets cooling state after a success: zeroes failure_count and clears next_allowed_at.
+func (r *CrawlDomainProfileRepository) ClearCooling(domain string) error {
+	return r.db.Model(&model.CrawlDomainProfile{}).
+		Where("domain = ?", domain).
+		Updates(map[string]interface{}{
+			"failure_count":   0,
+			"next_allowed_at": nil,
+		}).Error
+}
+
+// IsCooling reports whether the domain is currently within its cooling window.
+func (r *CrawlDomainProfileRepository) IsCooling(domain string) (bool, error) {
+	var count int64
+	err := r.db.Model(&model.CrawlDomainProfile{}).
+		Where("domain = ? AND next_allowed_at > ?", domain, time.Now()).
+		Count(&count).Error
+	return count > 0, err
+}
+
+// UpdateOverrides stores the domain-level request overrides and analysis (written by RuleOptimizer).
+func (r *CrawlDomainProfileRepository) UpdateOverrides(domain string, overrides datatypes.JSON, analysis string) error {
+	return r.db.Model(&model.CrawlDomainProfile{}).
+		Where("domain = ?", domain).
+		Updates(map[string]interface{}{
+			"request_overrides": overrides,
+			"analysis_result":   analysis,
+		}).Error
 }

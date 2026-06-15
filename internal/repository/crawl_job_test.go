@@ -1,6 +1,7 @@
 package repository
 
 import (
+	"fmt"
 	"testing"
 	"time"
 
@@ -293,4 +294,103 @@ func TestCrawlJobRepository_EnqueueWithMetadata(t *testing.T) {
 	}
 	assertNoError(t, repo.Enqueue(job), "Enqueue")
 	assertEqual(t, job.ID > 0, true)
+}
+
+func TestCrawlJobRepository_CountPendingByDomain(t *testing.T) {
+	db := setupTestDB(t)
+	repo := NewCrawlJobRepository(db)
+
+	// 2 pending + 1 retrying + 1 success for q.com; success must not count.
+	assertNoError(t, repo.Enqueue(&model.CrawlJob{SourceID: 1, URL: "https://q.com/1", Status: model.CrawlJobPending, SourceDomain: "q.com"}), "p1")
+	assertNoError(t, repo.Enqueue(&model.CrawlJob{SourceID: 1, URL: "https://q.com/2", Status: model.CrawlJobPending, SourceDomain: "q.com"}), "p2")
+	assertNoError(t, repo.Enqueue(&model.CrawlJob{SourceID: 1, URL: "https://q.com/3", Status: model.CrawlJobRetrying, SourceDomain: "q.com"}), "r1")
+	assertNoError(t, repo.Enqueue(&model.CrawlJob{SourceID: 1, URL: "https://q.com/4", Status: model.CrawlJobSuccess, SourceDomain: "q.com"}), "s1")
+	assertNoError(t, repo.Enqueue(&model.CrawlJob{SourceID: 1, URL: "https://other.com/1", Status: model.CrawlJobPending, SourceDomain: "other.com"}), "o1")
+
+	count, err := repo.CountPendingByDomain("q.com")
+	assertNoError(t, err, "CountPendingByDomain")
+	assertEqual(t, count, int64(3))
+
+	none, err := repo.CountPendingByDomain("missing.com")
+	assertNoError(t, err, "CountPendingByDomain missing")
+	assertEqual(t, none, int64(0))
+}
+
+func TestCrawlJobRepository_DequeueFair_ClaimsAndRuns(t *testing.T) {
+	db := setupTestDB(t)
+	repo := NewCrawlJobRepository(db)
+
+	assertNoError(t, repo.Enqueue(&model.CrawlJob{SourceID: 1, URL: "https://a.com/1", Status: model.CrawlJobPending, SourceDomain: "a.com"}), "Enqueue")
+
+	job, err := repo.DequeueFair("")
+	assertNoError(t, err, "DequeueFair")
+	if job == nil {
+		t.Fatalf("expected a job, got nil")
+	}
+	assertEqual(t, job.Status, model.CrawlJobRunning)
+	assertEqual(t, job.URL, "https://a.com/1")
+
+	// Once claimed, the same job is not handed out again.
+	job2, err := repo.DequeueFair("")
+	assertNoError(t, err, "DequeueFair empty")
+	assertEqual(t, job2 == nil, true)
+}
+
+func TestCrawlJobRepository_DequeueFair_SkipsCoolingDomain(t *testing.T) {
+	db := setupTestDB(t)
+	repo := NewCrawlJobRepository(db)
+	profiles := NewCrawlDomainProfileRepository(db)
+
+	// cool.com is cooling (next_allowed_at in the future); ready.com is not.
+	assertNoError(t, repo.Enqueue(&model.CrawlJob{SourceID: 1, URL: "https://cool.com/1", Status: model.CrawlJobPending, SourceDomain: "cool.com"}), "Enqueue cool")
+	assertNoError(t, repo.Enqueue(&model.CrawlJob{SourceID: 1, URL: "https://ready.com/1", Status: model.CrawlJobPending, SourceDomain: "ready.com"}), "Enqueue ready")
+	assertNoError(t, profiles.EnterCooling("cool.com", 1*time.Minute, 1*time.Hour), "EnterCooling")
+
+	// First claim must be ready.com — cool.com is filtered out at the SQL level.
+	job, err := repo.DequeueFair("")
+	assertNoError(t, err, "DequeueFair")
+	if job == nil {
+		t.Fatalf("expected ready.com job, got nil")
+	}
+	assertEqual(t, job.SourceDomain, "ready.com")
+
+	// No more claimable jobs: cool.com stays pending until its cooling expires.
+	job2, err := repo.DequeueFair("")
+	assertNoError(t, err, "DequeueFair after ready claimed")
+	assertEqual(t, job2 == nil, true)
+
+	cool, err := repo.GetByURL("https://cool.com/1")
+	assertNoError(t, err, "GetByURL cool")
+	assertEqual(t, cool.Status, model.CrawlJobPending)
+}
+
+func TestCrawlJobRepository_DequeueFair_FairRotation(t *testing.T) {
+	db := setupTestDB(t)
+	repo := NewCrawlJobRepository(db)
+	profiles := NewCrawlDomainProfileRepository(db)
+
+	// big.com floods the queue (3 older jobs); small.com has a single newer job.
+	for i := 1; i <= 3; i++ {
+		assertNoError(t, repo.Enqueue(&model.CrawlJob{SourceID: 1, URL: fmt.Sprintf("https://big.com/%d", i), Status: model.CrawlJobPending, SourceDomain: "big.com"}), "Enqueue big")
+	}
+	assertNoError(t, repo.Enqueue(&model.CrawlJob{SourceID: 1, URL: "https://small.com/1", Status: model.CrawlJobPending, SourceDomain: "small.com"}), "Enqueue small")
+
+	// First claim goes to big.com (oldest head).
+	first, err := repo.DequeueFair("")
+	assertNoError(t, err, "DequeueFair 1")
+	if first == nil {
+		t.Fatalf("expected a job, got nil")
+	}
+	assertEqual(t, first.SourceDomain, "big.com")
+
+	// Simulate the politeness/cooling delay applied after processing big.com.
+	assertNoError(t, profiles.EnterCooling("big.com", 1*time.Minute, 1*time.Hour), "EnterCooling big")
+
+	// Next claim must reach small.com — it is not starved behind big.com's backlog.
+	second, err := repo.DequeueFair("")
+	assertNoError(t, err, "DequeueFair 2")
+	if second == nil {
+		t.Fatalf("expected small.com job, got nil")
+	}
+	assertEqual(t, second.SourceDomain, "small.com")
 }

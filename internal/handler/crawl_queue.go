@@ -212,3 +212,25 @@ func (h *CrawlQueueHandler) Enqueue(c *gin.Context) {
 
 	response.Success(c, gin.H{"queued": true, "job_id": jobID})
 }
+
+// Cleanup handles POST /api/crawl/queue/cleanup
+func (h *CrawlQueueHandler) Cleanup(c *gin.Context) {
+	var req struct {
+		OlderThanDays int    `json:"older_than_days"`
+		Domain        string `json:"domain"`
+	}
+	if err := c.ShouldBindJSON(&req); err != nil {
+		response.BadRequest(c, err.Error())
+		return
+	}
+	if req.OlderThanDays <= 0 {
+		req.OlderThanDays = 3
+	}
+
+	skipped, err := h.svc.CleanupStalePending(req.OlderThanDays, req.Domain)
+	if err != nil {
+		response.InternalError(c, err.Error())
+		return
+	}
+	response.Success(c, gin.H{"skipped": skipped})
+}

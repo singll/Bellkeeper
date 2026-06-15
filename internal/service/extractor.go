@@ -22,10 +22,29 @@ type ExtractorService struct {
 	activityLog *ActivityLogService
 }
 
-// ExtractionRequest represents a request to extract content from a URL
+// RequestOverrides holds per-domain extraction tuning (User-Agent, headers,
+// timeout, preferred strategy, Firecrawl wait/actions). Populated by the rule
+// optimizer and persisted on crawl_domain_profiles; applied here at extract time.
+type RequestOverrides struct {
+	UserAgent        string            `json:"user_agent,omitempty"`
+	TimeoutSeconds   int               `json:"timeout_seconds,omitempty"`
+	Headers          map[string]string `json:"headers,omitempty"`
+	Strategy         string            `json:"strategy,omitempty"`
+	FirecrawlWaitFor int               `json:"firecrawl_wait_for,omitempty"`
+	FirecrawlActions []FirecrawlAction `json:"firecrawl_actions,omitempty"`
+}
+
+// FirecrawlAction is a scripted Firecrawl interaction (e.g. click a consent button).
+type FirecrawlAction struct {
+	Type     string `json:"type"`
+	Selector string `json:"selector,omitempty"`
+	Value    string `json:"value,omitempty"`
+}
+
 type ExtractionRequest struct {
 	URL     string
-	Timeout int // timeout in seconds, 0 = use default
+	Timeout int
+	Overrides *RequestOverrides
 }
 
 // ExtractionResult represents the result of content extraction
@@ -48,9 +67,12 @@ type TrafilaturaOutput struct {
 
 // FirecrawlRequest represents the request to Firecrawl API
 type FirecrawlRequest struct {
-	URL     string   `json:"url"`
-	Formats []string `json:"formats"`
-	Timeout int      `json:"timeout,omitempty"`
+	URL     string            `json:"url"`
+	Formats []string          `json:"formats"`
+	Timeout int               `json:"timeout,omitempty"`
+	WaitFor int               `json:"waitFor,omitempty"`
+	Actions []FirecrawlAction `json:"actions,omitempty"`
+	Headers map[string]string `json:"headers,omitempty"`
 }
 
 // FirecrawlResponse represents the response from Firecrawl API
@@ -111,12 +133,26 @@ func (s *ExtractorService) extractWithTrafilatura(req *ExtractionRequest) (*Extr
 	if req.Timeout > 0 {
 		timeout = req.Timeout
 	}
+	if req.Overrides != nil && req.Overrides.TimeoutSeconds > 0 {
+		timeout = req.Overrides.TimeoutSeconds
+	}
 
 	ctx, cancel := context.WithTimeout(context.Background(), time.Duration(timeout)*time.Second)
 	defer cancel()
 
-	// 使用 wrapper 脚本调用 trafilatura（trafilatura 2.0 移除了 __main__.py，不再支持 -m 调用）
-	cmd := exec.CommandContext(ctx, "python3", "/app/scripts/trafilatura_extract.py", req.URL, "--timeout", fmt.Sprintf("%d", timeout))
+	args := []string{"/app/scripts/trafilatura_extract.py", req.URL, "--timeout", fmt.Sprintf("%d", timeout)}
+	if req.Overrides != nil {
+		if req.Overrides.UserAgent != "" {
+			args = append(args, "--user-agent", req.Overrides.UserAgent)
+		}
+		if len(req.Overrides.Headers) > 0 {
+			if hdrJSON, err := json.Marshal(req.Overrides.Headers); err == nil {
+				args = append(args, "--headers", string(hdrJSON))
+			}
+		}
+	}
+
+	cmd := exec.CommandContext(ctx, "python3", args...)
 	var stdout, stderr bytes.Buffer
 	cmd.Stdout = &stdout
 	cmd.Stderr = &stderr
@@ -166,12 +202,25 @@ func (s *ExtractorService) extractWithFirecrawl(req *ExtractionRequest) (*Extrac
 	if req.Timeout > 0 {
 		timeout = req.Timeout
 	}
+	if req.Overrides != nil && req.Overrides.TimeoutSeconds > 0 {
+		timeout = req.Overrides.TimeoutSeconds
+	}
 
-	// Prepare request
 	fcReq := FirecrawlRequest{
 		URL:     req.URL,
 		Formats: []string{"markdown"},
-		Timeout: timeout * 1000, // Firecrawl expects milliseconds
+		Timeout: timeout * 1000,
+	}
+	if req.Overrides != nil {
+		if req.Overrides.FirecrawlWaitFor > 0 {
+			fcReq.WaitFor = req.Overrides.FirecrawlWaitFor
+		}
+		if len(req.Overrides.FirecrawlActions) > 0 {
+			fcReq.Actions = req.Overrides.FirecrawlActions
+		}
+		if len(req.Overrides.Headers) > 0 {
+			fcReq.Headers = req.Overrides.Headers
+		}
 	}
 
 	body, err := json.Marshal(fcReq)

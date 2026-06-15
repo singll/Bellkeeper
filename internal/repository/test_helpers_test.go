@@ -1,6 +1,7 @@
 package repository
 
 import (
+	"encoding/json"
 	"fmt"
 	"testing"
 	"time"
@@ -54,7 +55,7 @@ func seedUncategorizedTag(t *testing.T) {
 func truncateAll(t *testing.T) {
 	t.Helper()
 	tables := []string{
-		"crawl_rule_trials", "crawl_extraction_rules", "crawl_jobs", "crawl_domain_profiles",
+		"crawl_rule_trials", "crawl_extraction_rules", "crawl_failures", "crawl_jobs", "crawl_domain_profiles",
 		"matrix_command_logs", "matrix_events", "matrix_notifications", "matrix_sync_state",
 		"matrix_user_roles", "matrix_commands", "matrix_channels", "matrix_rooms",
 		"llm_channel_balance_snapshots", "llm_channel_credentials", "llm_alert_events",
@@ -106,6 +107,7 @@ func allModels() []interface{} {
 		&model.CrawlExtractionRule{},
 		&model.CrawlRuleTrial{},
 		&model.CrawlJob{},
+		&model.CrawlFailure{},
 	}
 }
 
@@ -139,5 +141,26 @@ func assertError(t *testing.T, err error, msg ...string) {
 			prefix = msg[0] + ": "
 		}
 		t.Fatalf("%sexpected error, got nil", prefix)
+	}
+}
+
+// assertJSONEq compares two JSON documents semantically, ignoring key order and
+// whitespace. PostgreSQL jsonb re-serializes values (e.g. a space after the
+// colon), so a verbatim string match against the input literal is unreliable.
+func assertJSONEq(t *testing.T, got, want string, msg ...string) {
+	t.Helper()
+	prefix := ""
+	if len(msg) > 0 {
+		prefix = msg[0] + ": "
+	}
+	var g, w interface{}
+	if err := json.Unmarshal([]byte(got), &g); err != nil {
+		t.Fatalf("%sunmarshal got %q: %v", prefix, got, err)
+	}
+	if err := json.Unmarshal([]byte(want), &w); err != nil {
+		t.Fatalf("%sunmarshal want %q: %v", prefix, want, err)
+	}
+	if fmt.Sprint(g) != fmt.Sprint(w) {
+		t.Fatalf("%sJSON not equal: got %s want %s", prefix, got, want)
 	}
 }

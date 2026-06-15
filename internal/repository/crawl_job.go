@@ -104,6 +104,68 @@ func (r *CrawlJobRepository) Dequeue(channelType string) (*model.CrawlJob, error
 	return &job, nil
 }
 
+// DequeueFair claims the next job using per-domain fair rotation, excluding
+// domains whose crawl_domain_profiles.next_allowed_at is still in the future.
+func (r *CrawlJobRepository) DequeueFair(channelType string) (*model.CrawlJob, error) {
+	now := time.Now()
+
+	// Step 1 (no lock): pick candidate ids fairly across domains. ROW_NUMBER per
+	// source_domain exposes only each domain's head-of-queue job, so a single domain
+	// with a huge backlog cannot starve others. Cooling domains are filtered via a
+	// LEFT JOIN on crawl_domain_profiles.next_allowed_at (LEFT JOIN keeps jobs whose
+	// domain has no profile row yet). PostgreSQL forbids FOR UPDATE alongside window
+	// functions, hence the separate atomic claim in step 2.
+	sql := `
+SELECT id FROM (
+	SELECT j.id AS id, j.created_at AS created_at,
+		ROW_NUMBER() OVER (PARTITION BY j.source_domain ORDER BY j.priority DESC, j.created_at ASC, j.id ASC) AS rn
+	FROM crawl_jobs j
+	LEFT JOIN crawl_domain_profiles p ON p.domain = j.source_domain AND p.deleted_at IS NULL
+	WHERE j.deleted_at IS NULL
+		AND j.status IN (?, ?)
+		AND (j.next_retry_at IS NULL OR j.next_retry_at <= ?)
+		AND (p.next_allowed_at IS NULL OR p.next_allowed_at <= ?)`
+	args := []interface{}{string(model.CrawlJobPending), string(model.CrawlJobRetrying), now, now}
+	if channelType != "" && channelType != "auto" {
+		// Specific-channel workers also pick up "auto" jobs.
+		sql += "\n\t\tAND j.channel_type IN (?, ?)"
+		args = append(args, channelType, "auto")
+	}
+	sql += `
+) t
+WHERE t.rn = 1
+ORDER BY t.created_at ASC
+LIMIT 8`
+
+	var candidates []struct{ ID uint }
+	if err := r.db.Raw(sql, args...).Scan(&candidates).Error; err != nil {
+		return nil, fmt.Errorf("dequeue fair candidates: %w", err)
+	}
+
+	// Step 2: try to claim candidates in order. The conditional UPDATE + RowsAffected
+	// check is the concurrency guard — if another worker already claimed a candidate,
+	// RowsAffected is 0 and we fall through to the next one.
+	for _, c := range candidates {
+		result := r.db.Model(&model.CrawlJob{}).
+			Where("id = ? AND status IN ?", c.ID, []string{string(model.CrawlJobPending), string(model.CrawlJobRetrying)}).
+			Updates(map[string]interface{}{
+				"status":     string(model.CrawlJobRunning),
+				"started_at": now,
+			})
+		if result.Error != nil {
+			return nil, fmt.Errorf("claim job %d: %w", c.ID, result.Error)
+		}
+		if result.RowsAffected == 1 {
+			var job model.CrawlJob
+			if err := r.db.First(&job, c.ID).Error; err != nil {
+				return nil, fmt.Errorf("load claimed job %d: %w", c.ID, err)
+			}
+			return &job, nil
+		}
+	}
+	return nil, nil // empty queue or all candidates lost to other workers
+}
+
 // UpdateStatus transitions a job's status and sets relevant timestamps.
 func (r *CrawlJobRepository) UpdateStatus(id uint, status model.CrawlJobStatus, updates map[string]interface{}) error {
 	if updates == nil {
@@ -427,6 +489,19 @@ func (r *CrawlJobRepository) GetDeadSince(since time.Time) ([]model.CrawlJob, er
 	return jobs, err
 }
 
+// CountPendingByDomain counts in-queue (pending + retrying) jobs for a domain.
+// Used by the enqueue-side per-domain quota to apply back-pressure.
+func (r *CrawlJobRepository) CountPendingByDomain(domain string) (int64, error) {
+	var count int64
+	err := r.db.Model(&model.CrawlJob{}).
+		Where("source_domain = ? AND status IN ?", domain, []string{
+			string(model.CrawlJobPending),
+			string(model.CrawlJobRetrying),
+		}).
+		Count(&count).Error
+	return count, err
+}
+
 // CountByDomainAndStatus counts jobs for a domain with a given status since a time.
 func (r *CrawlJobRepository) CountByDomainAndStatus(domain string, status model.CrawlJobStatus, since time.Time) (int64, error) {
 	var count int64
@@ -519,5 +594,20 @@ func (r *CrawlJobRepository) RetryDeadOrBlockedByDomain(domain string) (int64, e
 			"error_message": "",
 			"block_reason":  "",
 		})
+	return result.RowsAffected, result.Error
+}
+
+func (r *CrawlJobRepository) MarkSkippedStalePending(olderThan time.Time, domain string) (int64, error) {
+	tx := r.db.Model(&model.CrawlJob{}).
+		Where("status = ? AND created_at < ?", string(model.CrawlJobPending), olderThan)
+	if domain != "" {
+		tx = tx.Where("source_domain = ?", domain)
+	}
+	result := tx.Updates(map[string]interface{}{
+		"status":        string(model.CrawlJobSkipped),
+		"error_type":    "stale_pending",
+		"error_message": "skipped: pending too long",
+		"completed_at":  time.Now(),
+	})
 	return result.RowsAffected, result.Error
 }

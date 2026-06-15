@@ -39,46 +39,6 @@ func TestRetryAfterFromErrorHTTPDate(t *testing.T) {
 	}
 }
 
-func TestDecideDomainThrottleNextAllowedAt(t *testing.T) {
-	now := time.Date(2026, 6, 9, 10, 0, 0, 0, time.UTC)
-	next := now.Add(2 * time.Minute)
-	decision := decideDomainThrottle(&model.CrawlDomainProfile{
-		Domain:              "example.com",
-		DefaultDelaySeconds: 60,
-		MaxConcurrency:      1,
-		NextAllowedAt:       &next,
-	}, 1, now)
-
-	if decision.Allowed {
-		t.Fatal("decision.Allowed = true, want false")
-	}
-	if decision.Reason != "next_allowed_at" {
-		t.Fatalf("decision.Reason = %q, want next_allowed_at", decision.Reason)
-	}
-	if !decision.RetryAt.Equal(next) {
-		t.Fatalf("decision.RetryAt = %s, want %s", decision.RetryAt, next)
-	}
-}
-
-func TestDecideDomainThrottleMaxConcurrency(t *testing.T) {
-	now := time.Date(2026, 6, 9, 10, 0, 0, 0, time.UTC)
-	decision := decideDomainThrottle(&model.CrawlDomainProfile{
-		Domain:              "example.com",
-		DefaultDelaySeconds: 60,
-		MaxConcurrency:      1,
-	}, 2, now)
-
-	if decision.Allowed {
-		t.Fatal("decision.Allowed = true, want false")
-	}
-	if decision.Reason != "max_concurrency" {
-		t.Fatalf("decision.Reason = %q, want max_concurrency", decision.Reason)
-	}
-	if !decision.RetryAt.Equal(now.Add(time.Minute)) {
-		t.Fatalf("decision.RetryAt = %s, want %s", decision.RetryAt, now.Add(time.Minute))
-	}
-}
-
 func TestNextAllowedForDomainOutcomeUsesRetryAt(t *testing.T) {
 	now := time.Date(2026, 6, 9, 10, 0, 0, 0, time.UTC)
 	retryAt := now.Add(17 * time.Minute)

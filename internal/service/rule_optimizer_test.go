@@ -2,6 +2,8 @@ package service
 
 import (
 	"testing"
+
+	"github.com/singll/bellkeeper/internal/repository"
 )
 
 func TestScoreContentEmpty(t *testing.T) {
@@ -39,12 +41,53 @@ func TestScoreContentShortButValid(t *testing.T) {
 	}
 }
 
-func TestTruncateStr(t *testing.T) {
-	if got := truncateStr("hello", 10); got != "hello" {
-		t.Fatalf("truncateStr(\"hello\", 10) = %q, want \"hello\"", got)
+func TestDefaultOverridesForForbidden(t *testing.T) {
+	ov, analysis := defaultOverridesFor("forbidden")
+	if ov == nil {
+		t.Fatal("expected overrides for forbidden, got nil")
 	}
-	if got := truncateStr("hello world", 5); got != "hello" {
-		t.Fatalf("truncateStr(\"hello world\", 5) = %q, want \"hello\"", got)
+	if ov.UserAgent == "" {
+		t.Fatal("expected a spoofed User-Agent for 403")
+	}
+	if ov.Headers["Referer"] == "" {
+		t.Fatal("expected a Referer header for 403")
+	}
+	if analysis == "" {
+		t.Fatal("expected analysis text")
+	}
+}
+
+func TestDefaultOverridesForEmptyContent(t *testing.T) {
+	ov, _ := defaultOverridesFor("empty_content")
+	if ov == nil || ov.Strategy != "firecrawl" {
+		t.Fatalf("expected firecrawl strategy for empty_content, got %+v", ov)
+	}
+	if ov.FirecrawlWaitFor <= 0 {
+		t.Fatal("expected a positive firecrawl_wait_for for empty_content")
+	}
+}
+
+func TestDefaultOverridesForTransientReturnsNil(t *testing.T) {
+	// rate_limited and server_error are handled by backoff, not overrides → LLM fallback path.
+	for _, errType := range []string{"rate_limited", "server_error", "unknown", ""} {
+		if ov, _ := defaultOverridesFor(errType); ov != nil {
+			t.Fatalf("expected nil overrides for %q, got %+v", errType, ov)
+		}
+	}
+}
+
+func TestDominantErrorType(t *testing.T) {
+	samples := []repository.DomainFailureSample{
+		{ErrorType: "forbidden"},
+		{ErrorType: "forbidden"},
+		{ErrorType: "timeout"},
+		{ErrorType: ""},
+	}
+	if got := dominantErrorType(samples); got != "forbidden" {
+		t.Fatalf("dominantErrorType = %q, want forbidden", got)
+	}
+	if got := dominantErrorType(nil); got != "" {
+		t.Fatalf("dominantErrorType(nil) = %q, want empty", got)
 	}
 }
 

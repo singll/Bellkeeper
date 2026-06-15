@@ -28,6 +28,7 @@ type Services struct {
 	PKBReport     *PKBReportService
 	Dashboard     *DashboardService
 	CrawlQueue    *CrawlQueueService
+	CrawlFailure  *CrawlFailureService
 	RuleOptimizer *RuleOptimizerService
 	DailyReport   *DailyReportService
 	// Optional services (initialized in main.go with infra dependencies)
@@ -96,11 +97,16 @@ func NewServices(repos *repository.Repositories, cfg *config.Config, version str
 	// Create crawl queue service (if enabled)
 	var crawlQueueSvc *CrawlQueueService
 	var ruleOptimizerSvc *RuleOptimizerService
+	var crawlFailureSvc *CrawlFailureService
 	if cfg.CrawlQueue.Enabled {
-		crawlQueueSvc = NewCrawlQueueService(cfg.CrawlQueue, repos.CrawlJob, repos.CrawlDomainProfile, extractorSvc, fileIngestionSvc, activityLogSvc)
+		crawlQueueSvc = NewCrawlQueueService(cfg.CrawlQueue, repos.CrawlJob, repos.CrawlDomainProfile, repos.CrawlFailure, extractorSvc, fileIngestionSvc, activityLogSvc)
 		rssFetcherSvc.SetCrawlQueueService(crawlQueueSvc)
+		rssFetcherSvc.SetDomainRepo(repos.CrawlDomainProfile)
+		crawlFailureSvc = NewCrawlFailureService(repos.CrawlFailure, repos.CrawlJob)
 		if cfg.CrawlQueue.RuleOptimizerEnabled {
-			ruleOptimizerSvc = NewRuleOptimizerService(cfg.CrawlQueue, repos.CrawlExtractionRule, repos.CrawlJob, cfg.Classify.LLMProxyURL, cfg.Server.APIKey, extractorSvc, activityLogSvc)
+			ruleOptimizerSvc = NewRuleOptimizerService(cfg.CrawlQueue, repos.CrawlExtractionRule, repos.CrawlDomainProfile, repos.CrawlFailure, cfg.Classify.LLMProxyURL, cfg.Server.APIKey, extractorSvc, activityLogSvc)
+			// The optimizer discovers cooling domains via its own periodic loop
+			// (RuleOptimizer.Start); no per-cooling synchronous trigger is wired.
 		}
 	}
 
@@ -157,6 +163,7 @@ func NewServices(repos *repository.Repositories, cfg *config.Config, version str
 		PKBReport:     pkbReportSvc,
 		Dashboard:     dashboardSvc,
 		CrawlQueue:    crawlQueueSvc,
+		CrawlFailure:  crawlFailureSvc,
 		RuleOptimizer: ruleOptimizerSvc,
 		DailyReport:   dailyReportSvc,
 	}

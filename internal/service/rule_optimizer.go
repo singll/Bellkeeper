@@ -11,16 +11,17 @@ import (
 
 	"github.com/singll/bellkeeper/internal/config"
 	"github.com/singll/bellkeeper/internal/llmclient"
-	"github.com/singll/bellkeeper/internal/model"
 	"github.com/singll/bellkeeper/internal/repository"
+	"gorm.io/datatypes"
 )
 
 type RuleOptimizerService struct {
-	cfg        config.CrawlQueueConfig
-	ruleRepo   *repository.CrawlExtractionRuleRepository
-	jobRepo    *repository.CrawlJobRepository
-	llmClient  *llmclient.Client
-	extractor  *ExtractorService
+	cfg         config.CrawlQueueConfig
+	ruleRepo    *repository.CrawlExtractionRuleRepository
+	domainRepo  *repository.CrawlDomainProfileRepository
+	failureRepo *repository.CrawlFailureRepository
+	llmClient   *llmclient.Client
+	extractor   *ExtractorService
 	activityLog *ActivityLogService
 
 	cancel context.CancelFunc
@@ -30,18 +31,20 @@ type RuleOptimizerService struct {
 func NewRuleOptimizerService(
 	cfg config.CrawlQueueConfig,
 	ruleRepo *repository.CrawlExtractionRuleRepository,
-	jobRepo *repository.CrawlJobRepository,
+	domainRepo *repository.CrawlDomainProfileRepository,
+	failureRepo *repository.CrawlFailureRepository,
 	llmBaseURL, apiKey string,
 	extractor *ExtractorService,
 	activityLog *ActivityLogService,
 ) *RuleOptimizerService {
 	timeout := 3 * time.Minute
 	return &RuleOptimizerService{
-		cfg:       cfg,
-		ruleRepo:  ruleRepo,
-		jobRepo:   jobRepo,
-		llmClient: llmclient.New(llmclient.Options{BaseURL: llmBaseURL, APIKey: apiKey, Timeout: timeout}),
-		extractor: extractor,
+		cfg:         cfg,
+		ruleRepo:    ruleRepo,
+		domainRepo:  domainRepo,
+		failureRepo: failureRepo,
+		llmClient:   llmclient.New(llmclient.Options{BaseURL: llmBaseURL, APIKey: apiKey, Timeout: timeout}),
+		extractor:   extractor,
 		activityLog: activityLog,
 	}
 }
@@ -97,38 +100,107 @@ func (s *RuleOptimizerService) runOnce(ctx context.Context) {
 		if ctx.Err() != nil {
 			return
 		}
-		if err := s.optimizeDomain(ctx, domain); err != nil {
+		if err := s.AnalyzeDomain(ctx, domain); err != nil {
 			log.Printf("[RuleOptimizer] optimize domain %s error: %v", domain, err)
 		}
 	}
 }
 
 func (s *RuleOptimizerService) findOptimizableDomains(ctx context.Context) ([]string, error) {
-	since := time.Now().Add(-7 * 24 * time.Hour)
-	domains, err := s.jobRepo.FindDeadOrBlockedDomains(since)
+	if s.domainRepo == nil {
+		return nil, nil
+	}
+	domains, err := s.domainRepo.FindCoolingWithoutOverrides(50)
 	if err != nil {
 		return nil, fmt.Errorf("query optimizable domains: %w", err)
 	}
 
 	var filtered []string
 	for _, d := range domains {
-		activeRule, _ := s.ruleRepo.FindActiveByDomain(d)
-		if activeRule != nil {
+		if s.isPaywallDomain(d) {
 			continue
 		}
-		candidateRule, _ := s.ruleRepo.FindCandidateByDomain(d)
-		if candidateRule != nil {
-			trialCount, _ := s.ruleRepo.CountCandidateTrials(candidateRule.ID)
-			if int(trialCount) >= s.cfg.RuleMaxTrials {
-				continue
-			}
+		if s.hasRecentAnalysis(d) {
+			continue
 		}
 		filtered = append(filtered, d)
 	}
 	return filtered, nil
 }
 
-func (s *RuleOptimizerService) optimizeDomain(ctx context.Context, domain string) error {
+func (s *RuleOptimizerService) isPaywallDomain(domain string) bool {
+	if s.failureRepo == nil {
+		return false
+	}
+	failure, err := s.failureRepo.FindByDomain(domain)
+	if err != nil || failure == nil {
+		return false
+	}
+	return failure.LastErrorType == "paywall"
+}
+
+func (s *RuleOptimizerService) hasRecentAnalysis(domain string) bool {
+	if s.domainRepo == nil {
+		return false
+	}
+	profile, err := s.domainRepo.FindByDomain(domain)
+	if err != nil || profile == nil {
+		return false
+	}
+	return profile.AnalysisResult != "" && time.Since(profile.UpdatedAt) < 24*time.Hour
+}
+
+// browserUserAgent is the spoofed UA applied by the deterministic 403 rule.
+const browserUserAgent = "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/124.0 Safari/537.36"
+
+// defaultOverridesFor returns deterministic request overrides for well-understood
+// failure types, covering the common cases without an LLM call. Returns (nil, "")
+// when the error type isn't deterministically fixable, signalling the caller to
+// fall back to LLM analysis.
+func defaultOverridesFor(errType string) (*RequestOverrides, string) {
+	switch errType {
+	case "forbidden": // HTTP 403 — most often a missing/blocked UA
+		return &RequestOverrides{
+			UserAgent: browserUserAgent,
+			Headers: map[string]string{
+				"Accept-Language": "en-US,en;q=0.9",
+				"Referer":         "https://www.google.com/",
+			},
+		}, "403 Forbidden → spoof a real browser User-Agent plus Referer/Accept-Language headers"
+	case "timeout", "network": // slow or JS-heavy site
+		return &RequestOverrides{Strategy: "firecrawl", TimeoutSeconds: 120}, "timeout/network error → switch to firecrawl with a longer timeout"
+	case "empty_content": // content rendered client-side
+		return &RequestOverrides{Strategy: "firecrawl", FirecrawlWaitFor: 3000}, "empty content → likely JS-rendered; use firecrawl and wait for the DOM"
+	case "rate_limited", "server_error": // transient — handled by job/domain backoff, not overrides
+		return nil, ""
+	default:
+		return nil, "" // unknown → let the LLM analyze
+	}
+}
+
+// dominantErrorType returns the most frequent error type across the samples.
+func dominantErrorType(samples []repository.DomainFailureSample) string {
+	counts := make(map[string]int)
+	for _, sample := range samples {
+		if sample.ErrorType != "" {
+			counts[sample.ErrorType]++
+		}
+	}
+	best, bestN := "", 0
+	for errType, n := range counts {
+		if n > bestN {
+			best, bestN = errType, n
+		}
+	}
+	return best
+}
+
+func (s *RuleOptimizerService) AnalyzeDomain(ctx context.Context, domain string) error {
+	if s.isPaywallDomain(domain) {
+		log.Printf("[RuleOptimizer] skipping paywall domain %s (省Token)", domain)
+		return nil
+	}
+
 	sampleSize := s.cfg.RuleSampleSize
 	if sampleSize <= 0 {
 		sampleSize = 5
@@ -142,61 +214,85 @@ func (s *RuleOptimizerService) optimizeDomain(ctx context.Context, domain string
 		return nil
 	}
 
-	candidateRule, _ := s.ruleRepo.FindCandidateByDomain(domain)
-	if candidateRule == nil {
-		rule, err := s.generateRule(ctx, domain, samples)
-		if err != nil {
-			return fmt.Errorf("generate rule for %s: %w", domain, err)
+	// 1) Deterministic rules table first — covers most failures without an LLM call.
+	errType := dominantErrorType(samples)
+	if overrides, analysis := defaultOverridesFor(errType); overrides != nil {
+		if err := s.persistOverrides(domain, overrides, analysis); err != nil {
+			return err
 		}
-		if rule == nil {
-			log.Printf("[RuleOptimizer] LLM returned no rule for domain %s", domain)
-			return nil
-		}
-		candidateRule = rule
-	}
-
-	trial, err := s.validateRule(ctx, candidateRule, samples)
-	if err != nil {
-		log.Printf("[RuleOptimizer] validate rule %d for %s error: %v", candidateRule.ID, domain, err)
+		log.Printf("[RuleOptimizer] rule-based overrides for %s (errType=%s)", domain, errType)
+		s.logActivity("overrides_rule", "cooling",
+			fmt.Sprintf("Rule-based overrides for %s (errType=%s)", domain, errType))
+		s.validateOverrides(ctx, domain, overrides, samples)
 		return nil
 	}
 
-	if trial.QualityScore >= 0.6 {
-		if err := s.ruleRepo.UpdateStatus(candidateRule.ID, model.ExtractionRuleActive); err != nil {
-			return fmt.Errorf("activate rule %d: %w", candidateRule.ID, err)
-		}
-		log.Printf("[RuleOptimizer] activated rule %d for domain %s (score=%.2f)", candidateRule.ID, domain, trial.QualityScore)
-		s.logActivity("rule_activated", "active",
-			fmt.Sprintf("Rule %d activated for %s (score=%.2f)", candidateRule.ID, domain, trial.QualityScore))
-		s.retryDomainJobs(domain)
-	} else {
-		trialCount, _ := s.ruleRepo.CountCandidateTrials(candidateRule.ID)
-		if int(trialCount) >= s.cfg.RuleMaxTrials {
-			if err := s.ruleRepo.UpdateStatus(candidateRule.ID, model.ExtractionRuleRejected); err != nil {
-				log.Printf("[RuleOptimizer] reject rule %d error: %v", candidateRule.ID, err)
+	// 2) LLM fallback only when the rules table doesn't cover this error type.
+	overrides, analysis, err := s.generateRequestOverrides(ctx, domain, samples)
+	if err != nil {
+		return fmt.Errorf("generate overrides for %s: %w", domain, err)
+	}
+	if overrides == nil {
+		// Record the analysis (e.g. "paywall / unfixable") so we don't re-analyze
+		// this domain every cycle, even though there are no overrides to apply.
+		if analysis != "" {
+			if err := s.persistAnalysisOnly(domain, analysis); err != nil {
+				log.Printf("[RuleOptimizer] persist analysis-only for %s failed: %v", domain, err)
 			}
-			log.Printf("[RuleOptimizer] rejected rule %d for %s after %d trials", candidateRule.ID, domain, trialCount)
-			s.logActivity("rule_rejected", "rejected",
-				fmt.Sprintf("Rule %d rejected for %s after %d trials (score=%.2f)", candidateRule.ID, domain, trialCount, trial.QualityScore))
-		} else {
-			log.Printf("[RuleOptimizer] trial %d for rule %d/%s scored %.2f (need 0.6), will retry", trialCount, candidateRule.ID, domain, trial.QualityScore)
 		}
+		log.Printf("[RuleOptimizer] LLM returned no overrides for domain %s", domain)
+		return nil
+	}
+
+	if err := s.persistOverrides(domain, overrides, analysis); err != nil {
+		return err
+	}
+	log.Printf("[RuleOptimizer] LLM-generated overrides for domain %s", domain)
+	s.logActivity("overrides_generated", "cooling",
+		fmt.Sprintf("LLM request overrides generated for %s", domain))
+
+	s.validateOverrides(ctx, domain, overrides, samples)
+
+	return nil
+}
+
+// persistOverrides stores domain-level overrides + analysis on the profile.
+func (s *RuleOptimizerService) persistOverrides(domain string, overrides *RequestOverrides, analysis string) error {
+	if s.domainRepo == nil {
+		return nil
+	}
+	overridesJSON, err := json.Marshal(overrides)
+	if err != nil {
+		return fmt.Errorf("marshal overrides: %w", err)
+	}
+	if err := s.domainRepo.UpdateOverrides(domain, datatypes.JSON(overridesJSON), analysis); err != nil {
+		return fmt.Errorf("update overrides for %s: %w", domain, err)
 	}
 	return nil
 }
 
-type llmRuleOutput struct {
-	Strategy           string `json:"strategy"`
-	RSSHubRoute        string `json:"rsshub_route,omitempty"`
-	CSSTitleSelector   string `json:"css_title_selector,omitempty"`
-	CSSContentSelector string `json:"css_content_selector,omitempty"`
-	CSSRemoveSelectors string `json:"css_remove_selectors,omitempty"`
-	QualityMinChars    int    `json:"quality_min_chars"`
+// persistAnalysisOnly records analysis text without overrides (e.g. unfixable domains).
+func (s *RuleOptimizerService) persistAnalysisOnly(domain, analysis string) error {
+	if s.domainRepo == nil {
+		return nil
+	}
+	return s.domainRepo.UpdateOverrides(domain, datatypes.JSON("null"), analysis)
 }
 
-func (s *RuleOptimizerService) generateRule(ctx context.Context, domain string, samples []repository.DomainFailureSample) (*model.CrawlExtractionRule, error) {
+type llmOverridesOutput struct {
+	UserAgent        string            `json:"user_agent,omitempty"`
+	TimeoutSeconds   int               `json:"timeout_seconds,omitempty"`
+	Headers          map[string]string `json:"headers,omitempty"`
+	Strategy         string            `json:"strategy,omitempty"`
+	FirecrawlWaitFor int               `json:"firecrawl_wait_for,omitempty"`
+	FirecrawlActions []FirecrawlAction `json:"firecrawl_actions,omitempty"`
+	Analysis         string            `json:"analysis,omitempty"`
+	None             bool              `json:"none,omitempty"`
+}
+
+func (s *RuleOptimizerService) generateRequestOverrides(ctx context.Context, domain string, samples []repository.DomainFailureSample) (*RequestOverrides, string, error) {
 	samplesJSON, _ := json.Marshal(samples)
-	prompt := fmt.Sprintf(`You are a web extraction rule optimizer. Given a domain and its recent extraction failures, suggest an extraction rule.
+	prompt := fmt.Sprintf(`You are a web extraction failure analyst. Given a domain and its recent extraction failures, analyze the root cause and suggest request parameter overrides to improve extraction success.
 
 Domain: %s
 Recent failures:
@@ -204,20 +300,25 @@ Recent failures:
 
 Respond with ONLY a JSON object (no markdown fences):
 {
-  "strategy": "one of: rsshub | trafilatura | firecrawl | readability",
-  "rsshub_route": "RSSHub route path if strategy=rsshub, e.g. /anthropic/news",
-  "css_title_selector": "CSS selector for title if strategy=readability",
-  "css_content_selector": "CSS selector for article body if strategy=readability",
-  "css_remove_selectors": "comma-separated CSS selectors to remove (ads, nav, etc.)",
-  "quality_min_chars": 200
+  "user_agent": "custom User-Agent string if needed, e.g. Mozilla/5.0...",
+  "timeout_seconds": 60,
+  "headers": {"Accept-Language": "en-US", "Cookie": "consent=yes"},
+  "strategy": "firecrawl or trafilatura (which extractor to prefer)",
+  "firecrawl_wait_for": 3000,
+  "firecrawl_actions": [{"type": "click", "selector": ".consent-btn"}],
+  "analysis": "Brief explanation of failure root cause and why these overrides should help",
+  "none": false
 }
 
 Rules:
-- Prefer "rsshub" if the site has an RSSHub route.
-- Use "trafilatura" or "firecrawl" if no RSSHub route exists.
-- Use "readability" only if you know specific CSS selectors for the site.
-- Do NOT suggest strategies that bypass paywalls or login.
-- If you cannot suggest a rule, return {"strategy":"none"}.`, domain, string(samplesJSON))
+- Only set fields that differ from defaults. Omit fields you don't want to change.
+- Use "firecrawl" strategy if the site requires JavaScript rendering.
+- Use "trafilatura" strategy if the site is simple HTML.
+- Set firecrawl_wait_for (milliseconds) if content loads dynamically after page render.
+- Set firecrawl_actions for cookie consent popups or other overlays that block content.
+- Set headers for sites that check Referer, Accept-Language, or require consent cookies.
+- Do NOT suggest ways to bypass paywalls or login walls. If the site is paywalled, set {"none": true}.
+- If you cannot determine a fix, set {"none": true}.`, domain, string(samplesJSON))
 
 	llmModel := s.cfg.RuleOptimizerModel
 	if llmModel == "" {
@@ -233,10 +334,10 @@ Rules:
 		Temperature: temp,
 	}, llmclient.ChatOptions{CallerID: "rule_optimizer", TaskType: string(TaskRuleGeneration)})
 	if err != nil {
-		return nil, fmt.Errorf("LLM call failed: %w", err)
+		return nil, "", fmt.Errorf("LLM call failed: %w", err)
 	}
 
-	var output llmRuleOutput
+	var output llmOverridesOutput
 	body := strings.TrimSpace(resp)
 	if idx := strings.Index(body, "{"); idx >= 0 {
 		last := strings.LastIndex(body, "}")
@@ -245,137 +346,67 @@ Rules:
 		}
 	}
 	if err := json.Unmarshal([]byte(body), &output); err != nil {
-		return nil, fmt.Errorf("parse LLM JSON: %w (body=%q)", err, body)
+		return nil, "", fmt.Errorf("parse LLM JSON: %w (body=%q)", err, body)
 	}
-	if output.Strategy == "" || output.Strategy == "none" {
-		return nil, nil
-	}
-
-	strategy := model.ExtractionStrategy(output.Strategy)
-	switch strategy {
-	case model.StrategyRSSHub, model.StrategyTrafilatura, model.StrategyFirecrawl, model.StrategyReadability, model.StrategyPlaywright:
-	default:
-		return nil, fmt.Errorf("unknown strategy: %s", output.Strategy)
+	if output.None {
+		return nil, output.Analysis, nil
 	}
 
-	qualityMinChars := output.QualityMinChars
-	if qualityMinChars <= 0 {
-		qualityMinChars = s.cfg.RuleQualityMinChars
-		if qualityMinChars <= 0 {
-			qualityMinChars = 200
-		}
+	overrides := &RequestOverrides{
+		UserAgent:        output.UserAgent,
+		TimeoutSeconds:   output.TimeoutSeconds,
+		Headers:          output.Headers,
+		Strategy:         output.Strategy,
+		FirecrawlWaitFor: output.FirecrawlWaitFor,
+		FirecrawlActions: output.FirecrawlActions,
 	}
-
-	rule := &model.CrawlExtractionRule{
-		Domain:             domain,
-		Strategy:           strategy,
-		RSSHubRoute:        output.RSSHubRoute,
-		CSSTitleSelector:   output.CSSTitleSelector,
-		CSSContentSelector: output.CSSContentSelector,
-		CSSRemoveSelectors: output.CSSRemoveSelectors,
-		QualityMinChars:    qualityMinChars,
-		Version:            1,
-		Status:             model.ExtractionRuleCandidate,
-		CreatedBy:          model.RuleCreatedByLLM,
-	}
-	if err := s.ruleRepo.Create(rule); err != nil {
-		return nil, fmt.Errorf("create rule: %w", err)
-	}
-	log.Printf("[RuleOptimizer] created candidate rule %d for domain %s (strategy=%s)", rule.ID, domain, strategy)
-	s.logActivity("rule_created", "candidate",
-		fmt.Sprintf("Rule %d created for %s (strategy=%s)", rule.ID, domain, strategy))
-	return rule, nil
+	return overrides, output.Analysis, nil
 }
 
-func (s *RuleOptimizerService) validateRule(ctx context.Context, rule *model.CrawlExtractionRule, samples []repository.DomainFailureSample) (*model.CrawlRuleTrial, error) {
-	sampleURLs := make([]string, 0, len(samples))
-	for _, s := range samples {
-		sampleURLs = append(sampleURLs, s.URL)
-	}
-	sampleURLsJSON, _ := json.Marshal(sampleURLs)
-
-	trial := &model.CrawlRuleTrial{
-		RuleID:     rule.ID,
-		SampleURLs: sampleURLsJSON,
-		Attempt:    1,
-	}
-
-	existingTrials, _ := s.ruleRepo.ListTrialsByRule(rule.ID)
-	trial.Attempt = len(existingTrials) + 1
-
-	if len(samples) > 0 {
-		trial.BeforeError = samples[0].ErrorType
-	}
-
+func (s *RuleOptimizerService) validateOverrides(ctx context.Context, domain string, overrides *RequestOverrides, samples []repository.DomainFailureSample) {
 	testURL := ""
-	for _, s := range samples {
-		if s.URL != "" {
-			testURL = s.URL
+	for _, sample := range samples {
+		if sample.URL != "" {
+			testURL = sample.URL
 			break
 		}
 	}
-
 	if testURL == "" {
-		trial.AfterStatus = "no_sample_url"
-		trial.QualityScore = 0
-		_ = s.ruleRepo.CreateTrial(trial)
-		return trial, nil
+		return
 	}
 
-	content, err := s.extractWithRule(ctx, rule, testURL)
+	result, err := s.extractor.Extract(&ExtractionRequest{
+		URL:      testURL,
+		Overrides: overrides,
+	})
 	if err != nil {
-		trial.AfterStatus = "extraction_failed"
-		trial.DiffSummary = truncateStr(err.Error(), 500)
-		trial.QualityScore = 0
-		_ = s.ruleRepo.CreateTrial(trial)
-		return trial, nil
+		log.Printf("[RuleOptimizer] validation failed for %s: %v", domain, err)
+		s.logActivity("validation_failed", "cooling",
+			fmt.Sprintf("Override validation failed for %s: %v", domain, err))
+		return
+	}
+	if !result.Success {
+		log.Printf("[RuleOptimizer] validation extracted but failed for %s: %s", domain, result.Error)
+		s.logActivity("validation_failed", "cooling",
+			fmt.Sprintf("Override validation failed for %s: %s", domain, result.Error))
+		return
 	}
 
-	trial.ContentLen = len(content)
-	trial.QualityScore = s.scoreContent(content, rule.QualityMinChars)
-	trial.AfterStatus = "extracted"
+	minChars := s.cfg.RuleQualityMinChars
+	if minChars <= 0 {
+		minChars = 200
+	}
+	score := s.scoreContent(result.Content, minChars)
+	log.Printf("[RuleOptimizer] validation for %s: extractor=%s len=%d score=%.2f",
+		domain, result.Extractor, len(result.Content), score)
 
-	if trial.QualityScore >= 0.6 {
-		trial.DiffSummary = fmt.Sprintf("Extracted %d chars, score=%.2f", len(content), trial.QualityScore)
+	if score >= 0.6 {
+		s.logActivity("validation_passed", "cooling",
+			fmt.Sprintf("Override validated for %s: score=%.2f extractor=%s len=%d",
+				domain, score, result.Extractor, len(result.Content)))
 	} else {
-		trial.DiffSummary = fmt.Sprintf("Low quality: %d chars, score=%.2f", len(content), trial.QualityScore)
-	}
-
-	if err := s.ruleRepo.CreateTrial(trial); err != nil {
-		log.Printf("[RuleOptimizer] create trial error: %v", err)
-	}
-	return trial, nil
-}
-
-func (s *RuleOptimizerService) extractWithRule(ctx context.Context, rule *model.CrawlExtractionRule, testURL string) (string, error) {
-	switch rule.Strategy {
-	case model.StrategyRSSHub:
-		if rule.RSSHubRoute == "" {
-			return "", fmt.Errorf("rsshub route is empty")
-		}
-		return "", fmt.Errorf("rsshub strategy requires feed reconfiguration, not per-URL extraction")
-	case model.StrategyFirecrawl:
-		result, err := s.extractor.Extract(&ExtractionRequest{URL: testURL})
-		if err != nil {
-			return "", err
-		}
-		if !result.Success {
-			return "", fmt.Errorf("%s", result.Error)
-		}
-		return result.Content, nil
-	case model.StrategyTrafilatura:
-		result, err := s.extractor.Extract(&ExtractionRequest{URL: testURL})
-		if err != nil {
-			return "", err
-		}
-		if !result.Success {
-			return "", fmt.Errorf("%s", result.Error)
-		}
-		return result.Content, nil
-	case model.StrategyReadability:
-		return "", fmt.Errorf("readability strategy not yet implemented")
-	default:
-		return "", fmt.Errorf("unsupported strategy: %s", rule.Strategy)
+		s.logActivity("validation_low_quality", "cooling",
+			fmt.Sprintf("Override low quality for %s: score=%.2f", domain, score))
 	}
 }
 
@@ -432,18 +463,6 @@ func (s *RuleOptimizerService) scoreContent(content string, minChars int) float6
 	return score
 }
 
-func (s *RuleOptimizerService) retryDomainJobs(domain string) {
-	if s.jobRepo == nil {
-		return
-	}
-	retried, err := s.jobRepo.RetryDeadOrBlockedByDomain(domain)
-	if err != nil {
-		log.Printf("[RuleOptimizer] retry domain %s jobs error: %v", domain, err)
-	} else if retried > 0 {
-		log.Printf("[RuleOptimizer] retried %d jobs for domain %s", retried, domain)
-	}
-}
-
 func (s *RuleOptimizerService) logActivity(action, status, summary string) {
 	if s.activityLog == nil {
 		return
@@ -454,12 +473,4 @@ func (s *RuleOptimizerService) logActivity(action, status, summary string) {
 		Status:  status,
 		Summary: summary,
 	})
-}
-
-func truncateStr(s string, maxLen int) string {
-	r := []rune(s)
-	if len(r) <= maxLen {
-		return s
-	}
-	return string(r[:maxLen])
 }

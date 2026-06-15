@@ -30,6 +30,7 @@ type Handlers struct {
 	DailyReport    *DailyReportHandler
 	Crawler        *CrawlerHandler
 	CrawlQueue     *CrawlQueueHandler
+	CrawlFailure   *CrawlFailureHandler
 	ExtractionRule *ExtractionRuleHandler
 	// Optional handlers
 	MatrixNotify *MatrixNotifyHandler
@@ -68,6 +69,11 @@ func NewHandlers(services *service.Services, repos *repository.Repositories, shu
 	// Set crawl queue handler (if available)
 	if services.CrawlQueue != nil {
 		h.CrawlQueue = NewCrawlQueueHandler(services.CrawlQueue)
+	}
+
+	// Set crawl failure handler (if available)
+	if services.CrawlFailure != nil {
+		h.CrawlFailure = NewCrawlFailureHandler(services.CrawlFailure)
 	}
 
 	// Set extraction rule handler (if available)

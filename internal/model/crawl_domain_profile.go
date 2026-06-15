@@ -3,6 +3,7 @@ package model
 import (
 	"time"
 
+	"gorm.io/datatypes"
 	"gorm.io/gorm"
 )
 
@@ -18,6 +19,9 @@ type CrawlDomainProfile struct {
 	NextAllowedAt       *time.Time     `gorm:"index" json:"next_allowed_at,omitempty"`
 	RobotsCheckedAt     *time.Time     `json:"robots_checked_at,omitempty"`
 	Notes               string         `gorm:"type:text" json:"notes,omitempty"`
+	FailureCount        int            `gorm:"default:0" json:"failure_count"`
+	RequestOverrides    datatypes.JSON `gorm:"type:jsonb" json:"request_overrides,omitempty"`
+	AnalysisResult      string         `gorm:"type:text" json:"analysis_result,omitempty"`
 	CreatedAt           time.Time      `json:"created_at"`
 	UpdatedAt           time.Time      `json:"updated_at"`
 	DeletedAt           gorm.DeletedAt `gorm:"index" json:"-"`

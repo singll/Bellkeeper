@@ -24,6 +24,7 @@ type CrawlQueueService struct {
 	cfg          config.CrawlQueueConfig
 	repo         *repository.CrawlJobRepository
 	domainRepo   *repository.CrawlDomainProfileRepository
+	failureRepo  *repository.CrawlFailureRepository
 	extractor    *ExtractorService
 	ingestion    *FileIngestionService
 	activityLog  *ActivityLogService
@@ -35,10 +36,6 @@ type CrawlQueueService struct {
 
 	// Per-channel circuit breakers
 	breakers map[string]*circuitBreaker
-
-	// In-memory blocked domain set (auto-learned + config)
-	blockedDomains map[string]bool
-	domainMu       sync.RWMutex
 }
 
 // circuitBreaker implements per-channel back-pressure.
@@ -122,27 +119,22 @@ func NewCrawlQueueService(
 	cfg config.CrawlQueueConfig,
 	repo *repository.CrawlJobRepository,
 	domainRepo *repository.CrawlDomainProfileRepository,
+	failureRepo *repository.CrawlFailureRepository,
 	extractor *ExtractorService,
 	ingestion *FileIngestionService,
 	activityLog *ActivityLogService,
 ) *CrawlQueueService {
 	svc := &CrawlQueueService{
-		cfg:            cfg,
-		repo:           repo,
-		domainRepo:     domainRepo,
-		extractor:      extractor,
-		ingestion:      ingestion,
-		activityLog:    activityLog,
-		blockedDomains: make(map[string]bool),
-		breakers:       make(map[string]*circuitBreaker),
+		cfg:         cfg,
+		repo:        repo,
+		domainRepo:  domainRepo,
+		failureRepo: failureRepo,
+		extractor:   extractor,
+		ingestion:   ingestion,
+		activityLog: activityLog,
+		breakers:    make(map[string]*circuitBreaker),
 	}
 
-	// Seed blocked domains from config
-	for _, d := range cfg.BlockedDomains {
-		svc.blockedDomains[d] = true
-	}
-
-	// Create circuit breakers per channel
 	cbCooldown := 2 * time.Minute
 	svc.breakers["firecrawl"] = newCircuitBreaker(5, cbCooldown)
 	svc.breakers["trafilatura"] = newCircuitBreaker(5, cbCooldown)
@@ -156,36 +148,80 @@ func (s *CrawlQueueService) SetNotificationService(svc *NotificationService) {
 	s.notification = svc
 }
 
+// Domain cooling backoff bounds (exponential: base * 2^(failures-1), capped at max).
+// Cooling is persisted on crawl_domain_profiles.next_allowed_at so it survives restarts
+// and is enforced at dequeue time by DequeueFair's LEFT JOIN — no in-memory state.
+const (
+	crawlCoolingBase = 1 * time.Minute
+	crawlCoolingMax  = 1 * time.Hour
+)
+
+// enterCooling pushes a domain's next_allowed_at out via exponential backoff.
+func (s *CrawlQueueService) enterCooling(domain, errType, errMsg string) {
+	if domain == "" || s.domainRepo == nil {
+		return
+	}
+	if err := s.domainRepo.EnterCooling(domain, crawlCoolingBase, crawlCoolingMax); err != nil {
+		log.Printf("[CrawlQueue] enter cooling for %s failed: %v", domain, err)
+		return
+	}
+	log.Printf("[CrawlQueue] domain %s cooling: errType=%s err=%s", domain, errType, errMsg)
+}
+
+// clearCooling resets a domain's cooling state after a successful crawl.
+func (s *CrawlQueueService) clearCooling(domain string) {
+	if domain == "" || s.domainRepo == nil {
+		return
+	}
+	if err := s.domainRepo.ClearCooling(domain); err != nil {
+		log.Printf("[CrawlQueue] clear cooling for %s failed: %v", domain, err)
+	}
+}
+
+// getRequestOverrides loads domain-level extraction overrides (set by the rule
+// optimizer). Read-only — never creates a profile row on the hot path.
+func (s *CrawlQueueService) getRequestOverrides(domain string) *RequestOverrides {
+	if domain == "" || s.domainRepo == nil {
+		return nil
+	}
+	profile, err := s.domainRepo.FindByDomain(domain)
+	if err != nil {
+		log.Printf("[CrawlQueue] load overrides for %s failed: %v", domain, err)
+		return nil
+	}
+	if profile == nil || len(profile.RequestOverrides) == 0 {
+		return nil
+	}
+	var overrides RequestOverrides
+	if err := json.Unmarshal(profile.RequestOverrides, &overrides); err != nil {
+		log.Printf("[CrawlQueue] unmarshal overrides for %s failed: %v", domain, err)
+		return nil
+	}
+	return &overrides
+}
+
 // Enqueue adds a URL to the crawl queue.
 func (s *CrawlQueueService) Enqueue(sourceID uint, rawURL, title, channelType string, metadata map[string]interface{}) (uint, error) {
 	domain := crawlExtractDomain(rawURL)
 
-	// Layer 1: domain blacklist check
-	if s.isBlockedDomain(domain) {
-		job := &model.CrawlJob{
-			SourceID:     sourceID,
-			URL:          rawURL,
-			Title:        title,
-			Status:       model.CrawlJobBlocked,
-			ChannelType:  channelType,
-			SourceDomain: domain,
-			BlockReason:  "domain_blacklist",
-		}
-		if metadata != nil {
-			b, _ := json.Marshal(metadata)
-			job.Metadata = b
-		}
-		if err := s.repo.Enqueue(job); err != nil {
-			return 0, err
-		}
-		s.logActivity("job_blocked", "blocked", fmt.Sprintf("URL blocked (domain blacklist): %s domain=%s", rawURL, domain), sourceID)
-		s.notifyBlocked(rawURL, domain, "domain_blacklist")
-		return job.ID, nil
-	}
-
 	status := model.CrawlJobPending
 	if channelType == "" {
 		channelType = "auto"
+	}
+
+	// Per-domain back-pressure: cap how many in-queue jobs a single domain may
+	// accumulate. This is the safety valve against discovery outrunning consumption
+	// (e.g. one site flooding the queue with millions of pending URLs). Explicit
+	// rejection (⏭️), never a silent drop.
+	if s.cfg.DomainPendingCap > 0 && domain != "" {
+		pending, err := s.repo.CountPendingByDomain(domain)
+		if err != nil {
+			log.Printf("[CrawlQueue] pending count for %s failed: %v", domain, err)
+		} else if pending >= int64(s.cfg.DomainPendingCap) {
+			s.logActivity("enqueue_rejected", "skipped",
+				fmt.Sprintf("⏭️ Enqueue rejected: domain %s at pending cap %d — %s", domain, s.cfg.DomainPendingCap, rawURL), sourceID)
+			return 0, fmt.Errorf("domain %s reached pending cap %d", domain, s.cfg.DomainPendingCap)
+		}
 	}
 
 	job := &model.CrawlJob{
@@ -214,23 +250,16 @@ func (s *CrawlQueueService) Enqueue(sourceID uint, rawURL, title, channelType st
 func (s *CrawlQueueService) Start(ctx context.Context) {
 	ctx, s.cancel = context.WithCancel(ctx)
 
-	// Recover orphaned jobs from previous crash
 	if err := s.repo.RecoverOrphanedJobs(); err != nil {
 		log.Printf("[CrawlQueue] failed to recover orphaned jobs: %v", err)
 	}
 
-	// Rebuild blocked domain list from DB
-	s.rebuildBlockedDomains()
-
-	// Launch periodic stale job recovery
 	s.wg.Add(1)
 	go s.staleJobRecoveryLoop(ctx)
 
-	// Launch heartbeat goroutine
 	s.wg.Add(1)
 	go s.heartbeatLoop(ctx)
 
-	// Launch workers
 	s.startWorkers(ctx, "firecrawl", s.cfg.FirecrawlWorkers)
 	s.startWorkers(ctx, "trafilatura", s.cfg.TrafilaturaWorkers)
 	s.startWorkers(ctx, "auto", s.cfg.AutoWorkers)
@@ -289,6 +318,10 @@ func (s *CrawlQueueService) heartbeatLoop(ctx context.Context) {
 	}
 }
 
+// tierRefreshLoop removed: domain prioritization is now handled at dequeue time by
+// DequeueFair (per-domain fair rotation + next_allowed_at cooling filter), so there
+// is no in-memory tier map to refresh.
+
 // startWorkers launches n workers for a given channel type.
 func (s *CrawlQueueService) startWorkers(ctx context.Context, channelType string, n int) {
 	for i := 0; i < n; i++ {
@@ -312,28 +345,17 @@ func (s *CrawlQueueService) workerLoop(ctx context.Context, channelType string, 
 		case <-ticker.C:
 		}
 
-		// Check circuit breaker
 		cb := s.breakers[channelType]
 		if cb != nil && !cb.allow() {
 			continue
 		}
 
-		job, err := s.repo.Dequeue(channelType)
+		job, err := s.repo.DequeueFair(channelType)
 		if err != nil {
-			log.Printf("[CrawlQueue:%s:%d] dequeue error: %v", channelType, id, err)
+			log.Printf("[CrawlQueue:%s] dequeue error: %v", channelType, err)
 			continue
 		}
 		if job == nil {
-			continue
-		}
-
-		if retryAt, reason, ok := s.reserveDomainSlot(job); !ok {
-			if err := s.repo.DelayJob(job.ID, retryAt, "domain_throttled", reason); err != nil {
-				log.Printf("[CrawlQueue:%s:%d] failed to requeue domain-throttled job %d: %v", channelType, id, job.ID, err)
-			}
-			s.logActivity("job_throttled", "retrying",
-				fmt.Sprintf("Domain throttled: %s domain=%s next=%s reason=%s", job.URL, job.SourceDomain, retryAt.Format(time.RFC3339), reason),
-				job.SourceID)
 			continue
 		}
 
@@ -341,69 +363,13 @@ func (s *CrawlQueueService) workerLoop(ctx context.Context, channelType string, 
 	}
 }
 
-type domainThrottleDecision struct {
-	Allowed bool
-	RetryAt time.Time
-	Reason  string
-}
-
-func decideDomainThrottle(profile *model.CrawlDomainProfile, runningRank int64, now time.Time) domainThrottleDecision {
-	if profile == nil || profile.Domain == "" {
-		return domainThrottleDecision{Allowed: true}
-	}
-	delay := time.Duration(profile.DefaultDelaySeconds) * time.Second
-	if delay <= 0 {
-		delay = 60 * time.Second
-	}
-	maxConcurrency := profile.MaxConcurrency
-	if maxConcurrency <= 0 {
-		maxConcurrency = 1
-	}
-
-	if profile.NextAllowedAt != nil && profile.NextAllowedAt.After(now) {
-		return domainThrottleDecision{
-			Allowed: false,
-			RetryAt: *profile.NextAllowedAt,
-			Reason:  "next_allowed_at",
-		}
-	}
-	if runningRank > int64(maxConcurrency) {
-		return domainThrottleDecision{
-			Allowed: false,
-			RetryAt: now.Add(delay),
-			Reason:  "max_concurrency",
-		}
-	}
-	return domainThrottleDecision{Allowed: true}
-}
-
-func (s *CrawlQueueService) reserveDomainSlot(job *model.CrawlJob) (time.Time, string, bool) {
-	if job == nil || job.SourceDomain == "" || !s.cfg.DomainThrottleEnabled || s.domainRepo == nil {
-		return time.Time{}, "", true
-	}
-	now := time.Now()
-	profile, err := s.domainRepo.FindOrCreate(job.SourceDomain, s.domainDefaultDelaySeconds(), s.domainDefaultMaxConcurrency())
-	if err != nil {
-		log.Printf("[CrawlQueue] domain profile lookup failed for %s: %v", job.SourceDomain, err)
-		return time.Time{}, "", true
-	}
-	runningRank, err := s.repo.CountRunningDomainRank(job.SourceDomain, job.ID, job.StartedAt)
-	if err != nil {
-		log.Printf("[CrawlQueue] domain running rank failed for %s: %v", job.SourceDomain, err)
-		return time.Time{}, "", true
-	}
-
-	decision := decideDomainThrottle(profile, runningRank, now)
-	if !decision.Allowed {
-		return decision.RetryAt, decision.Reason, false
-	}
-
-	nextAllowed := now.Add(time.Duration(normalizePositive(profile.DefaultDelaySeconds, s.domainDefaultDelaySeconds())) * time.Second)
-	if err := s.domainRepo.RecordStart(job.SourceDomain, nextAllowed); err != nil {
-		log.Printf("[CrawlQueue] domain profile start update failed for %s: %v", job.SourceDomain, err)
-	}
-	return time.Time{}, "", true
-}
+// dequeueByTier removed: replaced by repo.DequeueFair (single SQL, per-domain fair
+// rotation with cooling filtered via next_allowed_at).
+//
+// Per-domain throttle gating (reserveDomainSlot/decideDomainThrottle) was also
+// removed: next_allowed_at — set by recordDomainOutcome on success and by
+// enterCooling on failure — is now enforced directly in DequeueFair, so a job is
+// never claimed for a domain that should wait.
 
 func (s *CrawlQueueService) domainDefaultDelaySeconds() int {
 	return normalizePositive(s.cfg.DomainDefaultDelay, 60)
@@ -432,6 +398,9 @@ func (s *CrawlQueueService) processJob(ctx context.Context, job *model.CrawlJob,
 
 	// Extract content
 	extractReq := &ExtractionRequest{URL: job.URL}
+	if overrides := s.getRequestOverrides(job.SourceDomain); overrides != nil {
+		extractReq.Overrides = overrides
+	}
 	result, err := s.extractor.Extract(extractReq)
 	durationMs := int(time.Since(startTime).Milliseconds())
 
@@ -457,16 +426,9 @@ func (s *CrawlQueueService) processJob(ctx context.Context, job *model.CrawlJob,
 
 	// Layer 3: paywall keyword detection
 	if s.detectPaywallKeywords(content) {
-		if err := s.repo.MarkBlocked(job.ID, "paywall_keywords"); err != nil {
-		log.Printf("[CrawlQueue] failed to mark job %d blocked (paywall_keywords): %v", job.ID, err)
-	}
-		s.logActivity("job_blocked", "blocked",
-			fmt.Sprintf("Paywall keywords detected: %s extractor=%s", job.URL, extractorUsed), job.SourceID)
-		s.notifyBlocked(job.URL, job.SourceDomain, "paywall_keywords")
-		s.recordDomainOutcome(job, string(model.CrawlJobBlocked), "paywall_keywords", "paywall keywords detected", nil)
-		if cb != nil {
-			cb.recordSuccess()
-		}
+		// Cooling is applied uniformly by handleExtractionFailure (classified as
+		// "paywall"); no separate pre-cooling here.
+		s.handleExtractionFailure(job, fmt.Errorf("paywall keywords detected"), extractorUsed, cb, durationMs)
 		return
 	}
 
@@ -488,6 +450,16 @@ func (s *CrawlQueueService) processJob(ctx context.Context, job *model.CrawlJob,
 	updates := map[string]interface{}{
 		"content_length": len(content),
 		"extractor_used": extractorUsed,
+	}
+	// Content extracted+ingested OK → exit cooling (zero failure_count, clear
+	// next_allowed_at). recordDomainOutcome below then re-applies the normal
+	// politeness delay. Done unconditionally so recovery isn't gated on throttling.
+	s.clearCooling(job.SourceDomain)
+	// Drop any stale failure-archive entry for this URL — it's no longer failing.
+	if s.failureRepo != nil {
+		if err := s.failureRepo.ResolveByURL(job.URL); err != nil {
+			log.Printf("[CrawlQueue] resolve failure record for %s failed: %v", job.URL, err)
+		}
 	}
 	if ingestResult.Status == "duplicate" || ingestResult.Status == "duplicate_content" {
 		if err := s.repo.UpdateStatus(job.ID, model.CrawlJobSkipped, updates); err != nil {
@@ -520,117 +492,71 @@ func (s *CrawlQueueService) handleExtractionFailure(job *model.CrawlJob, err err
 		cb.recordFailure()
 	}
 
-	switch errType {
-	case "not_found", "client_error":
-		if err := s.repo.MarkDead(job.ID, errType, errMsg); err != nil {
-			log.Printf("[CrawlQueue] failed to mark job %d dead (%s): %v", job.ID, errType, err)
+	s.enterCooling(job.SourceDomain, errType, errMsg)
+
+	if job.RetryCount >= job.MaxRetries {
+		if s.failureRepo != nil {
+			if fErr := s.failureRepo.UpsertFromJob(job, errType, errMsg); fErr != nil {
+				log.Printf("[CrawlQueue] failed to upsert crawl failure for job %d: %v", job.ID, fErr)
+			}
 		}
-		s.logActivity("job_dead", "dead",
-			fmt.Sprintf("Dead (%s): %s err=%s", errType, job.URL, errMsg), job.SourceID)
-		s.recordDomainOutcome(job, string(model.CrawlJobDead), errType, errMsg, nil)
-	case "forbidden":
-		if job.RetryCount >= 1 {
-			if err := s.repo.MarkBlocked(job.ID, "forbidden"); err != nil {
-				log.Printf("[CrawlQueue] failed to mark job %d blocked (forbidden): %v", job.ID, err)
-			}
-			s.logActivity("job_blocked", "blocked",
-				fmt.Sprintf("Blocked (forbidden after retry): %s err=%s", job.URL, errMsg), job.SourceID)
-			s.notifyBlocked(job.URL, job.SourceDomain, "forbidden")
-			s.recordDomainOutcome(job, string(model.CrawlJobBlocked), errType, errMsg, nil)
-		} else {
-			nextRetry := s.calculateBackoff(job.RetryCount, errType)
-			if err := s.repo.MarkRetry(job.ID, nextRetry, errType, errMsg); err != nil {
-				log.Printf("[CrawlQueue] failed to mark job %d retry (forbidden): %v", job.ID, err)
-			}
-			s.logActivity("job_retry", "retrying",
-				fmt.Sprintf("Retry (forbidden): %s attempt=%d next=%s err=%s", job.URL, job.RetryCount+1, nextRetry.Format(time.RFC3339), errMsg),
-				job.SourceID)
-			s.recordDomainOutcome(job, string(model.CrawlJobRetrying), errType, errMsg, &nextRetry)
+		if err := s.repo.UpdateStatus(job.ID, model.CrawlJobSkipped, map[string]interface{}{
+			"error_type":    errType,
+			"error_message": errMsg,
+		}); err != nil {
+			log.Printf("[CrawlQueue] failed to mark job %d skipped (max retries): %v", job.ID, err)
 		}
-	case "rate_limited":
-		if job.RetryCount >= job.MaxRetries {
-			if err := s.repo.MarkDead(job.ID, errType, errMsg); err != nil {
-				log.Printf("[CrawlQueue] failed to mark job %d dead (rate_limited): %v", job.ID, err)
-			}
-			s.logActivity("job_dead", "dead",
-				fmt.Sprintf("Dead (rate_limited max retries): %s retries=%d err=%s", job.URL, job.RetryCount, errMsg), job.SourceID)
-			s.recordDomainOutcome(job, string(model.CrawlJobDead), errType, errMsg, nil)
-		} else {
-			nextRetry := s.calculateBackoff(job.RetryCount, errType)
-			if retryAfter, ok := retryAfterFromError(err, time.Now()); ok && retryAfter.After(time.Now()) {
-				nextRetry = retryAfter
-			}
-			if err := s.repo.MarkRetry(job.ID, nextRetry, errType, errMsg); err != nil {
-				log.Printf("[CrawlQueue] failed to mark job %d retry (rate_limited): %v", job.ID, err)
-			}
-			s.logActivity("job_retry", "retrying",
-				fmt.Sprintf("Retry (rate_limited): %s attempt=%d next=%s err=%s", job.URL, job.RetryCount+1, nextRetry.Format(time.RFC3339), errMsg),
-				job.SourceID)
-			s.recordDomainOutcome(job, string(model.CrawlJobRetrying), errType, errMsg, &nextRetry)
-		}
-	case "paywall":
-		if err := s.repo.MarkBlocked(job.ID, "paywall_detected"); err != nil {
-			log.Printf("[CrawlQueue] failed to mark job %d blocked (paywall_detected): %v", job.ID, err)
-		}
-		s.logActivity("job_blocked", "blocked",
-			fmt.Sprintf("Blocked (paywall): %s", job.URL), job.SourceID)
-		s.notifyBlocked(job.URL, job.SourceDomain, "paywall_detected")
-		s.autoLearnDomain(job.SourceDomain)
-		s.recordDomainOutcome(job, string(model.CrawlJobBlocked), errType, errMsg, nil)
-	default:
-		// Retryable: timeout, server_error, network, empty_content, unknown
-		if job.RetryCount >= job.MaxRetries {
-			if err := s.repo.MarkDead(job.ID, errType, errMsg); err != nil {
-				log.Printf("[CrawlQueue] failed to mark job %d dead (max retries): %v", job.ID, err)
-			}
-			s.logActivity("job_dead", "dead",
-				fmt.Sprintf("Dead (max retries): %s retries=%d err=%s", job.URL, job.RetryCount, errMsg), job.SourceID)
-			s.recordDomainOutcome(job, string(model.CrawlJobDead), errType, errMsg, nil)
-		} else {
-			nextRetry := s.calculateBackoff(job.RetryCount, errType)
-			if err := s.repo.MarkRetry(job.ID, nextRetry, errType, errMsg); err != nil {
-				log.Printf("[CrawlQueue] failed to mark job %d retry: %v", job.ID, err)
-			}
-			s.logActivity("job_retry", "retrying",
-				fmt.Sprintf("Retry: %s attempt=%d next=%s err=%s", job.URL, job.RetryCount+1, nextRetry.Format(time.Kitchen), errMsg),
-				job.SourceID)
-			s.recordDomainOutcome(job, string(model.CrawlJobRetrying), errType, errMsg, &nextRetry)
+		s.logActivity("job_archived", "skipped",
+			fmt.Sprintf("Archived to failures (max retries): %s retries=%d err=%s", job.URL, job.RetryCount, errMsg), job.SourceID)
+		s.recordDomainOutcome(job, string(model.CrawlJobSkipped), errType, errMsg, nil)
+		return
+	}
+
+	nextRetry := s.calculateBackoff(job.RetryCount, errType)
+	if errType == "rate_limited" {
+		if retryAfter, ok := retryAfterFromError(err, time.Now()); ok && retryAfter.After(time.Now()) {
+			nextRetry = retryAfter
 		}
 	}
+
+	if err := s.repo.MarkRetry(job.ID, nextRetry, errType, errMsg); err != nil {
+		log.Printf("[CrawlQueue] failed to mark job %d retry: %v", job.ID, err)
+	}
+	s.logActivity("job_retry", "retrying",
+		fmt.Sprintf("Retry: %s attempt=%d next=%s type=%s err=%s", job.URL, job.RetryCount+1, nextRetry.Format(time.Kitchen), errType, errMsg),
+		job.SourceID)
+	s.recordDomainOutcome(job, string(model.CrawlJobRetrying), errType, errMsg, &nextRetry)
 }
 
 // handleEmptyContent handles extraction that returned too-short content.
 func (s *CrawlQueueService) handleEmptyContent(job *model.CrawlJob, extractor string, cb *circuitBreaker, durationMs int) {
-	// Check how many times this domain had empty content recently
-	count, _ := s.repo.CountByDomainAndStatus(job.SourceDomain, model.CrawlJobBlocked, time.Now().Add(-24*time.Hour))
-	if int(count)+1 >= s.cfg.PaywallThreshold {
-		if err := s.repo.MarkBlocked(job.ID, "empty_content_repeated"); err != nil {
-			log.Printf("[CrawlQueue] failed to mark job %d as blocked: %v", job.ID, err)
-		}
-		s.logActivity("job_blocked", "blocked",
-			fmt.Sprintf("Blocked (repeated empty): %s domain=%s count=%d", job.URL, job.SourceDomain, count+1),
-			job.SourceID)
-		s.notifyBlocked(job.URL, job.SourceDomain, "empty_content_repeated")
-		s.autoLearnDomain(job.SourceDomain)
-		s.recordDomainOutcome(job, string(model.CrawlJobBlocked), "empty_content_repeated", "repeated empty content", nil)
-	} else {
-		if job.RetryCount >= 1 {
-			if err := s.repo.MarkBlocked(job.ID, "empty_content"); err != nil {
-				log.Printf("[CrawlQueue] failed to mark job %d as blocked: %v", job.ID, err)
+	s.enterCooling(job.SourceDomain, "empty_content", "content too short")
+
+	if job.RetryCount >= job.MaxRetries {
+		if s.failureRepo != nil {
+			if fErr := s.failureRepo.UpsertFromJob(job, "empty_content", "content too short"); fErr != nil {
+				log.Printf("[CrawlQueue] failed to upsert crawl failure for empty content job %d: %v", job.ID, fErr)
 			}
-			s.logActivity("job_blocked", "blocked",
-				fmt.Sprintf("Blocked (empty content): %s", job.URL), job.SourceID)
-			s.recordDomainOutcome(job, string(model.CrawlJobBlocked), "empty_content", "content too short", nil)
-		} else {
-			nextRetry := time.Now().Add(30 * time.Second)
-			if err := s.repo.MarkRetry(job.ID, nextRetry, "empty_content", "content too short"); err != nil {
-				log.Printf("[CrawlQueue] failed to mark job %d for retry: %v", job.ID, err)
-			}
-			s.logActivity("job_retry", "retrying",
-				fmt.Sprintf("Retry (empty content): %s", job.URL), job.SourceID)
-			s.recordDomainOutcome(job, string(model.CrawlJobRetrying), "empty_content", "content too short", &nextRetry)
 		}
+		if err := s.repo.UpdateStatus(job.ID, model.CrawlJobSkipped, map[string]interface{}{
+			"error_type":    "empty_content",
+			"error_message": "content too short",
+		}); err != nil {
+			log.Printf("[CrawlQueue] failed to mark job %d skipped (empty content): %v", job.ID, err)
+		}
+		s.logActivity("job_archived", "skipped",
+			fmt.Sprintf("Archived (repeated empty): %s domain=%s", job.URL, job.SourceDomain), job.SourceID)
+		s.recordDomainOutcome(job, string(model.CrawlJobSkipped), "empty_content", "content too short", nil)
+		return
 	}
+
+	nextRetry := time.Now().Add(30 * time.Second)
+	if err := s.repo.MarkRetry(job.ID, nextRetry, "empty_content", "content too short"); err != nil {
+		log.Printf("[CrawlQueue] failed to mark job %d for retry: %v", job.ID, err)
+	}
+	s.logActivity("job_retry", "retrying",
+		fmt.Sprintf("Retry (empty content): %s", job.URL), job.SourceID)
+	s.recordDomainOutcome(job, string(model.CrawlJobRetrying), "empty_content", "content too short", &nextRetry)
 }
 
 // detectPaywallKeywords checks for paywall/anti-crawl keywords in extracted content.
@@ -745,61 +671,6 @@ func maxDuration(a, b time.Duration) time.Duration {
 	return b
 }
 
-// isBlockedDomain checks if a domain is in the blocked set.
-func (s *CrawlQueueService) isBlockedDomain(domain string) bool {
-	s.domainMu.RLock()
-	defer s.domainMu.RUnlock()
-	return s.blockedDomains[domain]
-}
-
-// autoLearnDomain adds a domain to the in-memory blocked set.
-func (s *CrawlQueueService) autoLearnDomain(domain string) {
-	if domain == "" {
-		return
-	}
-	s.domainMu.Lock()
-	defer s.domainMu.Unlock()
-	if !s.blockedDomains[domain] {
-		s.blockedDomains[domain] = true
-		log.Printf("[CrawlQueue] auto-learned blocked domain: %s", domain)
-	}
-}
-
-// rebuildBlockedDomains rebuilds the blocked domain set from DB history.
-func (s *CrawlQueueService) rebuildBlockedDomains() {
-	since := time.Now().Add(-7 * 24 * time.Hour)
-	domains, err := s.repo.GetRecentlyBlockedDomains(since)
-	if err != nil {
-		log.Printf("[CrawlQueue] failed to rebuild blocked domains: %v", err)
-		return
-	}
-	s.domainMu.Lock()
-	defer s.domainMu.Unlock()
-	for _, d := range domains {
-		if !s.blockedDomains[d] {
-			s.blockedDomains[d] = true
-			log.Printf("[CrawlQueue] restored blocked domain from DB: %s", d)
-		}
-	}
-}
-
-// notifyBlocked sends a Matrix notification for blocked URLs.
-func (s *CrawlQueueService) notifyBlocked(rawURL, domain, reason string) {
-	if s.notification == nil {
-		return
-	}
-	msg := fmt.Sprintf("[CrawlQueue] URL blocked: %s | Domain: %s | Reason: %s", rawURL, domain, reason)
-	if _, err := s.notification.Send(context.Background(), &NotificationRequest{
-		Channel:     "alerts",
-		Message:     msg,
-		MessageType: "text",
-		DedupKey:    "crawl_blocked:" + domain,
-		Severity:    "info",
-	}); err != nil {
-		log.Printf("[CrawlQueue] failed to send blocked notification for %s: %v", domain, err)
-	}
-}
-
 // logActivity logs a crawl queue activity event.
 func (s *CrawlQueueService) logActivity(action, status, summary string, sourceID uint) {
 	if s.activityLog == nil {
@@ -859,6 +730,20 @@ func (s *CrawlQueueService) UnblockJob(id uint) error {
 		"error_type":    "",
 		"error_message": "",
 	})
+}
+
+// CleanupStalePending marks stale pending jobs as skipped.
+func (s *CrawlQueueService) CleanupStalePending(olderThanDays int, domain string) (int64, error) {
+	olderThan := time.Now().AddDate(0, 0, -olderThanDays)
+	skipped, err := s.repo.MarkSkippedStalePending(olderThan, domain)
+	if err != nil {
+		return 0, fmt.Errorf("cleanup stale pending: %w", err)
+	}
+	if skipped > 0 {
+		s.logActivity("cleanup", "skipped",
+			fmt.Sprintf("Skipped %d stale pending jobs (older than %d days, domain=%s)", skipped, olderThanDays, domain), 0)
+	}
+	return skipped, nil
 }
 
 // WorkerStatus holds per-channel worker health info.

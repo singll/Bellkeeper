@@ -272,7 +272,7 @@ type CrawlQueueConfig struct {
 	RetryBackoffMax          int      `mapstructure:"retry_backoff_max"`  // 秒
 	DeadLetterThreshold      int      `mapstructure:"dead_letter_threshold"`
 	PaywallThreshold         int      `mapstructure:"paywall_threshold"`         // 连续空内容次数
-	BlockedDomains           []string `mapstructure:"blocked_domains"`           // 预设付费墙域名
+	DomainPendingCap         int      `mapstructure:"domain_pending_cap"`        // 每域名 pending+retrying 上限，0=不限
 	StaleTimeoutMinutes      int      `mapstructure:"stale_timeout_minutes"`     // 运行超过此分钟数视为卡死
 	RecoveryIntervalMinutes  int      `mapstructure:"recovery_interval_minutes"` // 卡死回收检查间隔（分钟）
 	DomainThrottleEnabled    bool     `mapstructure:"domain_throttle_enabled"`
@@ -575,11 +575,7 @@ func setDefaults(v *viper.Viper) {
 	v.SetDefault("crawl_queue.retry_backoff_max", 7200)
 	v.SetDefault("crawl_queue.dead_letter_threshold", 6)
 	v.SetDefault("crawl_queue.paywall_threshold", 2)
-	v.SetDefault("crawl_queue.blocked_domains", []string{
-		"wsj.com", "nytimes.com", "reuters.com", "bloomberg.com",
-		"medium.com", "ft.com", "economist.com", "wired.com",
-		"technologyreview.com", "scientificamerican.com",
-	})
+	v.SetDefault("crawl_queue.domain_pending_cap", 5000)
 	v.SetDefault("crawl_queue.stale_timeout_minutes", 10)
 	v.SetDefault("crawl_queue.recovery_interval_minutes", 5)
 	v.SetDefault("crawl_queue.domain_throttle_enabled", true)

@@ -75,6 +75,7 @@ func AutoMigrate(db *gorm.DB) error {
 		&CrawlExtractionRule{},
 		&CrawlRuleTrial{},
 		&CrawlJob{},
+		&CrawlFailure{},
 	); err != nil {
 		return err
 	}

@@ -120,7 +120,12 @@ func (r *CrawlExtractionRuleRepository) CollectFailureSamples(domain string, lim
 		Select("url, error_type, error_message, extractor_used as extractor").
 		Where("source_domain = ? AND status IN ? AND updated_at >= ?",
 			domain,
-			[]string{string(model.CrawlJobDead), string(model.CrawlJobBlocked), string(model.CrawlJobRetrying)},
+			[]string{
+				string(model.CrawlJobDead),
+				string(model.CrawlJobBlocked),
+				string(model.CrawlJobRetrying),
+				string(model.CrawlJobSkipped), // new path archives exhausted retries as "skipped"
+			},
 			since,
 		).
 		Order("updated_at DESC").
