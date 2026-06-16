@@ -239,7 +239,9 @@ func (s *FileIngestionService) IngestURL(req *IngestURLRequest) (*IngestURLRespo
 	if err := s.articleRepo.Create(article); err != nil {
 		// File created but DB record failed - log warning but don't fail
 		s.logIngestion(req.URL, "db_failed", fmt.Sprintf("file created but DB record failed: %v", err))
-	} else {
+	} else if len(tagRecords) > 1 {
+		// 仅当主标签(tagRecords[0])之外还有附加标签时才建附加行；
+		// tagRecords 为空(文章无标签)时 tagRecords[1:] 会触发 slice bounds [1:0] panic，导致进程崩溃重启。
 		s.createAdditionalArticleTagRows(article, tagRecords[1:])
 	}
 
