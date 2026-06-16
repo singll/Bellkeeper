@@ -42,7 +42,7 @@
         },
         "sendBody": true,
         "specifyBody": "json",
-        "jsonBody": "{\n  \"date\": \"{{ $now.setZone($env.BELLKEEPER_TIMEZONE || 'Asia/Shanghai').toFormat('yyyy-MM-dd') }}\",\n  \"dry_run\": false,\n  \"skip_notify\": false\n}"
+        "jsonBody": "{\n  \"dry_run\": false,\n  \"skip_notify\": false\n}"
       },
       "id": "o01-0002",
       "name": "调用日报生成",

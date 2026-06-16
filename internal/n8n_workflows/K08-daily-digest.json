@@ -42,7 +42,7 @@
         },
         "sendBody": true,
         "specifyBody": "json",
-        "jsonBody": "{\n  \"date\": \"{{ $now.setZone($env.BELLKEEPER_TIMEZONE || 'Asia/Shanghai').toFormat('yyyy-MM-dd') }}\"\n}"
+        "jsonBody": "{}"
       },
       "id": "k08-0002",
       "name": "调用资讯摘要生成",
