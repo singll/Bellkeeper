@@ -35,6 +35,9 @@ var (
 
 	// pkb-curate skeleton flags
 	pkbSkeletonTOCFile string
+
+	// pkb-curate fill flags
+	pkbFillPerRun int
 )
 
 func main() {
@@ -156,6 +159,24 @@ and pushed to Matrix for !pkb approve. Use --dry-run to preview.`,
 	pkbProposeCmd.Flags().BoolVar(&pkbDryRun, "dry-run", false, "print the proposal and impact radius without applying, saving, or pushing")
 	pkbProposeCmd.Flags().StringVar(&pkbCfgDir, "pkb-config", "config/pkb", "directory holding domains.yaml + prompts/")
 	pkbCurateCmd.AddCommand(pkbProposeCmd)
+
+	pkbFillCmd := &cobra.Command{
+		Use:   "fill <domain>",
+		Short: "Fill skeleton [缺口] gap nodes into V2-verified atomic cards (top-down)",
+		Long: `fill walks a domain's skeleton (_index.md), takes its [缺口] (gap) nodes top-down
+(breadth-first), and for each: gapfill_model drafts an atomic card and proposes authoritative
+sources; the source is fetched (honoring crawl cooling via next_allowed_at) and verify_model
+checks whether the page supports the card. Cards land with source/verification/confidence
+frontmatter (verified/unverified/llm-only) and are placed back onto the skeleton (缺口 → 已填).
+
+Gated per domain by gap_fill_enabled in domains.yaml. Use --dry-run to list the target gaps.`,
+		Args: cobra.ExactArgs(1),
+		Run:  runPkbFill,
+	}
+	pkbFillCmd.Flags().BoolVar(&pkbDryRun, "dry-run", false, "list the gaps this run would fill without drafting/fetching/writing")
+	pkbFillCmd.Flags().IntVar(&pkbFillPerRun, "per-run", 0, "max gaps to fill this run (0 = use domains.yaml gap_fill_per_run)")
+	pkbFillCmd.Flags().StringVar(&pkbCfgDir, "pkb-config", "config/pkb", "directory holding domains.yaml + prompts/")
+	pkbCurateCmd.AddCommand(pkbFillCmd)
 
 	pkbProposalsCmd := &cobra.Command{
 		Use:   "proposals <list|approve|reject> [id]",
@@ -468,6 +489,48 @@ func runPkbPropose(cmd *cobra.Command, args []string) {
 		DryRun: pkbDryRun,
 	}); err != nil {
 		fmt.Fprintf(os.Stderr, "pkb-curate propose failed: %v\n", err)
+		os.Exit(1)
+	}
+}
+
+func runPkbFill(cmd *cobra.Command, args []string) {
+	cfg, err := config.Load(cfgFile)
+	if err != nil {
+		fmt.Fprintf(os.Stderr, "Failed to load config: %v\n", err)
+		os.Exit(1)
+	}
+	if err := middleware.InitLogger(cfg.Logging.Level); err != nil {
+		fmt.Fprintf(os.Stderr, "Failed to initialize logger: %v\n", err)
+		os.Exit(1)
+	}
+	db, err := model.InitDB(cfg.Database)
+	if err != nil {
+		fmt.Fprintf(os.Stderr, "Failed to connect to database: %v\n", err)
+		os.Exit(1)
+	}
+	articleRepo := repository.NewArticleTagRepository(db)
+	domainRepo := repository.NewCrawlDomainProfileRepository(db) // G3 冷却让路查 next_allowed_at
+	var llmJobs *service.LLMJobQueueService
+	if cfg.LLMJobQueue.Enabled {
+		llmJobRepo := repository.NewLLMJobRepository(db)
+		llmJobs = service.NewLLMJobQueueService(cfg.LLMJobQueue, llmJobRepo, cfg.Classify.LLMProxyURL, cfg.Server.APIKey)
+	}
+	curator, err := pkb.NewCurator(cfg, pkb.Options{
+		ConfigDir:  pkbCfgDir,
+		DryRun:     pkbDryRun,
+		LLMJobs:    llmJobs,
+		DomainRepo: domainRepo,
+	}, articleRepo)
+	if err != nil {
+		fmt.Fprintf(os.Stderr, "Failed to init pkb curator: %v\n", err)
+		os.Exit(1)
+	}
+	if err := curator.RunGapFill(pkb.GapFillOptions{
+		Domain: args[0],
+		DryRun: pkbDryRun,
+		PerRun: pkbFillPerRun,
+	}); err != nil {
+		fmt.Fprintf(os.Stderr, "pkb-curate fill failed: %v\n", err)
 		os.Exit(1)
 	}
 }

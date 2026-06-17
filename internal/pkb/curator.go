@@ -23,6 +23,8 @@ type Options struct {
 	PerRun    int  // 0 = 用 domains.yaml defaults.per_run
 	LLMJobs   *service.LLMJobQueueService
 	Context   context.Context
+	// DomainRepo 供缺口填充 G3 冷却让路查 crawl_domain_profiles.next_allowed_at；仅 fill 子命令注入，其余命令为 nil。
+	DomainRepo *repository.CrawlDomainProfileRepository
 }
 
 // Curator 知识库维护编排器（一次性 CLI，跑完即退，无后台 goroutine）。
@@ -38,6 +40,8 @@ type Curator struct {
 	skeletonPrompt        string
 	matchPrompt           string
 	proposePrompt         string
+	gapfillPrompt         string
+	verifyPrompt          string
 	scorePromptName       string
 	reconstructName       string
 	digestPromptName      string
@@ -45,6 +49,8 @@ type Curator struct {
 	skeletonPromptName    string
 	matchPromptName       string
 	proposePromptName     string
+	gapfillPromptName     string
+	verifyPromptName      string
 	dryRun                bool
 	rescan                bool
 	perRun                int
@@ -54,6 +60,7 @@ type Curator struct {
 	digestCalls           int
 	lastSummary           runSummary
 	llmJobs               *service.LLMJobQueueService
+	domainRepo            *repository.CrawlDomainProfileRepository
 }
 
 // NewCurator 装配 Curator：加载 config/pkb + 构造 HTTP 客户端 + 注入 ArticleTag 仓库（幂等账本）。
@@ -95,6 +102,14 @@ func NewCurator(cfg *config.Config, opts Options, articleRepo *repository.Articl
 	if err != nil {
 		return nil, err
 	}
+	gapfillPrompt, err := loadPromptFile(opts.ConfigDir, registry.Active.Gapfill)
+	if err != nil {
+		return nil, err
+	}
+	verifyPrompt, err := loadPromptFile(opts.ConfigDir, registry.Active.Verify)
+	if err != nil {
+		return nil, err
+	}
 
 	llmBase := cfg.Classify.LLMProxyURL
 	if llmBase == "" {
@@ -131,6 +146,8 @@ func NewCurator(cfg *config.Config, opts Options, articleRepo *repository.Articl
 		skeletonPrompt:        skeletonPrompt,
 		matchPrompt:           matchPrompt,
 		proposePrompt:         proposePrompt,
+		gapfillPrompt:         gapfillPrompt,
+		verifyPrompt:          verifyPrompt,
 		scorePromptName:       registry.Active.Score,
 		reconstructName:       registry.Active.Reconstruct,
 		digestPromptName:      registry.Active.Digest,
@@ -138,11 +155,14 @@ func NewCurator(cfg *config.Config, opts Options, articleRepo *repository.Articl
 		skeletonPromptName:    registry.Active.Skeleton,
 		matchPromptName:       registry.Active.Match,
 		proposePromptName:     registry.Active.SkeletonPropose,
+		gapfillPromptName:     registry.Active.Gapfill,
+		verifyPromptName:      registry.Active.Verify,
 		dryRun:                opts.DryRun,
 		rescan:                opts.Rescan,
 		perRun:                perRun,
 		ctx:                   ctx,
 		llmJobs:               opts.LLMJobs,
+		domainRepo:            opts.DomainRepo,
 	}, nil
 }
 

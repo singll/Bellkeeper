@@ -16,6 +16,8 @@ defaults:
   digest_model: pool-pkb       # 体系化综述用强模型，低频触发
   skeleton_model: pool-pkb     # 骨架生成用顶级推理档（画整棵目标概念树，高价值低频）；空则回退 digest_model
   match_model: pool-summary    # 归位匹配用快强档（卡↔骨架节点判断，高频）；空则回退 score_model
+  gapfill_model: pool-pkb      # 缺口填充起草用顶级推理档（写正经原子卡）；空则回退 skeleton_model
+  verify_model: pool-summary   # 缺口填充 V2 核实用快强档（页面是否支撑卡片，高频判断）；空则回退 match_model
   score_temperature: 0.2           # 快模型允许低温，求稳定 JSON
   reconstruct_temperature: 1.0     # kimi-k2.6 是推理模型，仅接受 temperature=1
   digest_temperature: 1.0          # 与 pool-pkb 默认模型兼容
@@ -27,6 +29,13 @@ defaults:
   topic_moc_enabled: true          # 是否生成主题 MOC（topics/<主题>.md 中间层）
   topic_min_cards: 5               # 一个主题至少含几张卡才单独生成主题 MOC
   skeleton_change_approval_threshold: 5  # 骨架变更影响半径≤此值=小动作快照后自动应用；>此值=大动作走 Matrix !pkb approve 批准
+  # 缺口填充（pkb-curate fill）配额与开关 —— 全配置驱动，改本文件即调方向，无需重编/重启：
+  gap_fill_per_run: 10           # 每领域每轮最多填几个缺口
+  gap_fill_order: breadth        # 自顶向下广度优先：先填根/主题层缺口
+  gap_fill_enabled_all: false    # 一键总开关（true=所有配了 scope 的领域都参与填充）
+  gap_fill_default: false        # 未在 gap_fill_enabled 显式列出的领域默认开/关
+  gap_fill_enabled:              # 每领域开关（优先级最高）—— 打样先只开 programming（C# 落点在编程域 scope）
+    programming: true
   audit_on_run: true               # 每轮 pkb-curate 结束附带网健康度摘要
   llm_token_env: PKB_LLM_TOKEN     # 可选：配置专用 LLM Token 后，PKB 可独立限额/计费；未设置则回退 server.api_key
   budget:

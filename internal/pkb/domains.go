@@ -19,29 +19,36 @@ type Weights struct {
 
 // Defaults 全局默认（可被单领域覆盖）
 type Defaults struct {
-	VaultThreshold                  float64 `yaml:"vault_threshold"`
-	ArchiveThreshold                float64 `yaml:"archive_threshold"`
-	Weights                         Weights `yaml:"weights"`
-	ScoreModel                      string  `yaml:"score_model"`
-	ReconstructModel                string  `yaml:"reconstruct_model"`
-	DigestModel                     string  `yaml:"digest_model"`
-	SkeletonModel                   string  `yaml:"skeleton_model"` // 骨架生成用顶级推理档（高价值低频）；空则回退 digest_model
-	MatchModel                      string  `yaml:"match_model"`    // 归位匹配用快强档（卡↔骨架节点高频判断）；空则回退 score_model
-	ScoreTemperature                float64 `yaml:"score_temperature"`
-	ReconstructTemperature          float64 `yaml:"reconstruct_temperature"`
-	DigestTemperature               float64 `yaml:"digest_temperature"`
-	PerRun                          int     `yaml:"per_run"`
-	ContentTruncate                 int     `yaml:"content_truncate"`
-	LLMTokenEnv                     string  `yaml:"llm_token_env"`
-	MaxCardsPerArticle              int     `yaml:"max_cards_per_article"`
-	EnableSemanticDedup             *bool   `yaml:"enable_semantic_dedup"`
-	MapSnapshotOnRefresh            *bool   `yaml:"map_snapshot_on_refresh"`
-	TopicMocEnabled                 *bool   `yaml:"topic_moc_enabled"`
-	TopicMinCards                   int     `yaml:"topic_min_cards"`
-	SkeletonChangeApprovalThreshold int     `yaml:"skeleton_change_approval_threshold"` // 骨架变更影响半径≤此值=小动作自动应用，>此值=大动作走 Matrix 批准
-	AuditOnRun                      *bool   `yaml:"audit_on_run"`
-	Budget                          Budget  `yaml:"budget"`
-	Retry                           Retry   `yaml:"retry"`
+	VaultThreshold                  float64         `yaml:"vault_threshold"`
+	ArchiveThreshold                float64         `yaml:"archive_threshold"`
+	Weights                         Weights         `yaml:"weights"`
+	ScoreModel                      string          `yaml:"score_model"`
+	ReconstructModel                string          `yaml:"reconstruct_model"`
+	DigestModel                     string          `yaml:"digest_model"`
+	SkeletonModel                   string          `yaml:"skeleton_model"` // 骨架生成用顶级推理档（高价值低频）；空则回退 digest_model
+	MatchModel                      string          `yaml:"match_model"`    // 归位匹配用快强档（卡↔骨架节点高频判断）；空则回退 score_model
+	GapfillModel                    string          `yaml:"gapfill_model"`  // 缺口填充起草用顶级推理档；空则回退 skeleton_model
+	VerifyModel                     string          `yaml:"verify_model"`   // 缺口填充 V2 核实用快强档；空则回退 match_model
+	ScoreTemperature                float64         `yaml:"score_temperature"`
+	ReconstructTemperature          float64         `yaml:"reconstruct_temperature"`
+	DigestTemperature               float64         `yaml:"digest_temperature"`
+	PerRun                          int             `yaml:"per_run"`
+	ContentTruncate                 int             `yaml:"content_truncate"`
+	LLMTokenEnv                     string          `yaml:"llm_token_env"`
+	MaxCardsPerArticle              int             `yaml:"max_cards_per_article"`
+	EnableSemanticDedup             *bool           `yaml:"enable_semantic_dedup"`
+	MapSnapshotOnRefresh            *bool           `yaml:"map_snapshot_on_refresh"`
+	TopicMocEnabled                 *bool           `yaml:"topic_moc_enabled"`
+	TopicMinCards                   int             `yaml:"topic_min_cards"`
+	SkeletonChangeApprovalThreshold int             `yaml:"skeleton_change_approval_threshold"` // 骨架变更影响半径≤此值=小动作自动应用，>此值=大动作走 Matrix 批准
+	GapFillPerRun                   int             `yaml:"gap_fill_per_run"`                   // 缺口填充每领域每轮上限（默认10）
+	GapFillOrder                    string          `yaml:"gap_fill_order"`                     // breadth=自顶向下广度优先（先填根/主题层缺口）
+	GapFillEnabled                  map[string]bool `yaml:"gap_fill_enabled"`                   // 每领域开关（优先级最高，打样先只开一个域）
+	GapFillEnabledAll               *bool           `yaml:"gap_fill_enabled_all"`               // 一键总开关
+	GapFillDefault                  *bool           `yaml:"gap_fill_default"`                   // 未列入 gap_fill_enabled 的新领域默认开/关
+	AuditOnRun                      *bool           `yaml:"audit_on_run"`
+	Budget                          Budget          `yaml:"budget"`
+	Retry                           Retry           `yaml:"retry"`
 }
 
 // Budget 本轮大模型调用护栏。0 表示不限制。
@@ -117,6 +124,12 @@ func LoadDomains(path string) (*DomainsConfig, error) {
 	if d.MatchModel == "" {
 		d.MatchModel = d.ScoreModel
 	}
+	if d.GapfillModel == "" {
+		d.GapfillModel = d.SkeletonModel
+	}
+	if d.VerifyModel == "" {
+		d.VerifyModel = d.MatchModel
+	}
 	if d.ScoreTemperature == 0 {
 		d.ScoreTemperature = 0.2
 	}
@@ -149,6 +162,18 @@ func LoadDomains(path string) (*DomainsConfig, error) {
 	}
 	if d.SkeletonChangeApprovalThreshold <= 0 {
 		d.SkeletonChangeApprovalThreshold = 5
+	}
+	if d.GapFillPerRun <= 0 {
+		d.GapFillPerRun = 10
+	}
+	if d.GapFillOrder == "" {
+		d.GapFillOrder = "breadth"
+	}
+	if d.GapFillEnabledAll == nil {
+		d.GapFillEnabledAll = boolPtr(false)
+	}
+	if d.GapFillDefault == nil {
+		d.GapFillDefault = boolPtr(false)
 	}
 	if d.AuditOnRun == nil {
 		d.AuditOnRun = boolPtr(true)
@@ -265,4 +290,20 @@ func (r *Retry) GetStopRunOnRateLimit() bool {
 		return *r.StopRunOnRateLimit
 	}
 	return true
+}
+
+// GapFillEnabledFor 判断某领域是否开启缺口填充：每领域开关(gap_fill_enabled.<域>)优先；
+// 未显式配置则用总开关(gap_fill_enabled_all)，再退到新领域默认(gap_fill_default)。
+// 全配置驱动——改 domains.yaml 即调，无需重编。
+func (d *Defaults) GapFillEnabledFor(domain string) bool {
+	if v, ok := d.GapFillEnabled[domain]; ok {
+		return v
+	}
+	if d.GapFillEnabledAll != nil && *d.GapFillEnabledAll {
+		return true
+	}
+	if d.GapFillDefault != nil {
+		return *d.GapFillDefault
+	}
+	return false
 }

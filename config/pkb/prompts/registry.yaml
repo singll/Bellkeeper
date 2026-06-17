@@ -9,3 +9,5 @@ active:
   skeleton: skeleton.md
   match: match.md
   skeleton_propose: skeleton_propose.md
+  gapfill: gapfill.md
+  verify: verify.md

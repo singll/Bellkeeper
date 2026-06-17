@@ -22,6 +22,8 @@ type PromptRegistryActive struct {
 	Skeleton        string `yaml:"skeleton"`
 	Match           string `yaml:"match"`
 	SkeletonPropose string `yaml:"skeleton_propose"`
+	Gapfill         string `yaml:"gapfill"`
+	Verify          string `yaml:"verify"`
 }
 
 func LoadPromptRegistry(configDir string) (*PromptRegistry, error) {
@@ -61,6 +63,12 @@ func LoadPromptRegistry(configDir string) (*PromptRegistry, error) {
 	}
 	if reg.Active.SkeletonPropose == "" {
 		reg.Active.SkeletonPropose = "skeleton_propose.md"
+	}
+	if reg.Active.Gapfill == "" {
+		reg.Active.Gapfill = "gapfill.md"
+	}
+	if reg.Active.Verify == "" {
+		reg.Active.Verify = "verify.md"
 	}
 	return reg, nil
 }

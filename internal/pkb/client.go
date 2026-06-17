@@ -276,3 +276,41 @@ func (c *Client) ChatCompletion(model, systemPrompt, userPrompt string, temperat
 		llmclient.ChatOptions{CallerID: "pkb-curate", TaskType: taskType},
 	)
 }
+
+// ExtractResult 是 POST /api/files/extract 返回的正文（ExtractionResult 子集）。
+type ExtractResult struct {
+	Content   string `json:"content"`
+	Title     string `json:"title"`
+	Extractor string `json:"extractor"`
+	Success   bool   `json:"success"`
+	Error     string `json:"error,omitempty"`
+}
+
+// Extract 抓取一个 URL 的正文（POST /api/files/extract），不入库。供缺口填充 V2 核实：
+// 抓 LLM 提议的权威源，交 verify_model 判该页是否支撑卡片（ADR-0004 Phase G / Q7）。
+func (c *Client) Extract(rawURL string) (*ExtractResult, error) {
+	body, err := json.Marshal(map[string]string{"url": rawURL})
+	if err != nil {
+		return nil, err
+	}
+	req, err := c.newReq(http.MethodPost, c.apiBase+"/api/files/extract", bytes.NewReader(body))
+	if err != nil {
+		return nil, err
+	}
+	resp, err := c.httpClient.Do(req)
+	if err != nil {
+		return nil, fmt.Errorf("extract: %w", err)
+	}
+	defer resp.Body.Close() //nolint:errcheck
+	raw, _ := io.ReadAll(resp.Body)
+	if resp.StatusCode >= 400 {
+		return nil, fmt.Errorf("extract returned %d: %s", resp.StatusCode, string(raw))
+	}
+	var out struct {
+		Data ExtractResult `json:"data"`
+	}
+	if err := json.Unmarshal(raw, &out); err != nil {
+		return nil, fmt.Errorf("decode extract response: %w", err)
+	}
+	return &out.Data, nil
+}
