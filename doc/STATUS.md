@@ -63,6 +63,7 @@
 
 | 时间 | 动作 |
 |------|------|
+| 2026-06-17 | PKB 缺口填充 Phase G 落地(ADR-0004 §4):`pkb-curate fill <域>` 自顶向下补骨架缺口——gapfill_model 起草+提议源 → V2 真核实(G3 冷却让路 + Extract 抓取 + verify_model 判支撑) → 落 `source`/`verification`/`confidence` → 复用 Phase F 归位;F1 稳定缺口起草核实 / F2 易变缺口定向爬 reconstruct;新增 `POST /api/files/extract`;低置信卡进 audit;打样开 programming;本地未推,待部署 keeper 自验 |
 | 2026-06-17 | PKB 知识骨架 Phase F 落地(ADR-0004/0005):骨架=结构真相源,`pkb-curate skeleton/match/propose` + digest 每轮确定性归位 + 待归位区 + 影响半径闸(小动作自动应用/大动作 Matrix `!pkb` 审批);本地未推,待部署 keeper 自验 |
 | 2026-06-12 | Phase 9-10 (T5-T8): Agent MVP + 写工具 + API 补齐 + 前端对齐;v1.0.0 收尾 |
 | 2026-06-11 | Matrix 平台改造计划定稿(matrix-platform-overhaul-plan.md,T1-T9) |
