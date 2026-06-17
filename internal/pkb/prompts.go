@@ -25,6 +25,7 @@ type PromptRegistryActive struct {
 	Gapfill         string `yaml:"gapfill"`
 	Verify          string `yaml:"verify"`
 	Feed            string `yaml:"feed"`
+	Promote         string `yaml:"promote"`
 }
 
 func LoadPromptRegistry(configDir string) (*PromptRegistry, error) {
@@ -73,6 +74,9 @@ func LoadPromptRegistry(configDir string) (*PromptRegistry, error) {
 	}
 	if reg.Active.Feed == "" {
 		reg.Active.Feed = "feed.md"
+	}
+	if reg.Active.Promote == "" {
+		reg.Active.Promote = "promote.md"
 	}
 	return reg, nil
 }

@@ -124,3 +124,35 @@ func TestRealDomainsYAMLLoadsFeedConfig(t *testing.T) {
 	assert.True(t, ok, "应有 news 领域")
 	assert.True(t, news.Feed, "news 领域应配 feed: true（资讯库容器）")
 }
+
+// TestParsePromoteCandidates 守住晋升候选解析：CONCEPT/DURABILITY/NOVELTY/EVENT 字段提取 + 去引号。
+func TestParsePromoteCandidates(t *testing.T) {
+	out := "CONCEPT: 分代垃圾回收 | DURABILITY: 9 | NOVELTY: 5 | EVENT: no | REASON: 通用 GC 原理\n" +
+		"CONCEPT: \"Go 1.24 发布\" | DURABILITY: 3 | NOVELTY: 7 | EVENT: yes | REASON: 版本事件\n" +
+		"NONE"
+	cands := parsePromoteCandidates(out)
+	if len(cands) != 2 {
+		t.Fatalf("应解析 2 个候选，实得 %d: %+v", len(cands), cands)
+	}
+	assert.Equal(t, "分代垃圾回收", cands[0].concept)
+	assert.Equal(t, 9, cands[0].durability)
+	assert.Equal(t, 5, cands[0].novelty)
+	assert.False(t, cands[0].event)
+	assert.Equal(t, "Go 1.24 发布", cands[1].concept, "应去掉引号")
+	assert.True(t, cands[1].event, "版本事件应标 event=true")
+}
+
+// TestParsePromoteCandidatesEmpty 守住 NONE / 无 CONCEPT 行 / fence 包裹时返回空。
+func TestParsePromoteCandidatesEmpty(t *testing.T) {
+	assert.Empty(t, parsePromoteCandidates("NONE"))
+	assert.Empty(t, parsePromoteCandidates("```\nNONE\n```"))
+	assert.Empty(t, parsePromoteCandidates("当天没有耐久知识点。"))
+}
+
+// TestShouldPromote 守住晋升把闸（ADR-0005 §5.2）：非事件 && durability≥阈值才晋升。
+func TestShouldPromote(t *testing.T) {
+	assert.True(t, shouldPromote(promoteCandidate{durability: 8, event: false}, 7.0), "耐久且达阈值应晋升")
+	assert.False(t, shouldPromote(promoteCandidate{durability: 9, event: true}, 7.0), "事件性不晋升")
+	assert.False(t, shouldPromote(promoteCandidate{durability: 5, event: false}, 7.0), "durability 不足不晋升")
+	assert.True(t, shouldPromote(promoteCandidate{durability: 7, event: false}, 7.0), "恰好达阈值应晋升")
+}

@@ -40,7 +40,8 @@ var (
 	pkbFillPerRun int
 
 	// pkb-curate feed flags
-	pkbFeedDate string
+	pkbFeedDate      string
+	pkbFeedNoPromote bool
 )
 
 func main() {
@@ -195,6 +196,7 @@ Requires a feed-container domain (feed: true) in domains.yaml. Use --dry-run to 
 	}
 	pkbFeedCmd.Flags().BoolVar(&pkbDryRun, "dry-run", false, "list the feed items this run would summarize without calling the LLM or writing files")
 	pkbFeedCmd.Flags().StringVar(&pkbFeedDate, "date", "", "target date YYYY-MM-DD (default: today)")
+	pkbFeedCmd.Flags().BoolVar(&pkbFeedNoPromote, "no-promote", false, "only build the feed archive; skip promoting durable knowledge into the knowledge base")
 	pkbFeedCmd.Flags().StringVar(&pkbCfgDir, "pkb-config", "config/pkb", "directory holding domains.yaml + prompts/")
 	pkbCurateCmd.AddCommand(pkbFeedCmd)
 
@@ -571,23 +573,26 @@ func runPkbFeed(cmd *cobra.Command, args []string) {
 		os.Exit(1)
 	}
 	articleRepo := repository.NewArticleTagRepository(db)
+	domainRepo := repository.NewCrawlDomainProfileRepository(db) // 晋升复用 fillOneGap，V2 核实查 next_allowed_at 冷却让路
 	var llmJobs *service.LLMJobQueueService
 	if cfg.LLMJobQueue.Enabled {
 		llmJobRepo := repository.NewLLMJobRepository(db)
 		llmJobs = service.NewLLMJobQueueService(cfg.LLMJobQueue, llmJobRepo, cfg.Classify.LLMProxyURL, cfg.Server.APIKey)
 	}
 	curator, err := pkb.NewCurator(cfg, pkb.Options{
-		ConfigDir: pkbCfgDir,
-		DryRun:    pkbDryRun,
-		LLMJobs:   llmJobs,
+		ConfigDir:  pkbCfgDir,
+		DryRun:     pkbDryRun,
+		LLMJobs:    llmJobs,
+		DomainRepo: domainRepo,
 	}, articleRepo)
 	if err != nil {
 		fmt.Fprintf(os.Stderr, "Failed to init pkb curator: %v\n", err)
 		os.Exit(1)
 	}
 	if err := curator.RunFeed(pkb.FeedOptions{
-		Date:   pkbFeedDate,
-		DryRun: pkbDryRun,
+		Date:        pkbFeedDate,
+		DryRun:      pkbDryRun,
+		SkipPromote: pkbFeedNoPromote,
 	}); err != nil {
 		fmt.Fprintf(os.Stderr, "pkb-curate feed failed: %v\n", err)
 		os.Exit(1)

@@ -37,8 +37,10 @@ defaults:
   gap_fill_default: false        # 未在 gap_fill_enabled 显式列出的领域默认开/关
   gap_fill_enabled:              # 每领域开关（优先级最高）—— 打样先只开 programming（C# 落点在编程域 scope）
     programming: true
-  # 资讯库（pkb-curate feed）—— ADR-0005 §5.1：当日资讯类文章分领域分日存档，不进知识骨架/不存独立卡：
+  # 资讯库（pkb-curate feed）—— ADR-0005 §5：当日资讯类文章分领域分日存档，不进知识骨架/不存独立卡：
   feed_content_types: [news, release]  # 哪些 content_type(pkb_type) 视为「资讯」纳入资讯库综述
+  promote_enabled: true                # 晋升闸总开关：耐久知识点(原理/方法/模式,非事件)晋升为知识库卡(复用缺口填充同一 V2 核实)
+  promote_durability_min: 7.0          # 晋升所需最低 durability；事件性资讯一律不晋升、留资讯库自然过期
   audit_on_run: true               # 每轮 pkb-curate 结束附带网健康度摘要
   llm_token_env: PKB_LLM_TOKEN     # 可选：配置专用 LLM Token 后，PKB 可独立限额/计费；未设置则回退 server.api_key
   budget:

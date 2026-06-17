@@ -5,16 +5,18 @@ import (
 	"os"
 	"path/filepath"
 	"sort"
+	"strconv"
 	"strings"
 	"time"
 
 	"github.com/singll/bellkeeper/internal/pkg/textutil"
 )
 
-// FeedOptions 控制一次资讯库生成（资讯综述 + 落盘，ADR-0005 §5.1）。
+// FeedOptions 控制一次资讯库生成（资讯综述 + 落盘 + 晋升闸，ADR-0005 §5）。
 type FeedOptions struct {
-	Date   string // YYYY-MM-DD，空=今天
-	DryRun bool
+	Date        string // YYYY-MM-DD，空=今天
+	DryRun      bool
+	SkipPromote bool // 本轮只生成资讯库存档，跳过晋升闸（耐久知识点→知识库卡）
 }
 
 // feedItem 当日一条时效资讯（从 raw/archive 文件 frontmatter 采集，不存独立原子卡）。
@@ -62,7 +64,7 @@ func (c *Curator) RunFeed(opts FeedOptions) error {
 	}
 	sort.Strings(domainNames)
 
-	var written int
+	var written, promotedTotal int
 	for _, dn := range domainNames {
 		group := byDomain[dn]
 		domain, ok := c.domains.FindDomain(dn)
@@ -88,13 +90,25 @@ func (c *Curator) RunFeed(opts FeedOptions) error {
 		}
 		fmt.Printf("    → %s\n", dst)
 		written++
+
+		// 晋升闸（ADR-0005 §5.2）：从当日资讯识别耐久知识点，走缺口填充同一 V2 路径晋升为知识库卡。
+		// 仅对知识领域晋升（feed 容器领域的资讯多为事件性、无对应知识骨架，不晋升）。
+		if !domain.Feed && c.domains.Defaults.GetPromoteEnabled() && !opts.SkipPromote {
+			promotedTotal += c.promoteFromFeed(domain, date, group)
+		}
 	}
 
 	if opts.DryRun {
-		fmt.Printf("\n[pkb-feed] DRY-RUN：仅列出将综述的资讯条目，不调用 LLM/不写盘\n")
+		fmt.Printf("\n[pkb-feed] DRY-RUN：仅列出将综述/晋升的资讯条目，不调用 LLM/不抓取/不写盘\n")
 		return nil
 	}
-	fmt.Printf("\n[pkb-feed] 完成：生成 %d 个领域的资讯存档\n", written)
+	if promotedTotal > 0 {
+		fmt.Printf("\n[pkb-feed] 晋升 %d 个耐久知识点入知识库，触发 rebuild 对齐索引...\n", promotedTotal)
+		if err := c.client.Rebuild(); err != nil {
+			fmt.Printf("[pkb-feed] ⚠ rebuild 失败（卡已落盘，可稍后手动 rebuild）: %v\n", err)
+		}
+	}
+	fmt.Printf("\n[pkb-feed] 完成：生成 %d 个领域的资讯存档，晋升 %d 个知识点\n", written, promotedTotal)
 	return nil
 }
 
@@ -247,4 +261,135 @@ func (c *Curator) writeFeedArchive(feedRoot string, domain Domain, date, summary
 		return "", fmt.Errorf("rename: %w", err)
 	}
 	return dst, nil
+}
+
+type promoteCandidate struct {
+	concept    string
+	durability int
+	novelty    int
+	event      bool
+}
+
+// promoteFromFeed 晋升闸（ADR-0005 §5.2）：promote_model 从当日资讯识别耐久知识点候选，过闸
+// （非事件 && durability≥阈值）后，每个知识点复用缺口填充 fillOneGap 走同一 V2 路径（起草→真抓取
+// 核实→落卡，禁止旁路核实）晋升为知识库正经原子卡并归位到骨架。返回晋升成功数。
+func (c *Curator) promoteFromFeed(domain Domain, date string, items []feedItem) int {
+	candidates, err := c.identifyDurableKnowledge(domain, date, items)
+	if err != nil {
+		fmt.Printf("[pkb-feed] ⚠ %s 晋升判定失败（跳过晋升，资讯存档不受影响）: %v\n", domain.Display, err)
+		return 0
+	}
+	if len(candidates) == 0 {
+		return 0
+	}
+	dir := filepath.Join(c.basePath, domain.VaultSubpath)
+	if err := os.MkdirAll(dir, 0755); err != nil {
+		fmt.Printf("[pkb-feed] ⚠ %s 晋升 mkdir 失败（跳过）: %v\n", domain.Display, err)
+		return 0
+	}
+	durMin := c.domains.Defaults.PromoteDurabilityMin
+	var promoted int
+	for _, cand := range candidates {
+		if !shouldPromote(cand, durMin) {
+			fmt.Printf("    ⏭️ 不晋升「%s」（event=%v durability=%d，阈值%.0f；事件性/价值不足，留资讯库自然过期）\n",
+				cand.concept, cand.event, cand.durability, durMin)
+			continue
+		}
+		outcome, err := c.fillOneGap(domain, gapNode{Concept: cand.concept}, dir)
+		if err != nil {
+			fmt.Printf("    ✗ 晋升「%s」失败（跳过，不中断）: %v\n", cand.concept, err)
+			continue
+		}
+		if outcome.skipped != "" {
+			fmt.Printf("    ⏭️ 晋升「%s」跳过：%s\n", cand.concept, outcome.skipped)
+			continue
+		}
+		if outcome.written {
+			markFeedPromoted(filepath.Join(dir, sanitizeFilename(cand.concept)+".md"), date)
+			promoted++
+			fmt.Printf("    ⭐ 晋升「%s」入知识库 verification=%s confidence=%s\n",
+				cand.concept, outcome.verification, outcome.confidence)
+		}
+	}
+	if promoted > 0 {
+		// 复用 Phase F 归位把新晋升卡挂回骨架（缺口→已填，或进待归位待后续 propose 回流）。
+		if err := c.placeCardsOntoSkeleton(domain, false, true); err != nil {
+			fmt.Printf("[pkb-feed] ⚠ %s 晋升后归位失败（卡已落盘，下轮 digest/match 重试）: %v\n", domain.Display, err)
+		}
+	}
+	return promoted
+}
+
+// identifyDurableKnowledge 调 promote_model 从当日资讯条目识别耐久知识点候选（事件性资讯标 event=yes 会被过滤）。
+func (c *Curator) identifyDurableKnowledge(domain Domain, date string, items []feedItem) ([]promoteCandidate, error) {
+	prompt := c.promotePrompt
+	prompt = strings.ReplaceAll(prompt, "{{domain_display}}", domain.Display)
+	prompt = strings.ReplaceAll(prompt, "{{date}}", date)
+	prompt = strings.ReplaceAll(prompt, "{{items}}", renderFeedItems(items))
+	out, err := c.chatCompletionWithRetry(c.domains.Defaults.PromoteModel, "", prompt,
+		c.domains.Defaults.ScoreTemperature, "summary")
+	if err != nil {
+		return nil, err
+	}
+	return parsePromoteCandidates(out), nil
+}
+
+// parsePromoteCandidates 解析 promote_model 输出：每行
+// `CONCEPT: x | DURABILITY: n | NOVELTY: n | EVENT: yes|no | REASON: ...`；NONE / 无 CONCEPT 的行忽略。
+func parsePromoteCandidates(out string) []promoteCandidate {
+	var cands []promoteCandidate
+	for _, line := range strings.Split(textutil.StripFence(out), "\n") {
+		t := strings.TrimSpace(line)
+		if t == "" || strings.EqualFold(t, "NONE") {
+			continue
+		}
+		if !strings.Contains(strings.ToUpper(t), "CONCEPT:") {
+			continue
+		}
+		fields := map[string]string{}
+		for _, part := range strings.Split(t, "|") {
+			kv := strings.SplitN(part, ":", 2)
+			if len(kv) != 2 {
+				continue
+			}
+			fields[strings.ToUpper(strings.TrimSpace(kv[0]))] = strings.TrimSpace(kv[1])
+		}
+		concept := strings.Trim(fields["CONCEPT"], `"'`)
+		if concept == "" {
+			continue
+		}
+		cands = append(cands, promoteCandidate{
+			concept:    concept,
+			durability: atoiSafe(fields["DURABILITY"]),
+			novelty:    atoiSafe(fields["NOVELTY"]),
+			event:      strings.HasPrefix(strings.ToLower(fields["EVENT"]), "y"),
+		})
+	}
+	return cands
+}
+
+// shouldPromote 晋升把闸（ADR-0005 §5.2）：非事件性且 durability 达阈值的耐久知识点才晋升；
+// 事件性资讯（event=true）一律不晋升，留资讯库自然过期。
+func shouldPromote(cand promoteCandidate, durabilityMin float64) bool {
+	return !cand.event && float64(cand.durability) >= durabilityMin
+}
+
+func atoiSafe(s string) int {
+	n, _ := strconv.Atoi(strings.TrimSpace(s))
+	return n
+}
+
+// markFeedPromoted 给晋升落盘的知识卡补晋升来源标记（区别于普通缺口填充/重构卡）。
+// 卡路径不可预测时（如核实降级走 F2 多卡改名）静默跳过，不影响已落卡。
+func markFeedPromoted(path, date string) {
+	data, err := os.ReadFile(path)
+	if err != nil {
+		return
+	}
+	updated := upsertFrontmatter(string(data), map[string]string{
+		"pkb_promoted":  "true",
+		"promoted_from": "feed",
+		"promoted_date": date,
+	})
+	_ = os.WriteFile(path, []byte(updated), 0644)
 }

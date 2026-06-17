@@ -25,12 +25,14 @@ type Defaults struct {
 	ScoreModel                      string          `yaml:"score_model"`
 	ReconstructModel                string          `yaml:"reconstruct_model"`
 	DigestModel                     string          `yaml:"digest_model"`
-	SkeletonModel                   string          `yaml:"skeleton_model"`     // 骨架生成用顶级推理档（高价值低频）；空则回退 digest_model
-	MatchModel                      string          `yaml:"match_model"`        // 归位匹配用快强档（卡↔骨架节点高频判断）；空则回退 score_model
-	GapfillModel                    string          `yaml:"gapfill_model"`      // 缺口填充起草用顶级推理档；空则回退 skeleton_model
-	VerifyModel                     string          `yaml:"verify_model"`       // 缺口填充 V2 核实用快强档；空则回退 match_model
-	PromoteModel                    string          `yaml:"promote_model"`      // 资讯综述/晋升判定用快强档；空则回退 match_model
-	FeedContentTypes                []string        `yaml:"feed_content_types"` // 视为「资讯」的 content_type(pkb_type)，默认 [news, release]
+	SkeletonModel                   string          `yaml:"skeleton_model"`         // 骨架生成用顶级推理档（高价值低频）；空则回退 digest_model
+	MatchModel                      string          `yaml:"match_model"`            // 归位匹配用快强档（卡↔骨架节点高频判断）；空则回退 score_model
+	GapfillModel                    string          `yaml:"gapfill_model"`          // 缺口填充起草用顶级推理档；空则回退 skeleton_model
+	VerifyModel                     string          `yaml:"verify_model"`           // 缺口填充 V2 核实用快强档；空则回退 match_model
+	PromoteModel                    string          `yaml:"promote_model"`          // 资讯综述/晋升判定用快强档；空则回退 match_model
+	FeedContentTypes                []string        `yaml:"feed_content_types"`     // 视为「资讯」的 content_type(pkb_type)，默认 [news, release]
+	PromoteEnabled                  *bool           `yaml:"promote_enabled"`        // 资讯晋升闸总开关（耐久知识点→知识库卡，走同一 V2 路径）；默认 true
+	PromoteDurabilityMin            float64         `yaml:"promote_durability_min"` // 晋升所需最低 durability（事件性一律不晋升）；默认 7.0
 	ScoreTemperature                float64         `yaml:"score_temperature"`
 	ReconstructTemperature          float64         `yaml:"reconstruct_temperature"`
 	DigestTemperature               float64         `yaml:"digest_temperature"`
@@ -141,6 +143,12 @@ func LoadDomains(path string) (*DomainsConfig, error) {
 	}
 	if len(d.FeedContentTypes) == 0 {
 		d.FeedContentTypes = []string{"news", "release"}
+	}
+	if d.PromoteEnabled == nil {
+		d.PromoteEnabled = boolPtr(true)
+	}
+	if d.PromoteDurabilityMin <= 0 {
+		d.PromoteDurabilityMin = 7.0
 	}
 	if d.ScoreTemperature == 0 {
 		d.ScoreTemperature = 0.2
@@ -293,6 +301,14 @@ func (d *Defaults) GetTopicMocEnabled() bool {
 func (d *Defaults) GetAuditOnRun() bool {
 	if d.AuditOnRun != nil {
 		return *d.AuditOnRun
+	}
+	return true
+}
+
+// GetPromoteEnabled 资讯晋升闸总开关（默认开）：关掉则 feed 只生成资讯库存档、不晋升耐久知识点。
+func (d *Defaults) GetPromoteEnabled() bool {
+	if d.PromoteEnabled != nil {
+		return *d.PromoteEnabled
 	}
 	return true
 }
