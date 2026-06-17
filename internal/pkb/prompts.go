@@ -15,12 +15,13 @@ type PromptRegistry struct {
 }
 
 type PromptRegistryActive struct {
-	Score       string `yaml:"score"`
-	Reconstruct string `yaml:"reconstruct"`
-	Digest      string `yaml:"digest"`
-	DigestTopic string `yaml:"digest_topic"`
-	Skeleton    string `yaml:"skeleton"`
-	Match       string `yaml:"match"`
+	Score           string `yaml:"score"`
+	Reconstruct     string `yaml:"reconstruct"`
+	Digest          string `yaml:"digest"`
+	DigestTopic     string `yaml:"digest_topic"`
+	Skeleton        string `yaml:"skeleton"`
+	Match           string `yaml:"match"`
+	SkeletonPropose string `yaml:"skeleton_propose"`
 }
 
 func LoadPromptRegistry(configDir string) (*PromptRegistry, error) {
@@ -57,6 +58,9 @@ func LoadPromptRegistry(configDir string) (*PromptRegistry, error) {
 	}
 	if reg.Active.Match == "" {
 		reg.Active.Match = "match.md"
+	}
+	if reg.Active.SkeletonPropose == "" {
+		reg.Active.SkeletonPropose = "skeleton_propose.md"
 	}
 	return reg, nil
 }

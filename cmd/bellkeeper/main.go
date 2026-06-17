@@ -142,6 +142,34 @@ The domain must already have a skeleton (run skeleton first). Use --dry-run to p
 	pkbMatchCmd.Flags().StringVar(&pkbCfgDir, "pkb-config", "config/pkb", "directory holding domains.yaml + prompts/")
 	pkbCurateCmd.AddCommand(pkbMatchCmd)
 
+	pkbProposeCmd := &cobra.Command{
+		Use:   "propose <domain>",
+		Short: "Propose skeleton structure changes from a domain's waitlist; gate by impact radius",
+		Long: `propose reads a domain's waitlist (_待归位.md) and current skeleton, asks the
+skeleton_model to propose structure changes (add/delete/merge/restructure), then gates
+by impact radius (cards touched): small changes (<= skeleton_change_approval_threshold)
+are snapshotted and applied automatically; large changes are saved as pending proposals
+and pushed to Matrix for !pkb approve. Use --dry-run to preview.`,
+		Args: cobra.ExactArgs(1),
+		Run:  runPkbPropose,
+	}
+	pkbProposeCmd.Flags().BoolVar(&pkbDryRun, "dry-run", false, "print the proposal and impact radius without applying, saving, or pushing")
+	pkbProposeCmd.Flags().StringVar(&pkbCfgDir, "pkb-config", "config/pkb", "directory holding domains.yaml + prompts/")
+	pkbCurateCmd.AddCommand(pkbProposeCmd)
+
+	pkbProposalsCmd := &cobra.Command{
+		Use:   "proposals <list|approve|reject> [id]",
+		Short: "List, approve, or reject pending skeleton-change proposals (transitional approval gate)",
+		Long: `proposals manages pending large-impact skeleton changes:
+  proposals list            — list all pending proposals
+  proposals approve <id>    — apply a proposal (snapshot + replace knowledge tree)
+  proposals reject <id>     — discard a proposal (skeleton unchanged)
+These are the CLI mirror of the Matrix !pkb approve/reject commands.`,
+		Args: cobra.MinimumNArgs(1),
+		Run:  runPkbProposals,
+	}
+	pkbCurateCmd.AddCommand(pkbProposalsCmd)
+
 	rootCmd.AddCommand(serveCmd, versionCmd, migrateCmd, pkbCurateCmd)
 
 	if err := rootCmd.Execute(); err != nil {
@@ -401,6 +429,94 @@ func runPkbMatch(cmd *cobra.Command, args []string) {
 		DryRun: pkbDryRun,
 	}); err != nil {
 		fmt.Fprintf(os.Stderr, "pkb-curate match failed: %v\n", err)
+		os.Exit(1)
+	}
+}
+
+func runPkbPropose(cmd *cobra.Command, args []string) {
+	cfg, err := config.Load(cfgFile)
+	if err != nil {
+		fmt.Fprintf(os.Stderr, "Failed to load config: %v\n", err)
+		os.Exit(1)
+	}
+	if err := middleware.InitLogger(cfg.Logging.Level); err != nil {
+		fmt.Fprintf(os.Stderr, "Failed to initialize logger: %v\n", err)
+		os.Exit(1)
+	}
+	db, err := model.InitDB(cfg.Database)
+	if err != nil {
+		fmt.Fprintf(os.Stderr, "Failed to connect to database: %v\n", err)
+		os.Exit(1)
+	}
+	articleRepo := repository.NewArticleTagRepository(db)
+	var llmJobs *service.LLMJobQueueService
+	if cfg.LLMJobQueue.Enabled {
+		llmJobRepo := repository.NewLLMJobRepository(db)
+		llmJobs = service.NewLLMJobQueueService(cfg.LLMJobQueue, llmJobRepo, cfg.Classify.LLMProxyURL, cfg.Server.APIKey)
+	}
+	curator, err := pkb.NewCurator(cfg, pkb.Options{
+		ConfigDir: pkbCfgDir,
+		DryRun:    pkbDryRun,
+		LLMJobs:   llmJobs,
+	}, articleRepo)
+	if err != nil {
+		fmt.Fprintf(os.Stderr, "Failed to init pkb curator: %v\n", err)
+		os.Exit(1)
+	}
+	if err := curator.RunPropose(pkb.ProposeOptions{
+		Domain: args[0],
+		DryRun: pkbDryRun,
+	}); err != nil {
+		fmt.Fprintf(os.Stderr, "pkb-curate propose failed: %v\n", err)
+		os.Exit(1)
+	}
+}
+
+func runPkbProposals(cmd *cobra.Command, args []string) {
+	cfg, err := config.Load(cfgFile)
+	if err != nil {
+		fmt.Fprintf(os.Stderr, "Failed to load config: %v\n", err)
+		os.Exit(1)
+	}
+	basePath := cfg.Knowledge.BasePath
+	switch args[0] {
+	case "list":
+		props, err := pkb.ListPendingProposals(basePath)
+		if err != nil {
+			fmt.Fprintf(os.Stderr, "list proposals failed: %v\n", err)
+			os.Exit(1)
+		}
+		if len(props) == 0 {
+			fmt.Println("无待批骨架提议")
+			return
+		}
+		for _, p := range props {
+			fmt.Printf("- %s [%s 影响半径=%d] %s — %s\n", p.ID, p.Action, p.ImpactRadius, p.Domain, p.Summary)
+		}
+	case "approve":
+		if len(args) < 2 {
+			fmt.Fprintln(os.Stderr, "用法: pkb-curate proposals approve <id>")
+			os.Exit(1)
+		}
+		msg, err := pkb.ApplySkeletonProposal(basePath, args[1])
+		if err != nil {
+			fmt.Fprintf(os.Stderr, "approve failed: %v\n", err)
+			os.Exit(1)
+		}
+		fmt.Println(msg)
+	case "reject":
+		if len(args) < 2 {
+			fmt.Fprintln(os.Stderr, "用法: pkb-curate proposals reject <id>")
+			os.Exit(1)
+		}
+		msg, err := pkb.RejectSkeletonProposal(basePath, args[1])
+		if err != nil {
+			fmt.Fprintf(os.Stderr, "reject failed: %v\n", err)
+			os.Exit(1)
+		}
+		fmt.Println(msg)
+	default:
+		fmt.Fprintf(os.Stderr, "未知子动作 %q（支持 list|approve|reject）\n", args[0])
 		os.Exit(1)
 	}
 }

@@ -224,6 +224,34 @@ func (c *Client) Rebuild() error {
 	return nil
 }
 
+// NotifyMatrix 推送一条文本通知到 Matrix（POST /api/matrix/notify，alerts 频道）。
+// 供骨架大动作待批提议触达用户；失败由调用方降级处理（提议已落盘）。
+func (c *Client) NotifyMatrix(message string) error {
+	payload := map[string]string{
+		"channel":      "alerts",
+		"message":      message,
+		"message_type": "text",
+	}
+	body, err := json.Marshal(payload)
+	if err != nil {
+		return err
+	}
+	req, err := c.newReq(http.MethodPost, c.apiBase+"/api/matrix/notify", bytes.NewReader(body))
+	if err != nil {
+		return err
+	}
+	resp, err := c.httpClient.Do(req)
+	if err != nil {
+		return fmt.Errorf("notify matrix: %w", err)
+	}
+	defer resp.Body.Close() //nolint:errcheck
+	raw, _ := io.ReadAll(resp.Body)
+	if resp.StatusCode >= 400 {
+		return fmt.Errorf("matrix notify returned %d: %s", resp.StatusCode, string(raw))
+	}
+	return nil
+}
+
 // ChatCompletion 调 LLM Proxy（POST {llmBase}/chat/completions），返回 assistant 文本内容。
 func (c *Client) ChatCompletion(model, systemPrompt, userPrompt string, temperature float64, taskType string) (string, error) {
 	messages := make([]map[string]string, 0, 2)

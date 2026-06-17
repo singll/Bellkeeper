@@ -19,28 +19,29 @@ type Weights struct {
 
 // Defaults 全局默认（可被单领域覆盖）
 type Defaults struct {
-	VaultThreshold         float64 `yaml:"vault_threshold"`
-	ArchiveThreshold       float64 `yaml:"archive_threshold"`
-	Weights                Weights `yaml:"weights"`
-	ScoreModel             string  `yaml:"score_model"`
-	ReconstructModel       string  `yaml:"reconstruct_model"`
-	DigestModel            string  `yaml:"digest_model"`
-	SkeletonModel          string  `yaml:"skeleton_model"` // 骨架生成用顶级推理档（高价值低频）；空则回退 digest_model
-	MatchModel             string  `yaml:"match_model"`    // 归位匹配用快强档（卡↔骨架节点高频判断）；空则回退 score_model
-	ScoreTemperature       float64 `yaml:"score_temperature"`
-	ReconstructTemperature float64 `yaml:"reconstruct_temperature"`
-	DigestTemperature      float64 `yaml:"digest_temperature"`
-	PerRun                 int     `yaml:"per_run"`
-	ContentTruncate        int     `yaml:"content_truncate"`
-	LLMTokenEnv            string  `yaml:"llm_token_env"`
-	MaxCardsPerArticle     int     `yaml:"max_cards_per_article"`
-	EnableSemanticDedup    *bool   `yaml:"enable_semantic_dedup"`
-	MapSnapshotOnRefresh   *bool   `yaml:"map_snapshot_on_refresh"`
-	TopicMocEnabled        *bool   `yaml:"topic_moc_enabled"`
-	TopicMinCards          int     `yaml:"topic_min_cards"`
-	AuditOnRun             *bool   `yaml:"audit_on_run"`
-	Budget                 Budget  `yaml:"budget"`
-	Retry                  Retry   `yaml:"retry"`
+	VaultThreshold                  float64 `yaml:"vault_threshold"`
+	ArchiveThreshold                float64 `yaml:"archive_threshold"`
+	Weights                         Weights `yaml:"weights"`
+	ScoreModel                      string  `yaml:"score_model"`
+	ReconstructModel                string  `yaml:"reconstruct_model"`
+	DigestModel                     string  `yaml:"digest_model"`
+	SkeletonModel                   string  `yaml:"skeleton_model"` // 骨架生成用顶级推理档（高价值低频）；空则回退 digest_model
+	MatchModel                      string  `yaml:"match_model"`    // 归位匹配用快强档（卡↔骨架节点高频判断）；空则回退 score_model
+	ScoreTemperature                float64 `yaml:"score_temperature"`
+	ReconstructTemperature          float64 `yaml:"reconstruct_temperature"`
+	DigestTemperature               float64 `yaml:"digest_temperature"`
+	PerRun                          int     `yaml:"per_run"`
+	ContentTruncate                 int     `yaml:"content_truncate"`
+	LLMTokenEnv                     string  `yaml:"llm_token_env"`
+	MaxCardsPerArticle              int     `yaml:"max_cards_per_article"`
+	EnableSemanticDedup             *bool   `yaml:"enable_semantic_dedup"`
+	MapSnapshotOnRefresh            *bool   `yaml:"map_snapshot_on_refresh"`
+	TopicMocEnabled                 *bool   `yaml:"topic_moc_enabled"`
+	TopicMinCards                   int     `yaml:"topic_min_cards"`
+	SkeletonChangeApprovalThreshold int     `yaml:"skeleton_change_approval_threshold"` // 骨架变更影响半径≤此值=小动作自动应用，>此值=大动作走 Matrix 批准
+	AuditOnRun                      *bool   `yaml:"audit_on_run"`
+	Budget                          Budget  `yaml:"budget"`
+	Retry                           Retry   `yaml:"retry"`
 }
 
 // Budget 本轮大模型调用护栏。0 表示不限制。
@@ -145,6 +146,9 @@ func LoadDomains(path string) (*DomainsConfig, error) {
 	}
 	if d.TopicMinCards <= 0 {
 		d.TopicMinCards = 5
+	}
+	if d.SkeletonChangeApprovalThreshold <= 0 {
+		d.SkeletonChangeApprovalThreshold = 5
 	}
 	if d.AuditOnRun == nil {
 		d.AuditOnRun = boolPtr(true)

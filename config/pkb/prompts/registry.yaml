@@ -8,3 +8,4 @@ active:
   digest_topic: digest.topic.md
   skeleton: skeleton.md
   match: match.md
+  skeleton_propose: skeleton_propose.md

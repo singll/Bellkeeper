@@ -6,6 +6,7 @@ import (
 	"net/http"
 	"os"
 	"os/signal"
+	"strings"
 	"syscall"
 	"time"
 
@@ -13,6 +14,7 @@ import (
 	"github.com/singll/bellkeeper/internal/config"
 	"github.com/singll/bellkeeper/internal/handler"
 	"github.com/singll/bellkeeper/internal/matrix/agent"
+	"github.com/singll/bellkeeper/internal/matrix/command"
 	"github.com/singll/bellkeeper/internal/matrix/gateway"
 	"github.com/singll/bellkeeper/internal/matrix/infra"
 	"github.com/singll/bellkeeper/internal/matrix/policy"
@@ -266,6 +268,31 @@ func (a *App) setupMatrixGateway() error {
 
 	if a.services.Health != nil {
 		commandSvc.SetHealthChecker(a.services.Health)
+	}
+
+	// 注册 !pkb 骨架提议审批 handler（ADR-0004 过渡审批闸）。
+	// 用闭包注入 pkb 包级函数，避开 command → pkb → service → command 的 import 环。
+	if basePath := a.cfg.Knowledge.BasePath; basePath != "" {
+		commandSvc.GetRouter().RegisterHandler(command.NewPKBProposalHandler(command.PKBProposalActions{
+			List: func() (string, error) {
+				props, err := pkb.ListPendingProposals(basePath)
+				if err != nil {
+					return "", err
+				}
+				if len(props) == 0 {
+					return "无待批骨架提议", nil
+				}
+				var b strings.Builder
+				b.WriteString("待批骨架提议：\n")
+				for _, p := range props {
+					b.WriteString(fmt.Sprintf("- %s [%s 影响半径=%d] %s — %s\n", p.ID, p.Action, p.ImpactRadius, p.Domain, p.Summary))
+				}
+				return b.String(), nil
+			},
+			Approve: func(id string) (string, error) { return pkb.ApplySkeletonProposal(basePath, id) },
+			Reject:  func(id string) (string, error) { return pkb.RejectSkeletonProposal(basePath, id) },
+		}))
+		a.logger.Info("[Matrix] registered !pkb skeleton-proposal handler")
 	}
 
 	a.matrixSyncLoop.SetCommandService(commandSvc)

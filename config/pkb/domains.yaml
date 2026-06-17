@@ -26,6 +26,7 @@ defaults:
   map_snapshot_on_refresh: true    # refresh 模式下是否在刷新前保存快照
   topic_moc_enabled: true          # 是否生成主题 MOC（topics/<主题>.md 中间层）
   topic_min_cards: 5               # 一个主题至少含几张卡才单独生成主题 MOC
+  skeleton_change_approval_threshold: 5  # 骨架变更影响半径≤此值=小动作快照后自动应用；>此值=大动作走 Matrix !pkb approve 批准
   audit_on_run: true               # 每轮 pkb-curate 结束附带网健康度摘要
   llm_token_env: PKB_LLM_TOKEN     # 可选：配置专用 LLM Token 后，PKB 可独立限额/计费；未设置则回退 server.api_key
   budget:

@@ -219,3 +219,126 @@ func TestPlaceCardsOntoSkeletonNoOpEmptyTree(t *testing.T) {
 		t.Errorf("无骨架节点应 no-op 返回 nil，实际: %v", err)
 	}
 }
+
+func TestExtractAndReplaceSection(t *testing.T) {
+	tree := extractSection(sampleSkeletonOutput, "## 知识树")
+	if !strings.Contains(tree, "- 语言基础 [缺口]") || strings.Contains(tree, "## 核心脉络") {
+		t.Errorf("extractSection 未正确截取知识树正文:\n%s", tree)
+	}
+	newTree := "- 全新节点A [缺口]\n- 全新节点B [缺口]"
+	out := replaceSection(sampleSkeletonOutput, "## 知识树", newTree)
+	if !strings.Contains(out, "- 全新节点A [缺口]") {
+		t.Error("replaceSection 未写入新树")
+	}
+	if strings.Contains(out, "- 语言基础 [缺口]") {
+		t.Error("replaceSection 未清除旧树")
+	}
+	if !strings.Contains(out, "## 核心脉络") || !strings.Contains(out, "type: pkb_map") {
+		t.Error("replaceSection 破坏了其它章节/frontmatter")
+	}
+	// 找不到的标题原样返回
+	if got := replaceSection(sampleSkeletonOutput, "## 不存在", "x"); got != sampleSkeletonOutput {
+		t.Error("replaceSection 对不存在标题应原样返回")
+	}
+}
+
+func TestComputeImpactRadius(t *testing.T) {
+	// 当前骨架：泛型挂 2 卡、类型系统挂 1 卡
+	current := "## 知识树\n- 语言基础 [缺口]\n  - 类型系统 [[卡A]]\n  - 泛型 [[卡B]], [[卡C]]\n\n## 核心脉络\nx\n"
+	// 纯加节点：现有节点都在 → 影响半径 0
+	addOnly := "- 语言基础 [缺口]\n  - 类型系统 [缺口]\n  - 泛型 [缺口]\n  - 新节点 [缺口]"
+	if r := computeImpactRadius(current, addOnly); r != 0 {
+		t.Errorf("纯加节点影响半径应为 0，实际 %d", r)
+	}
+	// 删除「泛型」（挂了 2 卡）→ 影响半径 2
+	dropGeneric := "- 语言基础 [缺口]\n  - 类型系统 [缺口]"
+	if r := computeImpactRadius(current, dropGeneric); r != 2 {
+		t.Errorf("删除挂 2 卡的节点影响半径应为 2，实际 %d", r)
+	}
+}
+
+func TestParseProposal(t *testing.T) {
+	out := "ACTION: add\nSUMMARY: 把并发相关待归位卡归并为新节点\nTREE:\n- 语言基础 [缺口]\n  - 并发原语 [缺口]\n"
+	p := parseProposal("programming", out)
+	if p.Action != "add" {
+		t.Errorf("action=%q，期望 add", p.Action)
+	}
+	if !strings.Contains(p.Summary, "并发") {
+		t.Errorf("summary 解析错误: %q", p.Summary)
+	}
+	if !strings.Contains(p.ProposedTree, "并发原语 [缺口]") || strings.Contains(p.ProposedTree, "ACTION:") {
+		t.Errorf("proposedTree 解析错误:\n%s", p.ProposedTree)
+	}
+}
+
+func TestProposalApplyRejectRoundtrip(t *testing.T) {
+	tmp := t.TempDir()
+	domSub := filepath.Join("vault", "prog")
+	dir := filepath.Join(tmp, domSub)
+	if err := os.MkdirAll(dir, 0755); err != nil {
+		t.Fatal(err)
+	}
+	indexPath := filepath.Join(dir, "_index.md")
+	index := "---\ntype: pkb_map\n---\n\n## 体系概览\n概览\n\n## 知识树\n- 旧节点 [缺口]\n\n## 核心脉络\n脉络\n"
+	if err := os.WriteFile(indexPath, []byte(index), 0644); err != nil {
+		t.Fatal(err)
+	}
+
+	// 保存一条大动作提议
+	p := SkeletonProposal{
+		ID:           "prog-20260617-120000",
+		Domain:       "programming",
+		VaultSubpath: domSub,
+		Action:       "restructure",
+		Summary:      "重排",
+		ProposedTree: "- 新节点甲 [缺口]\n- 新节点乙 [缺口]",
+		ImpactRadius: 9,
+	}
+	if err := saveProposalFile(tmp, p); err != nil {
+		t.Fatalf("saveProposalFile: %v", err)
+	}
+	props, err := ListPendingProposals(tmp)
+	if err != nil || len(props) != 1 || props[0].ID != p.ID {
+		t.Fatalf("ListPendingProposals 应返回 1 条提议，实际 %v err=%v", props, err)
+	}
+
+	// approve：替换知识树 + 删提议 + 快照
+	msg, err := ApplySkeletonProposal(tmp, p.ID)
+	if err != nil {
+		t.Fatalf("ApplySkeletonProposal: %v", err)
+	}
+	if !strings.Contains(msg, p.ID) {
+		t.Errorf("apply 返回信息应含 id: %q", msg)
+	}
+	applied, _ := os.ReadFile(indexPath)
+	if !strings.Contains(string(applied), "- 新节点甲 [缺口]") || strings.Contains(string(applied), "- 旧节点 [缺口]") {
+		t.Errorf("apply 后知识树未替换:\n%s", string(applied))
+	}
+	if !strings.Contains(string(applied), "## 核心脉络") {
+		t.Error("apply 破坏了其它章节")
+	}
+	if remain, _ := ListPendingProposals(tmp); len(remain) != 0 {
+		t.Errorf("apply 后提议应被删除，仍剩 %d", len(remain))
+	}
+	// 快照应已生成
+	snaps, _ := os.ReadDir(filepath.Join(dir, "digest"))
+	if len(snaps) == 0 {
+		t.Error("apply 前应快照旧 _index.md 到 digest/")
+	}
+
+	// reject：再存一条后驳回
+	p2 := p
+	p2.ID = "prog-20260617-130000"
+	if err := saveProposalFile(tmp, p2); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := RejectSkeletonProposal(tmp, p2.ID); err != nil {
+		t.Fatalf("RejectSkeletonProposal: %v", err)
+	}
+	if remain, _ := ListPendingProposals(tmp); len(remain) != 0 {
+		t.Errorf("reject 后提议应被删除，仍剩 %d", len(remain))
+	}
+	if _, err := RejectSkeletonProposal(tmp, "不存在"); err == nil {
+		t.Error("reject 不存在的提议应报错")
+	}
+}
