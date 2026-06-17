@@ -6,3 +6,4 @@ active:
   reconstruct: reconstruct.v2.md
   digest: digest.v2.md
   digest_topic: digest.topic.md
+  skeleton: skeleton.md

@@ -14,6 +14,7 @@ defaults:
   score_model: pool-summary    # 打分用快模型组（deepseek/qwen，便宜快，适合批量打分）
   reconstruct_model: pool-pkb  # 重构用 kimi-k2.6（moonshot，推理强；仅 >=7 高分文章触发，量少）
   digest_model: pool-pkb       # 体系化综述用强模型，低频触发
+  skeleton_model: pool-pkb     # 骨架生成用顶级推理档（画整棵目标概念树，高价值低频）；空则回退 digest_model
   score_temperature: 0.2           # 快模型允许低温，求稳定 JSON
   reconstruct_temperature: 1.0     # kimi-k2.6 是推理模型，仅接受 temperature=1
   digest_temperature: 1.0          # 与 pool-pkb 默认模型兼容
@@ -37,24 +38,30 @@ defaults:
     stop_run_on_rate_limit: true     # 仍被限流时停止本轮，未处理 raw 留到下轮继续
 
 # 领域清单：新增领域=加一个 - name 块；改关键词/阈值只动对应块
+# scope（大方向）：仅用于 `pkb-curate skeleton <领域>` 生成知识骨架；改一句话即调整目标结构。
+#   兜底领域(misc)与资讯流(news)不配 scope，不生成骨架。
 domains:
   - name: programming
     display: 编程
+    scope: 后端与全栈工程实践——主流语言（Java/C#/.NET/Go/Rust）、前端框架（React/Vue/TypeScript）、服务端架构与微服务的设计与落地。
     vault_subpath: vault/编程
     keywords: [java, .net, csharp, golang, go, rust, 前端, react, vue, typescript, 后端, 架构, 微服务]
 
   - name: security
     display: 网络安全
+    scope: 攻防安全——Web/二进制/移动端漏洞挖掘与利用、代码审计、内网与域渗透、逆向工程，以及对应的防御与合规。
     vault_subpath: vault/安全
     keywords: [渗透测试, 代码审计, 逆向, 安卓, android, 内网渗透, 域渗透, 安全合规, owasp, cve, poc, exp, 漏洞]
 
   - name: cs-fundamentals
     display: 计算机基础
+    scope: 计算机基础与系统——算法与数据结构、操作系统、网络协议（TCP/HTTP）、数据库，以及 Linux 运维与容器/K8s 编排。
     vault_subpath: vault/基础
     keywords: [算法, 数据结构, 操作系统, 网络协议, tcp, http, 运维, linux, 容器, k8s, 数据库]
 
   - name: ai
     display: 人工智能
+    scope: 人工智能工程——大模型原理与微调、RAG/Agent 应用、机器学习与深度学习基础、NLP 与 Transformer 架构。
     vault_subpath: vault/AI
     keywords: [大模型, llm, nlp, 机器学习, 深度学习, 强化学习, rag, agent, transformer, 微调, embedding]
 

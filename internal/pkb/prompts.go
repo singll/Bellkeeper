@@ -19,6 +19,7 @@ type PromptRegistryActive struct {
 	Reconstruct string `yaml:"reconstruct"`
 	Digest      string `yaml:"digest"`
 	DigestTopic string `yaml:"digest_topic"`
+	Skeleton    string `yaml:"skeleton"`
 }
 
 func LoadPromptRegistry(configDir string) (*PromptRegistry, error) {
@@ -49,6 +50,9 @@ func LoadPromptRegistry(configDir string) (*PromptRegistry, error) {
 	}
 	if reg.Active.DigestTopic == "" {
 		reg.Active.DigestTopic = "digest.topic.md"
+	}
+	if reg.Active.Skeleton == "" {
+		reg.Active.Skeleton = "skeleton.md"
 	}
 	return reg, nil
 }

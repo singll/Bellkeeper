@@ -32,6 +32,9 @@ var (
 
 	// pkb-curate audit flags
 	pkbAuditJSON bool
+
+	// pkb-curate skeleton flags
+	pkbSkeletonTOCFile string
 )
 
 func main() {
@@ -104,6 +107,24 @@ Use --json for machine-readable output.`,
 	pkbAuditCmd.Flags().BoolVar(&pkbAuditJSON, "json", false, "output JSON for machine parsing")
 	pkbAuditCmd.Flags().StringVar(&pkbCfgDir, "pkb-config", "config/pkb", "directory holding domains.yaml + prompts/")
 	pkbCurateCmd.AddCommand(pkbAuditCmd)
+
+	pkbSkeletonCmd := &cobra.Command{
+		Use:   "skeleton <domain>",
+		Short: "Generate the initial knowledge skeleton (target concept tree) for a domain from its scope",
+		Long: `skeleton reads a domain's scope (one-line direction) from config/pkb/domains.yaml
+and asks the skeleton_model to design a multi-level target concept tree where every
+node starts as a [缺口] (gap). It writes the tree to vault/<domain>/_index.md via
+guardrail-6 (snapshot old index → atomic replace). Existing card links are re-attached
+later by the match step; topic MOCs emerge from digest as cards accumulate.
+
+The domain must have a scope: line in domains.yaml first. Use --dry-run to preview.`,
+		Args: cobra.ExactArgs(1),
+		Run:  runPkbSkeleton,
+	}
+	pkbSkeletonCmd.Flags().BoolVar(&pkbDryRun, "dry-run", false, "print scope and target path without calling the LLM or writing files")
+	pkbSkeletonCmd.Flags().StringVar(&pkbSkeletonTOCFile, "toc-file", "", "optional authoritative-source TOC file to guide tree structure and coverage")
+	pkbSkeletonCmd.Flags().StringVar(&pkbCfgDir, "pkb-config", "config/pkb", "directory holding domains.yaml + prompts/")
+	pkbCurateCmd.AddCommand(pkbSkeletonCmd)
 
 	rootCmd.AddCommand(serveCmd, versionCmd, migrateCmd, pkbCurateCmd)
 
@@ -267,6 +288,60 @@ func runPkbAudit(cmd *cobra.Command, args []string) {
 
 	if err := curator.RunAudit(pkbAuditJSON); err != nil {
 		fmt.Fprintf(os.Stderr, "pkb-curate audit failed: %v\n", err)
+		os.Exit(1)
+	}
+}
+
+func runPkbSkeleton(cmd *cobra.Command, args []string) {
+	cfg, err := config.Load(cfgFile)
+	if err != nil {
+		fmt.Fprintf(os.Stderr, "Failed to load config: %v\n", err)
+		os.Exit(1)
+	}
+
+	if err := middleware.InitLogger(cfg.Logging.Level); err != nil {
+		fmt.Fprintf(os.Stderr, "Failed to initialize logger: %v\n", err)
+		os.Exit(1)
+	}
+
+	db, err := model.InitDB(cfg.Database)
+	if err != nil {
+		fmt.Fprintf(os.Stderr, "Failed to connect to database: %v\n", err)
+		os.Exit(1)
+	}
+	articleRepo := repository.NewArticleTagRepository(db)
+	var llmJobs *service.LLMJobQueueService
+	if cfg.LLMJobQueue.Enabled {
+		llmJobRepo := repository.NewLLMJobRepository(db)
+		llmJobs = service.NewLLMJobQueueService(cfg.LLMJobQueue, llmJobRepo, cfg.Classify.LLMProxyURL, cfg.Server.APIKey)
+	}
+
+	curator, err := pkb.NewCurator(cfg, pkb.Options{
+		ConfigDir: pkbCfgDir,
+		DryRun:    pkbDryRun,
+		LLMJobs:   llmJobs,
+	}, articleRepo)
+	if err != nil {
+		fmt.Fprintf(os.Stderr, "Failed to init pkb curator: %v\n", err)
+		os.Exit(1)
+	}
+
+	var toc string
+	if pkbSkeletonTOCFile != "" {
+		data, err := os.ReadFile(pkbSkeletonTOCFile)
+		if err != nil {
+			fmt.Fprintf(os.Stderr, "Failed to read --toc-file %s: %v\n", pkbSkeletonTOCFile, err)
+			os.Exit(1)
+		}
+		toc = string(data)
+	}
+
+	if err := curator.RunSkeleton(pkb.SkeletonOptions{
+		Domain: args[0],
+		TOC:    toc,
+		DryRun: pkbDryRun,
+	}); err != nil {
+		fmt.Fprintf(os.Stderr, "pkb-curate skeleton failed: %v\n", err)
 		os.Exit(1)
 	}
 }

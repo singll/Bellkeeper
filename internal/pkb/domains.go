@@ -25,6 +25,7 @@ type Defaults struct {
 	ScoreModel             string  `yaml:"score_model"`
 	ReconstructModel       string  `yaml:"reconstruct_model"`
 	DigestModel            string  `yaml:"digest_model"`
+	SkeletonModel          string  `yaml:"skeleton_model"` // 骨架生成用顶级推理档（高价值低频）；空则回退 digest_model
 	ScoreTemperature       float64 `yaml:"score_temperature"`
 	ReconstructTemperature float64 `yaml:"reconstruct_temperature"`
 	DigestTemperature      float64 `yaml:"digest_temperature"`
@@ -60,6 +61,7 @@ type Retry struct {
 type Domain struct {
 	Name             string   `yaml:"name"`
 	Display          string   `yaml:"display"`
+	Scope            string   `yaml:"scope"` // 一句话「大方向」——骨架生成(skeleton)的输入；为空则该领域不能生成骨架
 	VaultSubpath     string   `yaml:"vault_subpath"`
 	Keywords         []string `yaml:"keywords"`
 	IsDefault        bool     `yaml:"is_default"`
@@ -106,6 +108,9 @@ func LoadDomains(path string) (*DomainsConfig, error) {
 	}
 	if d.DigestModel == "" {
 		d.DigestModel = d.ReconstructModel
+	}
+	if d.SkeletonModel == "" {
+		d.SkeletonModel = d.DigestModel
 	}
 	if d.ScoreTemperature == 0 {
 		d.ScoreTemperature = 0.2
