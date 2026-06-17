@@ -25,10 +25,12 @@ type Defaults struct {
 	ScoreModel                      string          `yaml:"score_model"`
 	ReconstructModel                string          `yaml:"reconstruct_model"`
 	DigestModel                     string          `yaml:"digest_model"`
-	SkeletonModel                   string          `yaml:"skeleton_model"` // 骨架生成用顶级推理档（高价值低频）；空则回退 digest_model
-	MatchModel                      string          `yaml:"match_model"`    // 归位匹配用快强档（卡↔骨架节点高频判断）；空则回退 score_model
-	GapfillModel                    string          `yaml:"gapfill_model"`  // 缺口填充起草用顶级推理档；空则回退 skeleton_model
-	VerifyModel                     string          `yaml:"verify_model"`   // 缺口填充 V2 核实用快强档；空则回退 match_model
+	SkeletonModel                   string          `yaml:"skeleton_model"`     // 骨架生成用顶级推理档（高价值低频）；空则回退 digest_model
+	MatchModel                      string          `yaml:"match_model"`        // 归位匹配用快强档（卡↔骨架节点高频判断）；空则回退 score_model
+	GapfillModel                    string          `yaml:"gapfill_model"`      // 缺口填充起草用顶级推理档；空则回退 skeleton_model
+	VerifyModel                     string          `yaml:"verify_model"`       // 缺口填充 V2 核实用快强档；空则回退 match_model
+	PromoteModel                    string          `yaml:"promote_model"`      // 资讯综述/晋升判定用快强档；空则回退 match_model
+	FeedContentTypes                []string        `yaml:"feed_content_types"` // 视为「资讯」的 content_type(pkb_type)，默认 [news, release]
 	ScoreTemperature                float64         `yaml:"score_temperature"`
 	ReconstructTemperature          float64         `yaml:"reconstruct_temperature"`
 	DigestTemperature               float64         `yaml:"digest_temperature"`
@@ -133,6 +135,12 @@ func LoadDomains(path string) (*DomainsConfig, error) {
 	}
 	if d.VerifyModel == "" {
 		d.VerifyModel = d.MatchModel
+	}
+	if d.PromoteModel == "" {
+		d.PromoteModel = d.MatchModel
+	}
+	if len(d.FeedContentTypes) == 0 {
+		d.FeedContentTypes = []string{"news", "release"}
 	}
 	if d.ScoreTemperature == 0 {
 		d.ScoreTemperature = 0.2

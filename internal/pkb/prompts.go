@@ -24,6 +24,7 @@ type PromptRegistryActive struct {
 	SkeletonPropose string `yaml:"skeleton_propose"`
 	Gapfill         string `yaml:"gapfill"`
 	Verify          string `yaml:"verify"`
+	Feed            string `yaml:"feed"`
 }
 
 func LoadPromptRegistry(configDir string) (*PromptRegistry, error) {
@@ -69,6 +70,9 @@ func LoadPromptRegistry(configDir string) (*PromptRegistry, error) {
 	}
 	if reg.Active.Verify == "" {
 		reg.Active.Verify = "verify.md"
+	}
+	if reg.Active.Feed == "" {
+		reg.Active.Feed = "feed.md"
 	}
 	return reg, nil
 }

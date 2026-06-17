@@ -1,0 +1,250 @@
+package pkb
+
+import (
+	"fmt"
+	"os"
+	"path/filepath"
+	"sort"
+	"strings"
+	"time"
+
+	"github.com/singll/bellkeeper/internal/pkg/textutil"
+)
+
+// FeedOptions 控制一次资讯库生成（资讯综述 + 落盘，ADR-0005 §5.1）。
+type FeedOptions struct {
+	Date   string // YYYY-MM-DD，空=今天
+	DryRun bool
+}
+
+// feedItem 当日一条时效资讯（从 raw/archive 文件 frontmatter 采集，不存独立原子卡）。
+type feedItem struct {
+	domain  string // pkb_domain（领域 name）
+	title   string
+	excerpt string
+	url     string
+}
+
+// RunFeed 生成资讯库当日存档（ADR-0005 §5.1）：遍历 raw+archive 取当日资讯类文章
+// （pkb_type∈feed_content_types），按 pkb_domain 分组，每领域调 promote_model 综述「今天发生了什么」，
+// 落 <资讯库根>/<领域 display>/<date>.md（一天一文件）。资讯不进知识骨架、不存独立原子卡（控 vault 膨胀）。
+// 晋升闸（耐久知识点→知识库卡）在本流程之上由 Phase H-3 接入。
+func (c *Curator) RunFeed(opts FeedOptions) error {
+	date := strings.TrimSpace(opts.Date)
+	if date == "" {
+		date = time.Now().Format("2006-01-02")
+	} else if _, err := time.Parse("2006-01-02", date); err != nil {
+		return fmt.Errorf("date 须为 YYYY-MM-DD: %w", err)
+	}
+
+	feedRoot, ok := c.feedArchiveRoot()
+	if !ok {
+		return fmt.Errorf("domains.yaml 未配置资讯库容器领域（需有一个领域设 feed: true，如 news）")
+	}
+
+	items := c.collectFeedItems(date)
+	byDomain := groupFeedItems(items)
+
+	fmt.Printf("[pkb-feed] 模式=%s 日期=%s 资讯条目=%d 领域=%d promote_model=%s prompt=%s 资讯库根=%s\n",
+		digestMode(opts.DryRun), date, len(items), len(byDomain),
+		c.domains.Defaults.PromoteModel, c.feedPromptName, feedRoot)
+
+	if len(items) == 0 {
+		fmt.Printf("[pkb-feed] 当日无资讯类文章（pkb_type∈%v；需主流程 pkb-curate 已打分），无需生成\n",
+			c.domains.Defaults.FeedContentTypes)
+		return nil
+	}
+
+	// 稳定输出顺序（领域名排序），便于 dry-run 阅读与测试断言
+	domainNames := make([]string, 0, len(byDomain))
+	for d := range byDomain {
+		domainNames = append(domainNames, d)
+	}
+	sort.Strings(domainNames)
+
+	var written int
+	for _, dn := range domainNames {
+		group := byDomain[dn]
+		domain, ok := c.domains.FindDomain(dn)
+		if !ok {
+			domain = c.domains.DefaultDomain()
+		}
+		fmt.Printf("\n[pkb-feed] 领域 %s(%s) 资讯条目=%d\n", domain.Display, dn, len(group))
+		if opts.DryRun {
+			for _, it := range group {
+				fmt.Printf("  - %s（%s）\n", it.title, it.url)
+			}
+			continue
+		}
+		summary, err := c.summarizeFeed(domain, date, group)
+		if err != nil {
+			fmt.Printf("[pkb-feed] ⚠ %s 综述失败（跳过该领域，不中断整批）: %v\n", domain.Display, err)
+			continue
+		}
+		dst, err := c.writeFeedArchive(feedRoot, domain, date, summary, len(group))
+		if err != nil {
+			fmt.Printf("[pkb-feed] ⚠ %s 落盘失败: %v\n", domain.Display, err)
+			continue
+		}
+		fmt.Printf("    → %s\n", dst)
+		written++
+	}
+
+	if opts.DryRun {
+		fmt.Printf("\n[pkb-feed] DRY-RUN：仅列出将综述的资讯条目，不调用 LLM/不写盘\n")
+		return nil
+	}
+	fmt.Printf("\n[pkb-feed] 完成：生成 %d 个领域的资讯存档\n", written)
+	return nil
+}
+
+// feedArchiveRoot 返回资讯库容器领域（feed:true）的 vault 子路径，作为资讯存档根（如 vault/资讯）。
+func (c *Curator) feedArchiveRoot() (string, bool) {
+	for _, d := range c.domains.Domains {
+		if d.Feed {
+			return d.VaultSubpath, true
+		}
+	}
+	return "", false
+}
+
+// collectFeedItems 遍历 raw + archive 层，按 frontmatter 取当日(ingested_at/pkb_scored_at)资讯类(pkb_type)文章。
+// 依赖主流程 pkb-curate 已给文章打分（frontmatter 才有 pkb_type/pkb_domain）；🔶未打分的当天文章本轮不入综述（下轮补）。
+func (c *Curator) collectFeedItems(date string) []feedItem {
+	var items []feedItem
+	feedTypes := feedTypeSet(c.domains.Defaults.FeedContentTypes)
+	for _, layer := range []string{"raw", "archive"} {
+		root := filepath.Join(c.basePath, layer)
+		_ = filepath.WalkDir(root, func(path string, d os.DirEntry, err error) error {
+			if err != nil || d.IsDir() || filepath.Ext(d.Name()) != ".md" {
+				return nil
+			}
+			data, readErr := os.ReadFile(path)
+			if readErr != nil {
+				return nil
+			}
+			content := string(data)
+			fm := parseFrontmatterMap(content)
+			pkbType := strings.ToLower(strings.Trim(fm["pkb_type"], `"'`))
+			if !feedTypes[pkbType] {
+				return nil
+			}
+			if feedItemDate(fm) != date {
+				return nil
+			}
+			items = append(items, feedItem{
+				domain:  strings.Trim(firstNonEmpty(fm["pkb_domain"], "misc"), `"'`),
+				title:   strings.Trim(firstNonEmpty(fm["title"], strings.TrimSuffix(d.Name(), ".md")), `"'`),
+				excerpt: digestExcerpt(stripFrontmatter(content), 200),
+				url:     strings.Trim(firstNonEmpty(fm["url"], fm["source"]), `"'`),
+			})
+			return nil
+		})
+	}
+	return items
+}
+
+// feedItemDate 取「当日」判定日期：优先入库时间 ingested_at，回退 pkb_scored_at（RFC3339），截到 YYYY-MM-DD。
+func feedItemDate(fm map[string]string) string {
+	for _, key := range []string{"ingested_at", "pkb_scored_at"} {
+		v := strings.Trim(fm[key], `"'`)
+		if v == "" {
+			continue
+		}
+		if t, err := time.Parse(time.RFC3339, v); err == nil {
+			return t.Format("2006-01-02")
+		}
+		if len(v) >= 10 {
+			return v[:10] // 已是 YYYY-MM-DD 或带日期前缀
+		}
+	}
+	return ""
+}
+
+func feedTypeSet(types []string) map[string]bool {
+	m := make(map[string]bool, len(types))
+	for _, t := range types {
+		m[strings.ToLower(strings.TrimSpace(t))] = true
+	}
+	return m
+}
+
+// groupFeedItems 按领域(pkb_domain)分组。
+func groupFeedItems(items []feedItem) map[string][]feedItem {
+	by := make(map[string][]feedItem)
+	for _, it := range items {
+		by[it.domain] = append(by[it.domain], it)
+	}
+	return by
+}
+
+// summarizeFeed 调 promote_model 把某领域当日资讯条目综述成「今天发生了什么」。
+func (c *Curator) summarizeFeed(domain Domain, date string, items []feedItem) (string, error) {
+	prompt := c.feedPrompt
+	prompt = strings.ReplaceAll(prompt, "{{domain_display}}", domain.Display)
+	prompt = strings.ReplaceAll(prompt, "{{date}}", date)
+	prompt = strings.ReplaceAll(prompt, "{{items}}", renderFeedItems(items))
+
+	out, err := c.chatCompletionWithRetry(c.domains.Defaults.PromoteModel, "", prompt,
+		c.domains.Defaults.DigestTemperature, "summary")
+	if err != nil {
+		return "", err
+	}
+	summary := strings.TrimSpace(textutil.StripFence(out))
+	if summary == "" {
+		return "", fmt.Errorf("综述返回空内容")
+	}
+	return summary, nil
+}
+
+// renderFeedItems 渲染资讯条目列表喂综述提示词（标题 + 来源 + 摘要）。
+func renderFeedItems(items []feedItem) string {
+	var b strings.Builder
+	for _, it := range items {
+		b.WriteString("- ")
+		b.WriteString(it.title)
+		if it.url != "" {
+			b.WriteString(fmt.Sprintf("（%s）", it.url))
+		}
+		if it.excerpt != "" {
+			b.WriteString("：")
+			b.WriteString(it.excerpt)
+		}
+		b.WriteString("\n")
+	}
+	return b.String()
+}
+
+// writeFeedArchive 落资讯库当日存档 <feedRoot>/<领域 display>/<date>.md（一天一文件，原子写）。
+// frontmatter type: pkb_feed 标记非知识卡；跨天只新增文件不删历史，单天重跑覆盖（当天全量综述，幂等）。
+func (c *Curator) writeFeedArchive(feedRoot string, domain Domain, date, summary string, itemCount int) (string, error) {
+	dir := filepath.Join(c.basePath, feedRoot, sanitizeFilename(domain.Display))
+	if err := os.MkdirAll(dir, 0755); err != nil {
+		return "", fmt.Errorf("mkdir feed dir: %w", err)
+	}
+	dst := filepath.Join(dir, date+".md")
+
+	var b strings.Builder
+	b.WriteString("---\n")
+	b.WriteString(fmt.Sprintf("title: %s 资讯 %s\n", domain.Display, date))
+	b.WriteString("type: pkb_feed\n")
+	b.WriteString(fmt.Sprintf("domain: %s\n", domain.Name))
+	b.WriteString(fmt.Sprintf("date: %s\n", date))
+	b.WriteString(fmt.Sprintf("generated_at: %s\n", time.Now().Format(time.RFC3339)))
+	b.WriteString(fmt.Sprintf("item_count: %d\n", itemCount))
+	b.WriteString(fmt.Sprintf("tags: [pkb-feed, %s]\n", domain.Display))
+	b.WriteString("---\n\n")
+	b.WriteString(fmt.Sprintf("### %s · %s 资讯\n\n", date, domain.Display))
+	b.WriteString(summary)
+	b.WriteString("\n")
+
+	tmp := dst + ".tmp.md"
+	if err := os.WriteFile(tmp, []byte(b.String()), 0644); err != nil {
+		return "", fmt.Errorf("write tmp: %w", err)
+	}
+	if err := os.Rename(tmp, dst); err != nil {
+		_ = os.Remove(tmp)
+		return "", fmt.Errorf("rename: %w", err)
+	}
+	return dst, nil
+}

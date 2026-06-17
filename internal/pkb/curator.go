@@ -42,6 +42,7 @@ type Curator struct {
 	proposePrompt         string
 	gapfillPrompt         string
 	verifyPrompt          string
+	feedPrompt            string
 	scorePromptName       string
 	reconstructName       string
 	digestPromptName      string
@@ -51,6 +52,7 @@ type Curator struct {
 	proposePromptName     string
 	gapfillPromptName     string
 	verifyPromptName      string
+	feedPromptName        string
 	dryRun                bool
 	rescan                bool
 	perRun                int
@@ -110,6 +112,10 @@ func NewCurator(cfg *config.Config, opts Options, articleRepo *repository.Articl
 	if err != nil {
 		return nil, err
 	}
+	feedPrompt, err := loadPromptFile(opts.ConfigDir, registry.Active.Feed)
+	if err != nil {
+		return nil, err
+	}
 
 	llmBase := cfg.Classify.LLMProxyURL
 	if llmBase == "" {
@@ -148,6 +154,7 @@ func NewCurator(cfg *config.Config, opts Options, articleRepo *repository.Articl
 		proposePrompt:         proposePrompt,
 		gapfillPrompt:         gapfillPrompt,
 		verifyPrompt:          verifyPrompt,
+		feedPrompt:            feedPrompt,
 		scorePromptName:       registry.Active.Score,
 		reconstructName:       registry.Active.Reconstruct,
 		digestPromptName:      registry.Active.Digest,
@@ -157,6 +164,7 @@ func NewCurator(cfg *config.Config, opts Options, articleRepo *repository.Articl
 		proposePromptName:     registry.Active.SkeletonPropose,
 		gapfillPromptName:     registry.Active.Gapfill,
 		verifyPromptName:      registry.Active.Verify,
+		feedPromptName:        registry.Active.Feed,
 		dryRun:                opts.DryRun,
 		rescan:                opts.Rescan,
 		perRun:                perRun,

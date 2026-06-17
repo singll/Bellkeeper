@@ -38,6 +38,9 @@ var (
 
 	// pkb-curate fill flags
 	pkbFillPerRun int
+
+	// pkb-curate feed flags
+	pkbFeedDate string
 )
 
 func main() {
@@ -177,6 +180,23 @@ Gated per domain by gap_fill_enabled in domains.yaml. Use --dry-run to list the 
 	pkbFillCmd.Flags().IntVar(&pkbFillPerRun, "per-run", 0, "max gaps to fill this run (0 = use domains.yaml gap_fill_per_run)")
 	pkbFillCmd.Flags().StringVar(&pkbCfgDir, "pkb-config", "config/pkb", "directory holding domains.yaml + prompts/")
 	pkbCurateCmd.AddCommand(pkbFillCmd)
+
+	pkbFeedCmd := &cobra.Command{
+		Use:   "feed",
+		Short: "Build the daily feed-base archive from today's news-type articles (per domain)",
+		Long: `feed collects the day's ingested news-type articles (pkb_type in feed_content_types)
+from the raw/archive layers, groups them by domain, asks promote_model to summarize "what
+happened today" per domain, and writes <feed-root>/<domain>/<date>.md (one file per day,
+append-only across days). Feed items are not stored as standalone atomic cards (ADR-0005).
+
+Requires a feed-container domain (feed: true) in domains.yaml. Use --dry-run to list items.`,
+		Args: cobra.NoArgs,
+		Run:  runPkbFeed,
+	}
+	pkbFeedCmd.Flags().BoolVar(&pkbDryRun, "dry-run", false, "list the feed items this run would summarize without calling the LLM or writing files")
+	pkbFeedCmd.Flags().StringVar(&pkbFeedDate, "date", "", "target date YYYY-MM-DD (default: today)")
+	pkbFeedCmd.Flags().StringVar(&pkbCfgDir, "pkb-config", "config/pkb", "directory holding domains.yaml + prompts/")
+	pkbCurateCmd.AddCommand(pkbFeedCmd)
 
 	pkbProposalsCmd := &cobra.Command{
 		Use:   "proposals <list|approve|reject> [id]",
@@ -531,6 +551,45 @@ func runPkbFill(cmd *cobra.Command, args []string) {
 		PerRun: pkbFillPerRun,
 	}); err != nil {
 		fmt.Fprintf(os.Stderr, "pkb-curate fill failed: %v\n", err)
+		os.Exit(1)
+	}
+}
+
+func runPkbFeed(cmd *cobra.Command, args []string) {
+	cfg, err := config.Load(cfgFile)
+	if err != nil {
+		fmt.Fprintf(os.Stderr, "Failed to load config: %v\n", err)
+		os.Exit(1)
+	}
+	if err := middleware.InitLogger(cfg.Logging.Level); err != nil {
+		fmt.Fprintf(os.Stderr, "Failed to initialize logger: %v\n", err)
+		os.Exit(1)
+	}
+	db, err := model.InitDB(cfg.Database)
+	if err != nil {
+		fmt.Fprintf(os.Stderr, "Failed to connect to database: %v\n", err)
+		os.Exit(1)
+	}
+	articleRepo := repository.NewArticleTagRepository(db)
+	var llmJobs *service.LLMJobQueueService
+	if cfg.LLMJobQueue.Enabled {
+		llmJobRepo := repository.NewLLMJobRepository(db)
+		llmJobs = service.NewLLMJobQueueService(cfg.LLMJobQueue, llmJobRepo, cfg.Classify.LLMProxyURL, cfg.Server.APIKey)
+	}
+	curator, err := pkb.NewCurator(cfg, pkb.Options{
+		ConfigDir: pkbCfgDir,
+		DryRun:    pkbDryRun,
+		LLMJobs:   llmJobs,
+	}, articleRepo)
+	if err != nil {
+		fmt.Fprintf(os.Stderr, "Failed to init pkb curator: %v\n", err)
+		os.Exit(1)
+	}
+	if err := curator.RunFeed(pkb.FeedOptions{
+		Date:   pkbFeedDate,
+		DryRun: pkbDryRun,
+	}); err != nil {
+		fmt.Fprintf(os.Stderr, "pkb-curate feed failed: %v\n", err)
 		os.Exit(1)
 	}
 }

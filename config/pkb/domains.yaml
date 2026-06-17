@@ -18,6 +18,7 @@ defaults:
   match_model: pool-summary    # 归位匹配用快强档（卡↔骨架节点判断，高频）；空则回退 score_model
   gapfill_model: pool-pkb      # 缺口填充起草用顶级推理档（写正经原子卡）；空则回退 skeleton_model
   verify_model: pool-summary   # 缺口填充 V2 核实用快强档（页面是否支撑卡片，高频判断）；空则回退 match_model
+  promote_model: pool-summary  # 资讯综述/晋升判定用快强档（「今天发生了什么」+ 耐久知识点识别）；空则回退 match_model
   score_temperature: 0.2           # 快模型允许低温，求稳定 JSON
   reconstruct_temperature: 1.0     # kimi-k2.6 是推理模型，仅接受 temperature=1
   digest_temperature: 1.0          # 与 pool-pkb 默认模型兼容
@@ -36,6 +37,8 @@ defaults:
   gap_fill_default: false        # 未在 gap_fill_enabled 显式列出的领域默认开/关
   gap_fill_enabled:              # 每领域开关（优先级最高）—— 打样先只开 programming（C# 落点在编程域 scope）
     programming: true
+  # 资讯库（pkb-curate feed）—— ADR-0005 §5.1：当日资讯类文章分领域分日存档，不进知识骨架/不存独立卡：
+  feed_content_types: [news, release]  # 哪些 content_type(pkb_type) 视为「资讯」纳入资讯库综述
   audit_on_run: true               # 每轮 pkb-curate 结束附带网健康度摘要
   llm_token_env: PKB_LLM_TOKEN     # 可选：配置专用 LLM Token 后，PKB 可独立限额/计费；未设置则回退 server.api_key
   budget:
