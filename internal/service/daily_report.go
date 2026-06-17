@@ -102,18 +102,19 @@ type FailureDetail struct {
 }
 
 type DailyReportData struct {
-	Date        string                     `json:"date"`
-	Health      *DetailedHealth            `json:"health,omitempty"`
-	Crawl       *CrawlDashboardStats       `json:"crawl,omitempty"`
-	RSSIngest   *RSSIngestStats            `json:"rss_ingest,omitempty"`
-	FileIngest  *FileIngestStats           `json:"file_ingest,omitempty"`
-	Classify    *ClassifyStats             `json:"classify,omitempty"`
-	PKB         *PKBVaultStats             `json:"pkb,omitempty"`
-	PKBCards    []PKBCardSummary           `json:"pkb_cards,omitempty"`
-	LLM         *LLMDashboardStats         `json:"llm,omitempty"`
-	Failures    []FailureDetail            `json:"failures,omitempty"`
-	AISummary   string                     `json:"ai_summary,omitempty"`
-	Errors      []CollectError             `json:"errors,omitempty"`
+	Date         string               `json:"date"`
+	Health       *DetailedHealth      `json:"health,omitempty"`
+	Crawl        *CrawlDashboardStats `json:"crawl,omitempty"`
+	RSSIngest    *RSSIngestStats      `json:"rss_ingest,omitempty"`
+	FileIngest   *FileIngestStats     `json:"file_ingest,omitempty"`
+	Classify     *ClassifyStats       `json:"classify,omitempty"`
+	PKB          *PKBVaultStats       `json:"pkb,omitempty"`
+	PKBCards     []PKBCardSummary     `json:"pkb_cards,omitempty"`
+	LLM          *LLMDashboardStats   `json:"llm,omitempty"`
+	Failures     []FailureDetail      `json:"failures,omitempty"`
+	FeedArchives []PKBFeedArchive     `json:"feed_archives,omitempty"`
+	AISummary    string               `json:"ai_summary,omitempty"`
+	Errors       []CollectError       `json:"errors,omitempty"`
 }
 
 type collectorResult struct {
@@ -182,6 +183,9 @@ func (s *DailyReportService) Collect(ctx context.Context, date string) (*DailyRe
 		}},
 		{name: "failures", fn: func(ctx context.Context) (interface{}, error) {
 			return s.collectFailureDetails(dayStart)
+		}},
+		{name: "feed_archives", fn: func(ctx context.Context) (interface{}, error) {
+			return s.pkbReport.FeedArchivesByDate(dateStr)
 		}},
 	}
 
@@ -269,6 +273,8 @@ func (s *DailyReportService) Collect(ctx context.Context, date string) (*DailyRe
 			result.LLM = cr.data.(*LLMDashboardStats)
 		case "failures":
 			result.Failures = cr.data.([]FailureDetail)
+		case "feed_archives":
+			result.FeedArchives = cr.data.([]PKBFeedArchive)
 		}
 	}
 
@@ -318,11 +324,11 @@ type GenerateOptions struct {
 }
 
 type GenerateResult struct {
-	Data       *DailyReportData `json:"data"`
-	Markdown   string           `json:"markdown"`
-	FilePath   string           `json:"file_path,omitempty"`
-	Notified   bool             `json:"notified"`
-	DryRun     bool             `json:"dry_run"`
+	Data     *DailyReportData `json:"data"`
+	Markdown string           `json:"markdown"`
+	FilePath string           `json:"file_path,omitempty"`
+	Notified bool             `json:"notified"`
+	DryRun   bool             `json:"dry_run"`
 }
 
 func (s *DailyReportService) Generate(ctx context.Context, opts GenerateOptions) (*GenerateResult, error) {
@@ -521,11 +527,9 @@ func (s *DailyReportService) GenerateBrief(ctx context.Context, opts BriefGenera
 }
 
 type BriefReportData struct {
-	Date      string              `json:"date"`
+	Date      string               `json:"date"`
 	Crawl     *CrawlDashboardStats `json:"crawl,omitempty"`
 	RSSIngest *RSSIngestStats      `json:"rss_ingest,omitempty"`
 	PKB       *PKBVaultStats       `json:"pkb,omitempty"`
 	PKBCards  []PKBCardSummary     `json:"pkb_cards,omitempty"`
 }
-
-

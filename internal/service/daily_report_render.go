@@ -17,6 +17,7 @@ func RenderDailyReport(data *DailyReportData) string {
 	sb.WriteString(renderFileIngestSection(data))
 	sb.WriteString(renderClassifySection(data))
 	sb.WriteString(renderPKBSection(data))
+	sb.WriteString(renderFeedArchiveSection(data))
 	sb.WriteString(renderLLMSection(data))
 	sb.WriteString(renderFailureSection(data))
 	sb.WriteString(renderTodoSection(data))
@@ -232,6 +233,20 @@ func renderErrorSection(title, source string) string {
 
 func renderTodoSection(data *DailyReportData) string {
 	return "\n#### 待办\n- ⏭️ Memos 待办统计暂未接入（待实现 Memos collector）\n"
+}
+
+// renderFeedArchiveSection 渲染日报与资讯库的弱联动（ADR-0005 §5.1）：列出当日各领域的资讯存档链接。
+// 资讯条目本身活在 vault/资讯/<领域>/<日期>.md（不入日报正文），此处仅聚合链接、便于跳转查看。
+func renderFeedArchiveSection(data *DailyReportData) string {
+	if len(data.FeedArchives) == 0 {
+		return ""
+	}
+	var sb strings.Builder
+	sb.WriteString("\n#### 今日资讯存档\n")
+	for _, fa := range data.FeedArchives {
+		sb.WriteString(fmt.Sprintf("- [%s](%s)\n", fa.Domain, fa.RelPath))
+	}
+	return sb.String()
 }
 
 func RenderBriefReport(data *DailyReportData) string {

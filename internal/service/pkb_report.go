@@ -233,6 +233,42 @@ func (s *PKBReportService) VaultStats() (*PKBVaultStats, error) {
 	return stats, nil
 }
 
+// PKBFeedArchive 是某领域当日资讯库存档的轻量引用（供日报「今日资讯存档」弱联动，ADR-0005 §5.1）。
+type PKBFeedArchive struct {
+	Domain  string `json:"domain"`
+	RelPath string `json:"rel_path"`
+}
+
+// FeedArchivesByDate 列出当日各领域的资讯库存档 vault/资讯/<领域>/<date>.md（feed 容器目录，
+// 目录名与 domains.yaml feed 领域 vault_subpath 末段一致）。供日报聚合链接当日资讯；无则返回空。
+func (s *PKBReportService) FeedArchivesByDate(date string) ([]PKBFeedArchive, error) {
+	feedRoot := filepath.Join(s.basePath, "vault", "资讯")
+	entries, err := os.ReadDir(feedRoot)
+	if err != nil {
+		if os.IsNotExist(err) {
+			return nil, nil
+		}
+		return nil, fmt.Errorf("read feed root: %w", err)
+	}
+	var out []PKBFeedArchive
+	for _, e := range entries {
+		if !e.IsDir() {
+			continue
+		}
+		f := filepath.Join(feedRoot, e.Name(), date+".md")
+		if _, statErr := os.Stat(f); statErr != nil {
+			continue
+		}
+		rel, relErr := filepath.Rel(s.basePath, f)
+		if relErr != nil {
+			rel = f
+		}
+		out = append(out, PKBFeedArchive{Domain: e.Name(), RelPath: filepath.ToSlash(rel)})
+	}
+	sort.Slice(out, func(i, j int) bool { return out[i].Domain < out[j].Domain })
+	return out, nil
+}
+
 func (s *PKBReportService) LatestDigests() ([]PKBDigestSummary, error) {
 	root := filepath.Join(s.basePath, "vault")
 	entries, err := os.ReadDir(root)

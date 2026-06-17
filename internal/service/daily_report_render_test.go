@@ -5,15 +5,33 @@ import (
 	"testing"
 )
 
+// TestRenderFeedArchiveSection 守住日报「今日资讯存档」弱联动节（ADR-0005 §5.1）：列出领域→存档链接；空则不渲染。
+func TestRenderFeedArchiveSection(t *testing.T) {
+	data := &DailyReportData{FeedArchives: []PKBFeedArchive{
+		{Domain: "编程", RelPath: "vault/资讯/编程/2026-06-17.md"},
+		{Domain: "安全", RelPath: "vault/资讯/安全/2026-06-17.md"},
+	}}
+	out := renderFeedArchiveSection(data)
+	if !strings.Contains(out, "#### 今日资讯存档") {
+		t.Fatal("应含「今日资讯存档」节标题")
+	}
+	if !strings.Contains(out, "[编程](vault/资讯/编程/2026-06-17.md)") {
+		t.Fatalf("应含编程资讯链接，实得: %s", out)
+	}
+	if renderFeedArchiveSection(&DailyReportData{}) != "" {
+		t.Fatal("无资讯存档时应返回空串（不渲染该节）")
+	}
+}
+
 func TestRenderDailyReport_Full(t *testing.T) {
 	data := &DailyReportData{
 		Date: "2026-06-11",
 		Health: &DetailedHealth{
 			Status: "healthy",
 			Services: map[string]ServiceStatus{
-				"n8n":          {Status: "up", LatencyMs: 42},
-				"meilisearch":  {Status: "up", LatencyMs: 5},
-				"rss_fetcher":  {Status: "up"},
+				"n8n":         {Status: "up", LatencyMs: 42},
+				"meilisearch": {Status: "up", LatencyMs: 5},
+				"rss_fetcher": {Status: "up"},
 			},
 		},
 		Crawl: &CrawlDashboardStats{
@@ -92,7 +110,7 @@ func TestRenderDailyReport_PartialFailure(t *testing.T) {
 		Health: &DetailedHealth{
 			Status: "degraded",
 			Services: map[string]ServiceStatus{
-				"n8n": {Status: "up"},
+				"n8n":   {Status: "up"},
 				"redis": {Status: "down", Error: "connection refused"},
 			},
 		},

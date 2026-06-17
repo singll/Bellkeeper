@@ -129,3 +129,26 @@ ingest_date: 2026-06-17
 		t.Fatalf("知识树数应为 1（编程；资讯库容器不计），实得 %d", stats.Trees)
 	}
 }
+
+// TestFeedArchivesByDate 守住日报联动：列出当日各领域资讯存档 vault/资讯/<领域>/<date>.md，按领域名排序。
+func TestFeedArchivesByDate(t *testing.T) {
+	base := t.TempDir()
+	writeTestFile(t, filepath.Join(base, "vault", "资讯", "编程", "2026-06-17.md"), "---\ntype: pkb_feed\n---\n编程资讯。\n")
+	writeTestFile(t, filepath.Join(base, "vault", "资讯", "安全", "2026-06-17.md"), "---\ntype: pkb_feed\n---\n安全资讯。\n")
+	writeTestFile(t, filepath.Join(base, "vault", "资讯", "编程", "2026-06-16.md"), "---\ntype: pkb_feed\n---\n昨天的资讯。\n")
+
+	svc := NewPKBReportService(config.KnowledgeConfig{BasePath: base}, config.DailyReportConfig{}, nil)
+	archives, err := svc.FeedArchivesByDate("2026-06-17")
+	if err != nil {
+		t.Fatalf("FeedArchivesByDate returned error: %v", err)
+	}
+	if len(archives) != 2 {
+		t.Fatalf("当日资讯存档应为 2（编程+安全，不含 6-16），实得 %d: %+v", len(archives), archives)
+	}
+	if archives[0].Domain != "安全" {
+		t.Fatalf("应按领域名排序，archives[0]=%q want 安全", archives[0].Domain)
+	}
+	if archives[1].RelPath != "vault/资讯/编程/2026-06-17.md" {
+		t.Fatalf("编程存档相对路径 = %q", archives[1].RelPath)
+	}
+}
