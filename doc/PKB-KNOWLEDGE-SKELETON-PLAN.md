@@ -213,7 +213,7 @@ Phase I (调方向前端)         ──→ Phase F（形态待定，最后做�
 
 | Phase | 范围 | 验收要点 |
 |-------|------|---------|
-| **F：知识骨架** | `skeleton.go` 生成/渲染/归位/提议 + `digest.v2.md` 收紧 + `skeleton`/提议提示词 + 待归位区 + 影响半径闸（含 Matrix 过渡） + 配置项 | 给 C# 播大方向能生成多层骨架；存量卡全量归位；挂不上的进 `_待归位.md`；大动作走 Matrix 批准、有快照可回滚 |
+| **F：知识骨架** ✅已完成(2026-06-17, commits 3291f6d/6bc31a0/7e3c1f6/16f02b2，本地未推) | `skeleton.go` 生成/渲染/归位/提议 + `digest.v2.md` 收紧 + `skeleton`/提议提示词 + 待归位区 + 影响半径闸（含 Matrix 过渡） + 配置项 | 给 C# 播大方向能生成多层骨架；存量卡全量归位；挂不上的进 `_待归位.md`；大动作走 Matrix 批准、有快照可回滚 |
 | **G：缺口填充** | `gapfill.go` 填充循环 + V2 核实（Extract+verify）+ G3 冷却让路 + 配额/开关 + 出处/置信度落 frontmatter | C# 打样：`pkb-curate fill --domain C#` 自顶向下补缺口；卡带 `source`/`confidence`；冷却域名被让路；低置信卡进 audit |
 | **H：资讯库+晋升** | 分领域分日落盘 + 与日报联动 + `资讯/` 排除 + 晋升闸 | `资讯/<领域>/<日期>.md` 每日生成；耐久知识点晋升为知识库卡（走 V2）；事件资讯不晋升 |
 | **I：调方向前端** | 窄掌舵面（批准提议/设大方向/剪节点）——**形态待用户定，本计划不细化** | 待定 |
@@ -221,17 +221,20 @@ Phase I (调方向前端)         ──→ Phase F（形态待定，最后做�
 ### 8.3 验收自检（CLAUDE.md §3 + 原子计划清单的增量）
 
 ```
-□ go build / go vet 绿；新包有真实调用方（导入 > 0）
-□ digest 不再自行猜树：层级源自已声明关系 + 骨架（ADR-0004 落实）
-□ 骨架 md 机器独占写：人不手改路径，快照在替换前执行（W1+护栏6）
-□ 缺口填充卡必带 source/confidence；V2 真去 fetch（grep 验证调 Extract）
-□ G3：抓取前查 next_allowed_at；失败不进 crawl_failures，只降级卡
-□ 影响半径闸：大动作走 Matrix、小动作快照后自动应用
-□ 资讯不进骨架、不存独立卡；资讯/ 已排除出 digest 候选
-□ 晋升走缺口填充同一 V2 路径（不旁路核实）
-□ 新增配置项随消费方 Phase 落地（无死配置）；全配置驱动可调方向
-□ 模型路由：生成顶级档 / 判断快强档，走 llm_jobs 队列
+☑ go build / go vet 绿；新包有真实调用方（导入 > 0）                      [Phase F ✅]
+☑ digest 不再自行猜树：层级源自已声明关系 + 骨架（ADR-0004 落实）          [Phase F ✅ Slice3]
+☑ 骨架 md 机器独占写：人不手改路径，快照在替换前执行（W1+护栏6）          [Phase F ✅]
+□ 缺口填充卡必带 source/confidence；V2 真去 fetch（grep 验证调 Extract）   [Phase G]
+□ G3：抓取前查 next_allowed_at；失败不进 crawl_failures，只降级卡          [Phase G]
+☑ 影响半径闸：大动作走 Matrix、小动作快照后自动应用                        [Phase F ✅ Slice4]
+□ 资讯不进骨架、不存独立卡；资讯/ 已排除出 digest 候选                      [Phase H]
+□ 晋升走缺口填充同一 V2 路径（不旁路核实）                                 [Phase H]
+☑ 新增配置项随消费方 Phase 落地（无死配置）；全配置驱动可调方向            [Phase F ✅]
+☑ 模型路由：生成顶级档 / 判断快强档，走 llm_jobs 队列                      [Phase F ✅ skeleton_model 顶级 / match_model 快强]
 ```
+
+> Phase F 落点速查：`pkb-curate skeleton <域>`（生成骨架）/ `match <域>`（归位）/ `propose <域>`（涌现回流提议+闸）/ `proposals list|approve|reject <id>`（CLI 审批）；Matrix `!pkb list|approve|reject <id>`（过渡审批）。digest 每轮自动归位。骨架结构真相源活在 `vault/<域>/_index.md`，待批提议在 `vault/_提议/<id>.md`。
+> **未运行时验证**（vault 在生产 keeper，本地无 LLM）：build/vet/test 全绿、契约测试守住格式，实际生成质量待部署后 `pkb-curate skeleton programming` 自验。
 
 ---
 

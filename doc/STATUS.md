@@ -1,6 +1,6 @@
 # SilkSpool 项目进度
 
-> 最后更新: 2026-06-12
+> 最后更新: 2026-06-17
 >
 > 本文档是跨仓库的全局进度视图(SilkSpool IaC + Bellkeeper 应用 + n8n 工作流)。
 > 演进规划见 [ROADMAP.md](ROADMAP.md);已完成计划的原始文档在 [archive/](archive/)。
@@ -63,6 +63,7 @@
 
 | 时间 | 动作 |
 |------|------|
+| 2026-06-17 | PKB 知识骨架 Phase F 落地(ADR-0004/0005):骨架=结构真相源,`pkb-curate skeleton/match/propose` + digest 每轮确定性归位 + 待归位区 + 影响半径闸(小动作自动应用/大动作 Matrix `!pkb` 审批);本地未推,待部署 keeper 自验 |
 | 2026-06-12 | Phase 9-10 (T5-T8): Agent MVP + 写工具 + API 补齐 + 前端对齐;v1.0.0 收尾 |
 | 2026-06-11 | Matrix 平台改造计划定稿(matrix-platform-overhaul-plan.md,T1-T9) |
 | 2026-06-10 | LLM Proxy / PKB 提示词体系审查;文档大整理 |
