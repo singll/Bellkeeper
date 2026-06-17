@@ -77,6 +77,11 @@ func (c *Curator) RunDigest(opts DigestOptions) error {
 
 	var generated int
 	for _, domain := range domains {
+		if domain.Feed {
+			// 资讯库容器（ADR-0005）：vault 子目录是分领域分日资讯存档，不产知识原子卡——
+			// 跳过 digest（资讯不进知识骨架/综述，亦不被 collectDigestCards 遍历）。
+			continue
+		}
 		cards, err := c.collectDigestCards(domain, since, maxCards)
 		if err != nil {
 			fmt.Printf("[pkb-digest] ⚠ %s 收集失败: %v\n", domain.Name, err)

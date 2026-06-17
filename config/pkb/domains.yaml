@@ -87,3 +87,5 @@ domains:
     vault_subpath: vault/资讯
     keywords: [发布, release, 新版本, 趋势, 动态, 快讯]
     vault_threshold: 8.0           # 资讯门槛更高（时效性内容少进 vault）
+    feed: true                     # 资讯库容器（ADR-0005）：vault/资讯 承载分领域分日资讯存档(资讯/<领域>/<日期>.md)，
+                                   # 不产知识原子卡——digest/audit 跳过本领域、知识卡统计不计入，资讯不进知识骨架。

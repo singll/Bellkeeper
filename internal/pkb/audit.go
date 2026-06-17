@@ -63,6 +63,11 @@ func (c *Curator) buildAuditGraph() *auditGraph {
 	conceptIndex := make(map[string][]string)
 
 	for _, domain := range c.domains.Domains {
+		if domain.Feed {
+			// 资讯库容器（ADR-0005）：分领域分日资讯存档不是知识原子卡，
+			// 跳过链接图建图（不进 audit 健康度/低置信占比统计）。
+			continue
+		}
 		root := filepath.Join(c.basePath, domain.VaultSubpath)
 		if _, err := os.Stat(root); os.IsNotExist(err) {
 			continue

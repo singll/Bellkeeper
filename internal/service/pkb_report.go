@@ -192,7 +192,7 @@ func (s *PKBReportService) VaultStats() (*PKBVaultStats, error) {
 
 	for _, entry := range entries {
 		if !entry.IsDir() || strings.HasPrefix(entry.Name(), ".") ||
-			strings.HasPrefix(entry.Name(), "_") || entry.Name() == "daily" {
+			strings.HasPrefix(entry.Name(), "_") || entry.Name() == "daily" || entry.Name() == "资讯" {
 			continue
 		}
 		stats.Trees++
@@ -357,7 +357,9 @@ func shouldSkipPKBReportDir(path, root, name string) bool {
 		return false
 	}
 	switch name {
-	case "daily", "digest", "maps", "topics":
+	// "资讯" = 资讯库容器目录（ADR-0005，domains.yaml feed 领域 vault_subpath 末段）：
+	// 分领域分日资讯存档不是知识原子卡，排除出 VaultCardsByDate/VaultStats 的知识卡遍历。
+	case "daily", "digest", "maps", "topics", "资讯":
 		return true
 	default:
 		return strings.HasPrefix(name, ".") || strings.HasPrefix(name, "_")

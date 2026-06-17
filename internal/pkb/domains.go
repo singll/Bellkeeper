@@ -76,6 +76,10 @@ type Domain struct {
 	IsDefault        bool     `yaml:"is_default"`
 	VaultThreshold   float64  `yaml:"vault_threshold"`   // 0 = 用 defaults
 	ArchiveThreshold float64  `yaml:"archive_threshold"` // 0 = 用 defaults
+	// Feed 标记该领域为「资讯库容器」（ADR-0005）：其 vault 子目录承载分领域分日资讯存档
+	// （资讯/<领域>/<日期>.md），不产知识原子卡——故 digest/audit 的领域遍历跳过它、知识卡
+	// 统计不计入，资讯不污染知识骨架（替代「collectDigestCards 路径排除」的更干净做法）。
+	Feed bool `yaml:"feed"`
 }
 
 // DomainsConfig domains.yaml 的根
