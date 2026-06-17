@@ -134,6 +134,14 @@ func (c *Curator) RunDigest(opts DigestOptions) error {
 				generated++
 			}
 		}
+
+		// ADR-0004：digest 写完根索引后，用最新骨架对全部原子卡做确定性归位——
+		// 把 LLM 生成的知识树覆盖为「骨架渲染树」（结构以骨架为准，不再凭卡片猜树），
+		// 并产出/更新待归位区。snapshot=false（本轮开头已快照 pre-digest 索引），
+		// rebuild 由本轮末尾统一触发。无骨架的领域内部 no-op，digest 行为不变。
+		if err := c.placeCardsOntoSkeleton(domain, false, false); err != nil {
+			fmt.Printf("[pkb-digest] ⚠ %s 归位失败（digest 根索引已写盘）: %v\n", domain.Name, err)
+		}
 	}
 
 	if !opts.DryRun && generated > 0 {

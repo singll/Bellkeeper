@@ -120,17 +120,46 @@ func (c *Curator) RunMatch(opts MatchOptions) error {
 	if !ok {
 		return fmt.Errorf("unknown domain: %s", opts.Domain)
 	}
+	indexPath := filepath.Join(c.basePath, domain.VaultSubpath, "_index.md")
+	if _, err := os.Stat(indexPath); err != nil {
+		return fmt.Errorf("领域 %s 尚无骨架 _index.md（先跑 `pkb-curate skeleton %s` 生成）: %w", domain.Name, domain.Name, err)
+	}
 
+	if err := c.placeCardsOntoSkeleton(domain, opts.DryRun, true); err != nil {
+		return err
+	}
+	if opts.DryRun {
+		return nil
+	}
+
+	fmt.Printf("[pkb-match] 触发 rebuild 与文件系统对齐...\n")
+	if err := c.client.Rebuild(); err != nil {
+		fmt.Printf("[pkb-match] ⚠ rebuild 失败（归位已写盘，可稍后手动 rebuild）: %v\n", err)
+	}
+	fmt.Printf("[pkb-match] 完成\n")
+	return nil
+}
+
+// placeCardsOntoSkeleton 执行一次确定性归位（无 rebuild，供 RunMatch 与 RunDigest 复用）：
+// 读 _index.md → 解析骨架节点 → match_model 判定 → 渲染树（缺口→[[卡]]）→ 写 _index.md + _待归位.md。
+// 领域无骨架（无 _index.md 或无节点）则记录并 no-op 返回 nil，使 digest 在旧领域上行为不变。
+// snapshot=true 时覆盖前快照旧 _index.md（digest 流程已自行快照，传 false 避免重复）。
+func (c *Curator) placeCardsOntoSkeleton(domain Domain, dryRun, snapshot bool) error {
 	indexPath := filepath.Join(c.basePath, domain.VaultSubpath, "_index.md")
 	data, err := os.ReadFile(indexPath)
 	if err != nil {
-		return fmt.Errorf("领域 %s 尚无骨架 _index.md（先跑 `pkb-curate skeleton %s` 生成）: %w", domain.Name, domain.Name, err)
+		if os.IsNotExist(err) {
+			fmt.Printf("[pkb-match] %s 无骨架 _index.md，跳过归位\n", domain.Name)
+			return nil
+		}
+		return fmt.Errorf("read _index.md: %w", err)
 	}
 	indexContent := string(data)
 
 	nodes := parseSkeletonNodes(indexContent)
 	if len(nodes) == 0 {
-		return fmt.Errorf("领域 %s 的 _index.md「## 知识树」未解析到任何节点", domain.Name)
+		fmt.Printf("[pkb-match] %s 的 _index.md 无骨架节点，跳过归位\n", domain.Name)
+		return nil
 	}
 
 	cards, err := c.collectAllCards(domain)
@@ -139,7 +168,7 @@ func (c *Curator) RunMatch(opts MatchOptions) error {
 	}
 
 	fmt.Printf("[pkb-match] 模式=%s 领域=%s(%s) 骨架节点=%d 原子卡=%d model=%s prompt=%s\n",
-		digestMode(opts.DryRun), domain.Display, domain.Name, len(nodes), len(cards),
+		digestMode(dryRun), domain.Display, domain.Name, len(nodes), len(cards),
 		c.domains.Defaults.MatchModel, c.matchPromptName)
 
 	if len(cards) == 0 {
@@ -168,7 +197,7 @@ func (c *Curator) RunMatch(opts MatchOptions) error {
 	}
 	fmt.Printf("[pkb-match] 归位=%d 待归位=%d\n", len(cards)-len(unplaced), len(unplaced))
 
-	if opts.DryRun {
+	if dryRun {
 		for _, n := range nodes {
 			if cs := placed[n]; len(cs) > 0 {
 				fmt.Printf("  [节点] %s ← %s\n", n, strings.Join(cs, ", "))
@@ -180,8 +209,7 @@ func (c *Curator) RunMatch(opts MatchOptions) error {
 		return nil
 	}
 
-	// 护栏 6：覆盖前快照旧 _index.md
-	if c.domains.Defaults.GetMapSnapshotOnRefresh() {
+	if snapshot && c.domains.Defaults.GetMapSnapshotOnRefresh() {
 		if err := c.snapshotIndex(domain); err != nil {
 			fmt.Printf("[pkb-match] ⚠ 快照旧 _index.md 失败（继续）: %v\n", err)
 		}
@@ -205,12 +233,6 @@ func (c *Curator) RunMatch(opts MatchOptions) error {
 			fmt.Printf("[pkb-match] ⚠ 移除空待归位文件失败: %v\n", err)
 		}
 	}
-
-	fmt.Printf("[pkb-match] 触发 rebuild 与文件系统对齐...\n")
-	if err := c.client.Rebuild(); err != nil {
-		fmt.Printf("[pkb-match] ⚠ rebuild 失败（归位已写盘，可稍后手动 rebuild）: %v\n", err)
-	}
-	fmt.Printf("[pkb-match] 完成\n")
 	return nil
 }
 

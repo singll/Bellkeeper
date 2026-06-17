@@ -1,6 +1,8 @@
 package pkb
 
 import (
+	"os"
+	"path/filepath"
 	"strings"
 	"testing"
 )
@@ -182,5 +184,38 @@ func TestParseMatchJSON(t *testing.T) {
 
 	if _, err := parseMatchJSON("没有任何 JSON 的输出"); err == nil {
 		t.Error("无 JSON 数组的输出应返回错误")
+	}
+}
+
+// 归位在「无骨架」领域上必须 no-op 返回 nil——这是 digest 接入归位后旧领域不崩的保证。
+func TestPlaceCardsOntoSkeletonNoOpWithoutIndex(t *testing.T) {
+	tmp := t.TempDir()
+	domSub := filepath.Join("vault", "test")
+	if err := os.MkdirAll(filepath.Join(tmp, domSub), 0755); err != nil {
+		t.Fatal(err)
+	}
+	c := &Curator{basePath: tmp, domains: &DomainsConfig{}}
+	dom := Domain{Name: "test", Display: "测试", VaultSubpath: domSub}
+	if err := c.placeCardsOntoSkeleton(dom, false, false); err != nil {
+		t.Errorf("无 _index.md 应 no-op 返回 nil，实际: %v", err)
+	}
+}
+
+func TestPlaceCardsOntoSkeletonNoOpEmptyTree(t *testing.T) {
+	tmp := t.TempDir()
+	domSub := filepath.Join("vault", "test")
+	dir := filepath.Join(tmp, domSub)
+	if err := os.MkdirAll(dir, 0755); err != nil {
+		t.Fatal(err)
+	}
+	// _index.md 存在但无「## 知识树」节点
+	noTree := "---\ntitle: x\ntype: pkb_map\n---\n\n## 体系概览\n暂无结构\n"
+	if err := os.WriteFile(filepath.Join(dir, "_index.md"), []byte(noTree), 0644); err != nil {
+		t.Fatal(err)
+	}
+	c := &Curator{basePath: tmp, domains: &DomainsConfig{}}
+	dom := Domain{Name: "test", VaultSubpath: domSub}
+	if err := c.placeCardsOntoSkeleton(dom, false, false); err != nil {
+		t.Errorf("无骨架节点应 no-op 返回 nil，实际: %v", err)
 	}
 }
