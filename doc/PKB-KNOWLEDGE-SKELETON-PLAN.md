@@ -215,7 +215,7 @@ Phase I (调方向前端)         ──→ Phase F（形态待定，最后做�
 |-------|------|---------|
 | **F：知识骨架** ✅已完成(2026-06-17, commits 3291f6d/6bc31a0/7e3c1f6/16f02b2，本地未推) | `skeleton.go` 生成/渲染/归位/提议 + `digest.v2.md` 收紧 + `skeleton`/提议提示词 + 待归位区 + 影响半径闸（含 Matrix 过渡） + 配置项 | 给 C# 播大方向能生成多层骨架；存量卡全量归位；挂不上的进 `_待归位.md`；大动作走 Matrix 批准、有快照可回滚 |
 | **G：缺口填充** ✅已完成(2026-06-17, commits 9942c79/c45da39/aef08d2/32b7858，本地未推) | `gapfill.go` 填充循环 + V2 核实（Extract+verify）+ G3 冷却让路 + 配额/开关 + 出处/置信度落 frontmatter | C# 打样：`pkb-curate fill programming` 自顶向下补缺口；卡带 `source`/`verification`/`confidence`；冷却域名被让路；低置信卡进 audit |
-| **H：资讯库+晋升** | 分领域分日落盘 + 与日报联动 + `资讯/` 排除 + 晋升闸 | `资讯/<领域>/<日期>.md` 每日生成；耐久知识点晋升为知识库卡（走 V2）；事件资讯不晋升 |
+| **H：资讯库+晋升** ✅已完成(2026-06-17, commits f9fdd7b/e696edd/59c4ee5/55e917b，本地未推) | 分领域分日落盘 + 与日报联动 + `资讯/` 排除 + 晋升闸 | `资讯/<领域>/<日期>.md` 每日生成；耐久知识点晋升为知识库卡（走 V2）；事件资讯不晋升 |
 | **I：调方向前端** | 窄掌舵面（批准提议/设大方向/剪节点）——**形态待用户定，本计划不细化** | 待定 |
 
 ### 8.3 验收自检（CLAUDE.md §3 + 原子计划清单的增量）
@@ -227,14 +227,15 @@ Phase I (调方向前端)         ──→ Phase F（形态待定，最后做�
 ☑ 缺口填充卡必带 source/verification/confidence；V2 真去 fetch（grep 验证调 Extract）   [Phase G ✅ G-2]
 ☑ G3：抓取前查 next_allowed_at；失败不进 crawl_failures，只降级卡          [Phase G ✅ G-2]
 ☑ 影响半径闸：大动作走 Matrix、小动作快照后自动应用                        [Phase F ✅ Slice4]
-□ 资讯不进骨架、不存独立卡；资讯/ 已排除出 digest 候选                      [Phase H]
-□ 晋升走缺口填充同一 V2 路径（不旁路核实）                                 [Phase H]
+☑ 资讯不进骨架、不存独立卡；资讯/ 已排除出 digest 候选                      [Phase H ✅ H-1]
+☑ 晋升走缺口填充同一 V2 路径（不旁路核实）                                 [Phase H ✅ H-3]
 ☑ 新增配置项随消费方 Phase 落地（无死配置）；全配置驱动可调方向            [Phase F ✅]
 ☑ 模型路由：生成顶级档 / 判断快强档，走 llm_jobs 队列                      [Phase F ✅ skeleton_model 顶级 / match_model 快强]
 ```
 
 > Phase F 落点速查：`pkb-curate skeleton <域>`（生成骨架）/ `match <域>`（归位）/ `propose <域>`（涌现回流提议+闸）/ `proposals list|approve|reject <id>`（CLI 审批）；Matrix `!pkb list|approve|reject <id>`（过渡审批）。digest 每轮自动归位。骨架结构真相源活在 `vault/<域>/_index.md`，待批提议在 `vault/_提议/<id>.md`。
 > Phase G 落点速查：`pkb-curate fill <域>`（缺口填充，独立子命令，可挂独立 cron；`--per-run`/`--dry-run`）；新增 server `POST /api/files/extract`（bare 抽取不入库，供 V2 核实）。卡落 `source` / `verification`(verified/unverified/llm-only) / `confidence`(high/medium/low)；F1 稳定缺口起草+核实，F2 易变缺口(volatility=volatile 且有源)定向爬走 reconstruct。开关在 `domains.yaml` 的 `gap_fill_enabled.<域>`（打样开 programming）；模型路由 `gapfill_model`(顶级,回退 skeleton_model)/`verify_model`(快强,回退 match_model)。
+> Phase H 落点速查：`news` 领域配 `feed: true` 成资讯库容器（digest/audit 领域遍历跳过、日报卡统计排除 `vault/资讯`——领域级跳过等价「资讯/ 排除出 digest 候选」）；`pkb-curate feed`（资讯库生成，独立子命令可挂 cron；`--date`/`--dry-run`/`--no-promote`）遍历 raw+archive 取当日资讯类(`pkb_type∈feed_content_types`)→按 `pkb_domain` 分领域 `promote_model` 综述→落 `vault/资讯/<领域>/<日期>.md`(type:pkb_feed，不存独立卡)。晋升闸：`promote_model` 识别耐久知识点→`shouldPromote` 把闸(非事件 && durability≥`promote_durability_min`)→复用 `fillOneGap` 走同一 V2 路径晋升+`placeCardsOntoSkeleton` 归位、标 `pkb_promoted`；事件性不晋升。日报「今日资讯存档」节弱联动(`FeedArchivesByDate`)。配置 `promote_model`(快强,回退 match_model)/`feed_content_types`(默认 news,release)/`promote_enabled`/`promote_durability_min`(默认7)。
 > **未运行时验证**（vault 在生产 keeper，本地无 LLM）：build/vet/test 全绿、契约测试守住格式，实际生成质量待部署后 `pkb-curate skeleton programming` 自验。
 
 ---
