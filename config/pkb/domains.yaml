@@ -15,6 +15,7 @@ defaults:
   reconstruct_model: pool-pkb  # 重构用 kimi-k2.6（moonshot，推理强；仅 >=7 高分文章触发，量少）
   digest_model: pool-pkb       # 体系化综述用强模型，低频触发
   skeleton_model: pool-pkb     # 骨架生成用顶级推理档（画整棵目标概念树，高价值低频）；空则回退 digest_model
+  match_model: pool-summary    # 归位匹配用快强档（卡↔骨架节点判断，高频）；空则回退 score_model
   score_temperature: 0.2           # 快模型允许低温，求稳定 JSON
   reconstruct_temperature: 1.0     # kimi-k2.6 是推理模型，仅接受 temperature=1
   digest_temperature: 1.0          # 与 pool-pkb 默认模型兼容

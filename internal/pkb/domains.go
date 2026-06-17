@@ -26,6 +26,7 @@ type Defaults struct {
 	ReconstructModel       string  `yaml:"reconstruct_model"`
 	DigestModel            string  `yaml:"digest_model"`
 	SkeletonModel          string  `yaml:"skeleton_model"` // 骨架生成用顶级推理档（高价值低频）；空则回退 digest_model
+	MatchModel             string  `yaml:"match_model"`    // 归位匹配用快强档（卡↔骨架节点高频判断）；空则回退 score_model
 	ScoreTemperature       float64 `yaml:"score_temperature"`
 	ReconstructTemperature float64 `yaml:"reconstruct_temperature"`
 	DigestTemperature      float64 `yaml:"digest_temperature"`
@@ -111,6 +112,9 @@ func LoadDomains(path string) (*DomainsConfig, error) {
 	}
 	if d.SkeletonModel == "" {
 		d.SkeletonModel = d.DigestModel
+	}
+	if d.MatchModel == "" {
+		d.MatchModel = d.ScoreModel
 	}
 	if d.ScoreTemperature == 0 {
 		d.ScoreTemperature = 0.2

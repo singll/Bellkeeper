@@ -20,6 +20,7 @@ type PromptRegistryActive struct {
 	Digest      string `yaml:"digest"`
 	DigestTopic string `yaml:"digest_topic"`
 	Skeleton    string `yaml:"skeleton"`
+	Match       string `yaml:"match"`
 }
 
 func LoadPromptRegistry(configDir string) (*PromptRegistry, error) {
@@ -53,6 +54,9 @@ func LoadPromptRegistry(configDir string) (*PromptRegistry, error) {
 	}
 	if reg.Active.Skeleton == "" {
 		reg.Active.Skeleton = "skeleton.md"
+	}
+	if reg.Active.Match == "" {
+		reg.Active.Match = "match.md"
 	}
 	return reg, nil
 }

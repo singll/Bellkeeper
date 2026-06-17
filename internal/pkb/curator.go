@@ -36,11 +36,13 @@ type Curator struct {
 	digestPrompt          string
 	digestTopicPrompt     string
 	skeletonPrompt        string
+	matchPrompt           string
 	scorePromptName       string
 	reconstructName       string
 	digestPromptName      string
 	digestTopicPromptName string
 	skeletonPromptName    string
+	matchPromptName       string
 	dryRun                bool
 	rescan                bool
 	perRun                int
@@ -83,6 +85,10 @@ func NewCurator(cfg *config.Config, opts Options, articleRepo *repository.Articl
 	if err != nil {
 		return nil, err
 	}
+	matchPrompt, err := loadPromptFile(opts.ConfigDir, registry.Active.Match)
+	if err != nil {
+		return nil, err
+	}
 
 	llmBase := cfg.Classify.LLMProxyURL
 	if llmBase == "" {
@@ -117,11 +123,13 @@ func NewCurator(cfg *config.Config, opts Options, articleRepo *repository.Articl
 		digestPrompt:          digestPrompt,
 		digestTopicPrompt:     digestTopicPrompt,
 		skeletonPrompt:        skeletonPrompt,
+		matchPrompt:           matchPrompt,
 		scorePromptName:       registry.Active.Score,
 		reconstructName:       registry.Active.Reconstruct,
 		digestPromptName:      registry.Active.Digest,
 		digestTopicPromptName: registry.Active.DigestTopic,
 		skeletonPromptName:    registry.Active.Skeleton,
+		matchPromptName:       registry.Active.Match,
 		dryRun:                opts.DryRun,
 		rescan:                opts.Rescan,
 		perRun:                perRun,

@@ -79,3 +79,108 @@ func TestRunSkeletonRejectsUnknownDomain(t *testing.T) {
 		t.Errorf("未知领域应返回 unknown domain 错误，实际: %v", err)
 	}
 }
+
+func TestParseSkeletonNodes(t *testing.T) {
+	nodes := parseSkeletonNodes(sampleSkeletonOutput)
+	want := []string{"语言基础", "类型系统", "泛型", "异步编程", "async/await", "内存与GC"}
+	if len(nodes) != len(want) {
+		t.Fatalf("parseSkeletonNodes 得到 %d 个节点 %v，期望 %d 个 %v", len(nodes), nodes, len(want), want)
+	}
+	for i := range want {
+		if nodes[i] != want[i] {
+			t.Errorf("节点[%d]=%q，期望 %q", i, nodes[i], want[i])
+		}
+	}
+	// 核心脉络里的 [[类型系统]] 等不应被当成新节点（只读「## 知识树」章节）
+	seen := map[string]int{}
+	for _, n := range nodes {
+		seen[n]++
+	}
+	if seen["类型系统"] != 1 {
+		t.Errorf("「类型系统」应只出现一次（来自知识树，非核心脉络），实际 %d 次", seen["类型系统"])
+	}
+}
+
+func TestRenderSkeletonWithCards(t *testing.T) {
+	placed := map[string][]string{
+		"泛型":   {"C#泛型约束"},
+		"类型系统": {"值类型与引用类型", "可空引用类型"},
+	}
+	out := renderSkeletonWithCards(sampleSkeletonOutput, placed)
+
+	if !strings.Contains(out, "- 泛型 [[C#泛型约束]]") {
+		t.Errorf("泛型节点应挂上 [[C#泛型约束]]，实际输出:\n%s", out)
+	}
+	if !strings.Contains(out, "- 类型系统 [[值类型与引用类型]], [[可空引用类型]]") {
+		t.Errorf("类型系统节点应挂上两张卡，实际输出:\n%s", out)
+	}
+	if !strings.Contains(out, "- 异步编程 [缺口]") {
+		t.Error("无卡节点「异步编程」应保持 [缺口]")
+	}
+	// frontmatter 与其余章节不动
+	if !strings.Contains(out, "type: pkb_map") {
+		t.Error("frontmatter 被破坏：丢失 type: pkb_map")
+	}
+	if !strings.Contains(out, "## 核心脉络") || !strings.Contains(out, "## 缺口与探索方向") {
+		t.Error("散文章节被破坏")
+	}
+}
+
+func TestRenderSkeletonIdempotent(t *testing.T) {
+	placed := map[string][]string{"泛型": {"C#泛型约束"}}
+	once := renderSkeletonWithCards(sampleSkeletonOutput, placed)
+	twice := renderSkeletonWithCards(once, placed)
+	if once != twice {
+		t.Errorf("归位渲染应幂等（已挂卡节点再渲染不变）。\n首次:\n%s\n二次:\n%s", once, twice)
+	}
+	// 第二次解析仍应得到全部 6 个节点（已填 [[..]] 节点不丢）
+	if got := len(parseSkeletonNodes(once)); got != 6 {
+		t.Errorf("已渲染骨架再解析应得 6 节点，实际 %d", got)
+	}
+}
+
+func TestParseMatchJSON(t *testing.T) {
+	cases := []struct {
+		name    string
+		in      string
+		wantLen int
+		check   func(map[string]string) bool
+	}{
+		{
+			"裸JSON数组",
+			`[{"concept":"a","node":"X"},{"concept":"b","node":"待归位"}]`,
+			2,
+			func(m map[string]string) bool { return m["a"] == "X" && m["b"] == "待归位" },
+		},
+		{
+			"代码块包裹",
+			"```json\n[{\"concept\":\"泛型约束\",\"node\":\"泛型\"}]\n```",
+			1,
+			func(m map[string]string) bool { return m["泛型约束"] == "泛型" },
+		},
+		{
+			"前后有解释文字",
+			`这是结果：[{"concept":"x","node":"Y"}] 完毕`,
+			1,
+			func(m map[string]string) bool { return m["x"] == "Y" },
+		},
+	}
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			m, err := parseMatchJSON(tc.in)
+			if err != nil {
+				t.Fatalf("parseMatchJSON 失败: %v", err)
+			}
+			if len(m) != tc.wantLen {
+				t.Errorf("解析得 %d 项，期望 %d：%v", len(m), tc.wantLen, m)
+			}
+			if !tc.check(m) {
+				t.Errorf("内容校验失败：%v", m)
+			}
+		})
+	}
+
+	if _, err := parseMatchJSON("没有任何 JSON 的输出"); err == nil {
+		t.Error("无 JSON 数组的输出应返回错误")
+	}
+}

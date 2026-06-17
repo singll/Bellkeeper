@@ -126,6 +126,22 @@ The domain must have a scope: line in domains.yaml first. Use --dry-run to previ
 	pkbSkeletonCmd.Flags().StringVar(&pkbCfgDir, "pkb-config", "config/pkb", "directory holding domains.yaml + prompts/")
 	pkbCurateCmd.AddCommand(pkbSkeletonCmd)
 
+	pkbMatchCmd := &cobra.Command{
+		Use:   "match <domain>",
+		Short: "Place a domain's atomic cards onto its knowledge skeleton; unmatched cards go to the waitlist",
+		Long: `match reads a domain's skeleton (_index.md), collects all atomic cards, and asks the
+match_model which skeleton node each card belongs to. Matched cards fill their node
+([缺口] → [[card]]); unmatched cards go to _待归位.md. The skeleton structure is preserved
+exactly — only node mount markers are recomputed. Writes via guardrail-6 (snapshot → atomic).
+
+The domain must already have a skeleton (run skeleton first). Use --dry-run to preview.`,
+		Args: cobra.ExactArgs(1),
+		Run:  runPkbMatch,
+	}
+	pkbMatchCmd.Flags().BoolVar(&pkbDryRun, "dry-run", false, "print placement decisions without calling the LLM or writing files")
+	pkbMatchCmd.Flags().StringVar(&pkbCfgDir, "pkb-config", "config/pkb", "directory holding domains.yaml + prompts/")
+	pkbCurateCmd.AddCommand(pkbMatchCmd)
+
 	rootCmd.AddCommand(serveCmd, versionCmd, migrateCmd, pkbCurateCmd)
 
 	if err := rootCmd.Execute(); err != nil {
@@ -342,6 +358,49 @@ func runPkbSkeleton(cmd *cobra.Command, args []string) {
 		DryRun: pkbDryRun,
 	}); err != nil {
 		fmt.Fprintf(os.Stderr, "pkb-curate skeleton failed: %v\n", err)
+		os.Exit(1)
+	}
+}
+
+func runPkbMatch(cmd *cobra.Command, args []string) {
+	cfg, err := config.Load(cfgFile)
+	if err != nil {
+		fmt.Fprintf(os.Stderr, "Failed to load config: %v\n", err)
+		os.Exit(1)
+	}
+
+	if err := middleware.InitLogger(cfg.Logging.Level); err != nil {
+		fmt.Fprintf(os.Stderr, "Failed to initialize logger: %v\n", err)
+		os.Exit(1)
+	}
+
+	db, err := model.InitDB(cfg.Database)
+	if err != nil {
+		fmt.Fprintf(os.Stderr, "Failed to connect to database: %v\n", err)
+		os.Exit(1)
+	}
+	articleRepo := repository.NewArticleTagRepository(db)
+	var llmJobs *service.LLMJobQueueService
+	if cfg.LLMJobQueue.Enabled {
+		llmJobRepo := repository.NewLLMJobRepository(db)
+		llmJobs = service.NewLLMJobQueueService(cfg.LLMJobQueue, llmJobRepo, cfg.Classify.LLMProxyURL, cfg.Server.APIKey)
+	}
+
+	curator, err := pkb.NewCurator(cfg, pkb.Options{
+		ConfigDir: pkbCfgDir,
+		DryRun:    pkbDryRun,
+		LLMJobs:   llmJobs,
+	}, articleRepo)
+	if err != nil {
+		fmt.Fprintf(os.Stderr, "Failed to init pkb curator: %v\n", err)
+		os.Exit(1)
+	}
+
+	if err := curator.RunMatch(pkb.MatchOptions{
+		Domain: args[0],
+		DryRun: pkbDryRun,
+	}); err != nil {
+		fmt.Fprintf(os.Stderr, "pkb-curate match failed: %v\n", err)
 		os.Exit(1)
 	}
 }
