@@ -20,6 +20,9 @@ type AuditResult struct {
 	DuplicateConcepts []ConceptCluster `json:"duplicate_concepts"`
 	CoverageRate      float64          `json:"coverage_rate"`
 	CardsWithMOC      int              `json:"cards_with_moc"`
+	// 低置信卡（缺口填充未核实/纯 LLM 编写）：verification ∈ {unverified, llm-only}（计划 §6 / Phase G）。
+	LowConfidenceCards int     `json:"low_confidence_cards"`
+	LowConfidenceRate  float64 `json:"low_confidence_rate"`
 }
 
 // HubCard 超级 hub 卡片（被过度连接的节点）
@@ -41,6 +44,7 @@ type auditNode struct {
 	AtomicConcept string
 	Aliases       []string
 	Type          string
+	Verification  string
 	InDegree      int
 	OutDegree     int
 	OutLinks      []string
@@ -74,6 +78,7 @@ func (c *Curator) buildAuditGraph() *auditGraph {
 			content := string(data)
 			fm := parseFrontmatterMap(content)
 			nodeType := fm["type"]
+			verification := fm["verification"]
 			concept := fm["atomic_concept"]
 			if concept == "" {
 				concept = fm["title"]
@@ -99,6 +104,7 @@ func (c *Curator) buildAuditGraph() *auditGraph {
 				AtomicConcept: concept,
 				Aliases:       aliases,
 				Type:          nodeType,
+				Verification:  verification,
 				OutLinks:      links,
 			}
 			nodes[path] = node
@@ -139,6 +145,9 @@ func (g *auditGraph) computeAuditMetrics() AuditResult {
 			continue
 		}
 		result.TotalCards++
+		if isLowConfidence(node.Verification) {
+			result.LowConfidenceCards++
+		}
 		outDegree := 0
 		for _, link := range node.OutLinks {
 			if g.validTargets[link] {
@@ -168,6 +177,7 @@ func (g *auditGraph) computeAuditMetrics() AuditResult {
 	if result.TotalCards > 0 {
 		result.OrphanRate = float64(result.OrphanCards) / float64(result.TotalCards) * 100
 		result.AvgDegree = float64(totalDegree) / float64(result.TotalCards)
+		result.LowConfidenceRate = float64(result.LowConfidenceCards) / float64(result.TotalCards) * 100
 	}
 
 	for concept, files := range g.conceptIndex {
@@ -259,6 +269,7 @@ func printAuditReport(r AuditResult) {
 	fmt.Printf("  总卡片数: %d\n", r.TotalCards)
 	fmt.Printf("  孤儿卡: %d (%.1f%%)\n", r.OrphanCards, r.OrphanRate)
 	fmt.Printf("  断链数: %d\n", r.BrokenLinks)
+	fmt.Printf("  低置信卡: %d (%.1f%%) [unverified+llm-only]\n", r.LowConfidenceCards, r.LowConfidenceRate)
 	fmt.Printf("  平均度: %.1f\n", r.AvgDegree)
 	fmt.Printf("  MOC 覆盖率: %.1f%% (%d/%d)\n", r.CoverageRate, r.CardsWithMOC, r.TotalCards)
 	if len(r.DuplicateConcepts) > 0 {
@@ -279,5 +290,5 @@ func printAuditReport(r AuditResult) {
 func (c *Curator) AuditSummary() string {
 	g := c.buildAuditGraph()
 	result := g.computeAuditMetrics()
-	return fmt.Sprintf("孤儿=%d 断链=%d 总卡=%d", result.OrphanCards, result.BrokenLinks, result.TotalCards)
+	return fmt.Sprintf("孤儿=%d 断链=%d 低置信=%d 总卡=%d", result.OrphanCards, result.BrokenLinks, result.LowConfidenceCards, result.TotalCards)
 }
