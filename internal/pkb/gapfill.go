@@ -150,11 +150,19 @@ func (c *Curator) fillOneGap(domain Domain, g gapNode, dir string) (gapFillOutco
 		return out, nil
 	}
 
-	// 1. 起草（gapfill_model 顶级推理档）
+	// 1. 起草（gapfill_model 顶级推理档）：自评易变性 + 写草稿 + 提议权威源
 	draft, err := c.draftGapCard(domain, g.Concept)
 	if err != nil {
 		return out, fmt.Errorf("draft: %w", err)
 	}
+
+	// F2：易变/前沿缺口跳过草稿卡，改定向爬权威源走 reconstruct 原子化（§4.2，步骤 b 后合流）。
+	// 易变知识模型记忆不可靠，以真实抓取内容为准；无提议源则回退 F1 草稿（下方）。
+	if draft.volatility == "volatile" && len(draft.sources) > 0 {
+		return c.fillGapByCrawl(domain, g, draft.sources, dir)
+	}
+
+	// F1：稳定缺口用草稿卡 + V2 核实
 	if strings.TrimSpace(draft.card) == "" {
 		return out, fmt.Errorf("draft 返回空卡")
 	}
@@ -387,4 +395,132 @@ func errOrEmpty(err error) string {
 		return err.Error()
 	}
 	return "内容为空或抓取未成功"
+}
+
+// fillGapByCrawl 是易变缺口的 F2 路径（计划 §4.2）：定向爬权威源 → reconstruct 原子化。
+// G3 冷却让路同 F1；抓到的内容经现有 reconstructCard 生成卡（基于真实页面，标 verified），
+// 与 F1 在「落卡 + 归位」处合流。抓取失败/冷却中只跳过本缺口（不写 crawl_failures）。
+func (c *Curator) fillGapByCrawl(domain Domain, g gapNode, sources []string, dir string) (gapFillOutcome, error) {
+	out := gapFillOutcome{concept: g.Concept}
+	primary := sources[0]
+	host := hostOf(primary)
+	fmt.Printf("    ↻ 易变缺口走定向爬（F2）：%s\n", primary)
+
+	if c.domainRepo != nil && host != "" {
+		cooling, err := c.domainRepo.IsCooling(host)
+		if err != nil {
+			fmt.Printf("    ⚠ 查询域名 %s 冷却状态失败（按未冷却处理）: %v\n", host, err)
+		} else if cooling {
+			out.skipped = fmt.Sprintf("源域名 %s 冷却中（易变缺口定向爬，留待下轮）", host)
+			return out, nil
+		}
+	}
+
+	res, err := c.client.Extract(primary)
+	if err != nil || res == nil || !res.Success || strings.TrimSpace(res.Content) == "" {
+		out.skipped = fmt.Sprintf("易变缺口定向爬抓取失败/为空：%s", errOrEmpty(err))
+		return out, nil
+	}
+
+	cards, err := c.reconstructGapCards(domain, g.Concept, res, primary)
+	if err != nil {
+		return out, fmt.Errorf("reconstruct: %w", err)
+	}
+	if written := c.writeGapReconstructedCards(domain, g.Concept, cards, primary, dir); written > 0 {
+		out.written = true
+		out.verification, out.confidence, out.source = "verified", "high", primary
+		fmt.Printf("    ✓ 定向爬原子化落 %d 张卡（verified，基于真实抓取）\n", written)
+	} else {
+		out.skipped = "reconstruct 未产出可落卡"
+	}
+	return out, nil
+}
+
+// reconstructGapCards 用现有 reconstructCard 把抓取到的权威源正文原子化成卡。
+// 缺口为定向补全目标，合成一个高相关高价值打分（ContentType=knowledge）喂重构提示词。
+func (c *Curator) reconstructGapCards(domain Domain, concept string, res *ExtractResult, sourceURL string) ([]string, error) {
+	art := ArticleMeta{Title: firstNonEmpty(res.Title, concept), URL: sourceURL}
+	score := &ScoreResult{
+		Relevance:      9,
+		Depth:          8,
+		Actionability:  7,
+		Durability:     7,
+		Novelty:        6,
+		ContentType:    "knowledge",
+		MatchedDomains: []string{domain.Name},
+	}
+	cards, _, err := c.reconstructCard(art, res.Content, score, domain, nil, nil, time.Now().Format("20060102"))
+	return cards, err
+}
+
+// writeGapReconstructedCards 落 F2 原子化产出的多张卡：第一张锚回缺口名（确保缺口→已填），
+// 其余卡保留各自 concept（作补充卡，由后续归位/digest 入网）。全部标 verified（基于真实抓取）。
+func (c *Curator) writeGapReconstructedCards(domain Domain, concept string, cards []string, sourceURL, dir string) int {
+	written := 0
+	for i, card := range cards {
+		anchor := ""
+		if i == 0 {
+			anchor = concept
+		}
+		card = finalizeCrawledGapCard(card, anchor, domain, sourceURL)
+		if err := validateCard(card); err != nil {
+			fmt.Printf("    ⚠ 第 %d 张 reconstruct 卡校验失败（跳过）: %v\n", i+1, err)
+			continue
+		}
+		card = pruneWikilinks(card, nil)
+
+		cardConcept := firstNonEmpty(frontmatterValue(card, "atomic_concept"), concept)
+		slug := sanitizeFilename(cardConcept)
+		dst := filepath.Join(dir, slug+".md")
+		if _, statErr := os.Stat(dst); statErr == nil {
+			placed := false
+			for n := 2; n <= 100; n++ {
+				alt := filepath.Join(dir, fmt.Sprintf("%s-%d.md", slug, n))
+				if _, e := os.Stat(alt); e != nil {
+					dst = alt
+					card = appendAlias(card, slug)
+					placed = true
+					break
+				}
+			}
+			if !placed {
+				fmt.Printf("    ⚠ %s 落盘位已满（跳过）\n", slug)
+				continue
+			}
+		}
+		tmp := dst + ".tmp.md"
+		if err := os.WriteFile(tmp, []byte(card), 0644); err != nil {
+			fmt.Printf("    ⚠ 写 %s 失败（跳过）: %v\n", dst, err)
+			continue
+		}
+		if err := os.Rename(tmp, dst); err != nil {
+			_ = os.Remove(tmp)
+			fmt.Printf("    ⚠ rename %s 失败（跳过）: %v\n", dst, err)
+			continue
+		}
+		fmt.Printf("    → %s\n", dst)
+		written++
+	}
+	return written
+}
+
+// finalizeCrawledGapCard 为 F2 原子化卡盖上缺口填充标记：标 verified/high（基于真实抓取），
+// 写回核实源 URL；anchorConcept 非空时强制 atomic_concept=缺口名（第一张卡，归位必中）。
+func finalizeCrawledGapCard(card, anchorConcept string, domain Domain, sourceURL string) string {
+	fields := map[string]string{
+		"type":         "pkb_card",
+		"domains":      domain.Name,
+		"source":       sourceURL,
+		"verification": "verified",
+		"confidence":   "high",
+		"ingest_date":  time.Now().Format("20060102"),
+		"pkb_gap_fill": "true",
+	}
+	if anchorConcept != "" {
+		fields["atomic_concept"] = anchorConcept
+	}
+	if frontmatterValue(card, "score") == "" {
+		fields["score"] = "7.0"
+	}
+	return upsertFrontmatter(card, fields)
 }

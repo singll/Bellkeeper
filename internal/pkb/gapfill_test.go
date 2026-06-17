@@ -194,3 +194,50 @@ func TestGapFillEnabledFor(t *testing.T) {
 	d.GapFillDefault = boolPtr(true)
 	assert.True(t, d.GapFillEnabledFor("security"))
 }
+
+// TestFinalizeCrawledGapCard 守住 F2 路径：定向爬原子化卡标 verified（基于真实抓取），
+// 第一张锚回缺口名（归位必中），补充卡保留自身概念；落卡后仍是合法卡。
+func TestFinalizeCrawledGapCard(t *testing.T) {
+	card := `---
+title: 抓取得到的概念
+type: pkb_card
+source: https://old
+ingest_date: 20250101
+score: 8.0
+domains: programming
+tags: [x]
+atomic_concept: 抓取得到的概念
+aliases: []
+card_type: definition
+---
+
+## 定义与本质
+定义。
+
+## 关键细节
+细节。
+
+## 适用场景与边界
+场景。
+
+## 与其他知识的关系
+（暂无关联）`
+
+	dom := Domain{Name: "programming"}
+
+	// 第一张卡：anchor=缺口名 → 强制改 atomic_concept（归位必中）
+	first := finalizeCrawledGapCard(card, "目标缺口", dom, "https://new")
+	assert.Contains(t, first, "atomic_concept: 目标缺口")
+	assert.NotContains(t, first, "atomic_concept: 抓取得到的概念")
+	assert.Contains(t, first, "verification: verified")
+	assert.Contains(t, first, "confidence: high")
+	assert.Contains(t, first, "source: https://new")
+	assert.Contains(t, first, "pkb_gap_fill: true")
+	assert.NoError(t, validateCard(first))
+
+	// 补充卡：anchor 空 → 保留自身概念
+	supp := finalizeCrawledGapCard(card, "", dom, "https://new")
+	assert.Contains(t, supp, "atomic_concept: 抓取得到的概念")
+	assert.Contains(t, supp, "verification: verified")
+	assert.NoError(t, validateCard(supp))
+}
