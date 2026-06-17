@@ -8,6 +8,16 @@ import (
 	"github.com/stretchr/testify/assert"
 )
 
+func TestFileIngestionService_ExtractURL_EmptyURL(t *testing.T) {
+	svc := &FileIngestionService{}
+
+	// 空/纯空白 URL 必须在触达 extractor 之前被拒（避免 nil-extractor deref，也省一次无谓抓取）。
+	for _, in := range []string{"", "   ", "\t\n"} {
+		_, err := svc.ExtractURL(in)
+		assert.Error(t, err, "empty url %q should error", in)
+	}
+}
+
 func TestFileIngestionService_sanitizeTitle(t *testing.T) {
 	svc := &FileIngestionService{}
 

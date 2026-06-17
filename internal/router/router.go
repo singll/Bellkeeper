@@ -258,6 +258,7 @@ func registerActivityLogRoutes(api *gin.RouterGroup, h *handler.ActivityLogHandl
 func registerFileIngestionRoutes(api *gin.RouterGroup, h *handler.FileIngestionHandler) {
 	files := api.Group("/files")
 	files.POST("/ingest/url", h.IngestURL)
+	files.POST("/extract", h.Extract)
 	files.GET("/metadata/:id", h.GetMetadata)
 	files.GET("/list", h.List)
 }

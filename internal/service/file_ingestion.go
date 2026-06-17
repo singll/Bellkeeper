@@ -78,6 +78,23 @@ func NewFileIngestionService(
 	}
 }
 
+// ExtractURL extracts a URL's main content via the configured extractors and returns
+// it WITHOUT ingesting — no URL/content dedup, no file write, no DB row. It backs the
+// bare POST /api/files/extract endpoint that pkb-curate's gap-fill (ADR-0004 Phase G,
+// Q7 V2 核实) uses to fetch an LLM-proposed authoritative source and check whether the
+// page actually supports a drafted card.
+func (s *FileIngestionService) ExtractURL(rawURL string) (*ExtractionResult, error) {
+	rawURL = strings.TrimSpace(rawURL)
+	if rawURL == "" {
+		return nil, fmt.Errorf("extract: url is required")
+	}
+	result, err := s.extractor.Extract(&ExtractionRequest{URL: rawURL})
+	if err != nil {
+		return nil, fmt.Errorf("extract %s: %w", rawURL, err)
+	}
+	return result, nil
+}
+
 // IngestURL ingests content from a URL and saves it as a file
 func (s *FileIngestionService) IngestURL(req *IngestURLRequest) (*IngestURLResponse, error) {
 	// 1. URL 去重

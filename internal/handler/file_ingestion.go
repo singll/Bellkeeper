@@ -37,6 +37,30 @@ func (h *FileIngestionHandler) IngestURL(c *gin.Context) {
 	response.Success(c, result)
 }
 
+// ExtractRequest is the body for POST /api/files/extract.
+type ExtractRequest struct {
+	URL string `json:"url" binding:"required"`
+}
+
+// Extract handles POST /api/files/extract — extract a URL's main content WITHOUT ingesting
+// (no dedup, no file write, no DB row). Backs pkb-curate gap-fill's V2 verification: fetch
+// an LLM-proposed authoritative source so it can be checked against a drafted card.
+func (h *FileIngestionHandler) Extract(c *gin.Context) {
+	var req ExtractRequest
+	if err := c.ShouldBindJSON(&req); err != nil {
+		response.BadRequest(c, err.Error())
+		return
+	}
+
+	result, err := h.svc.ExtractURL(req.URL)
+	if err != nil {
+		response.InternalError(c, err.Error())
+		return
+	}
+
+	response.Success(c, result)
+}
+
 // GetMetadata handles GET /api/files/metadata/:id
 func (h *FileIngestionHandler) GetMetadata(c *gin.Context) {
 	idStr := c.Param("id")
