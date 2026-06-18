@@ -5,6 +5,7 @@ import (
 	"errors"
 	"fmt"
 	"log"
+	"path/filepath"
 	"strconv"
 	"strings"
 	"sync"
@@ -20,12 +21,23 @@ const (
 	SettingAutoCurateEnabled = "feature_pkb_auto_curate"
 	SettingAutoIntervalMins  = "pkb_auto_interval_minutes"
 
-	defaultAutoInterval = 6 * time.Hour
-	minAutoInterval     = 30 * time.Minute
-	startupDelay        = time.Minute
-	togglePollInterval  = time.Minute
-	errorBackoff        = 30 * time.Minute
+	// 骨架链维护任务开关 + 间隔（独立于主 curate；默认关，由前端/运维显式开启）。
+	SettingAutoFillEnabled     = "feature_pkb_auto_fill"
+	SettingAutoFeedEnabled     = "feature_pkb_auto_feed"
+	SettingAutoProposeEnabled  = "feature_pkb_auto_propose"
+	SettingFillIntervalMins    = "pkb_fill_interval_minutes"
+	SettingFeedIntervalMins    = "pkb_feed_interval_minutes"
+	SettingProposeIntervalMins = "pkb_propose_interval_minutes"
+
+	defaultAutoInterval  = 6 * time.Hour
+	defaultMaintInterval = 24 * time.Hour
+	minAutoInterval      = 30 * time.Minute
+	startupDelay         = time.Minute
+	togglePollInterval   = time.Minute
+	errorBackoff         = 30 * time.Minute
 )
+
+var errSchedulerBusy = errors.New("scheduler busy")
 
 // Scheduler runs pkb-curate periodically when the DB feature switch is enabled.
 type Scheduler struct {
@@ -35,6 +47,7 @@ type Scheduler struct {
 	articleRepo *repository.ArticleTagRepository
 	llmJobs     *service.LLMJobQueueService
 	activity    *service.ActivityLogService
+	domainRepo  *repository.CrawlDomainProfileRepository
 
 	cancel  context.CancelFunc
 	done    chan struct{}
@@ -49,6 +62,7 @@ func NewScheduler(
 	articleRepo *repository.ArticleTagRepository,
 	llmJobs *service.LLMJobQueueService,
 	activity *service.ActivityLogService,
+	domainRepo *repository.CrawlDomainProfileRepository,
 ) *Scheduler {
 	if configDir == "" {
 		configDir = "config/pkb"
@@ -60,6 +74,7 @@ func NewScheduler(
 		articleRepo: articleRepo,
 		llmJobs:     llmJobs,
 		activity:    activity,
+		domainRepo:  domainRepo,
 		done:        make(chan struct{}),
 	}
 }
@@ -91,8 +106,11 @@ func (s *Scheduler) loop(ctx context.Context) {
 	ticker := time.NewTicker(togglePollInterval)
 	defer ticker.Stop()
 
-	nextRun := time.Now().Add(startupDelay)
-	wasEnabled := false
+	tasks := s.buildTasks()
+	startAt := time.Now().Add(startupDelay)
+	for _, t := range tasks {
+		t.nextRun = startAt
+	}
 
 	for {
 		select {
@@ -100,47 +118,58 @@ func (s *Scheduler) loop(ctx context.Context) {
 			return
 		case <-ticker.C:
 		}
-
-		enabled := s.autoEnabled()
-		if !enabled {
-			if wasEnabled {
-				log.Printf("[PKBScheduler] disabled")
+		now := time.Now()
+		for _, t := range tasks {
+			if !t.enabled() || now.Before(t.nextRun) {
+				continue
 			}
-			wasEnabled = false
-			nextRun = time.Now()
-			continue
+			start := time.Now()
+			summary, err := s.runGuarded(ctx, t.run)
+			if errors.Is(err, errSchedulerBusy) {
+				break // 已有任务在跑，本 tick 让出，下个 tick 重试
+			}
+			durationMs := int(time.Since(start).Milliseconds())
+			if err != nil {
+				log.Printf("[PKBScheduler] %s 失败: %v", t.name, err)
+				s.logActivity("failed", fmt.Sprintf("PKB %s 失败: %v", t.name, err), durationMs)
+				t.nextRun = now.Add(errorBackoff)
+			} else {
+				if summary != "" {
+					s.logActivity("success", summary, durationMs)
+				}
+				t.nextRun = now.Add(t.interval())
+				log.Printf("[PKBScheduler] %s 完成，下次 %s", t.name, t.nextRun.Format(time.RFC3339))
+			}
+			break // 一个 tick 只跑一个到期任务（串行 + 公平轮转）
 		}
-
-		if !wasEnabled {
-			log.Printf("[PKBScheduler] enabled")
-			wasEnabled = true
-			nextRun = time.Now()
-		}
-		if time.Now().Before(nextRun) {
-			continue
-		}
-
-		start := time.Now()
-		sum, err := s.runOnce(ctx)
-		durationMs := int(time.Since(start).Milliseconds())
-		if err != nil {
-			log.Printf("[PKBScheduler] run failed: %v", err)
-			s.logActivity("failed", fmt.Sprintf("PKB 自动维护失败: %v", err), durationMs)
-			nextRun = time.Now().Add(errorBackoff)
-			continue
-		}
-
-		s.logActivity("success", formatRunSummary("PKB 自动维护完成", sum), durationMs)
-		nextRun = time.Now().Add(s.interval())
-		log.Printf("[PKBScheduler] next run at %s", nextRun.Format(time.RFC3339))
 	}
 }
 
-func (s *Scheduler) runOnce(ctx context.Context) (runSummary, error) {
+// schedTask 是调度器的一个周期维护任务。
+type schedTask struct {
+	name     string
+	enabled  func() bool
+	interval func() time.Duration
+	run      func(context.Context) (string, error)
+	nextRun  time.Time
+}
+
+// buildTasks 构建维护任务列表：主 curate+digest（新卡归位+综述）+ fill/feed/propose（独立开关周期）。
+func (s *Scheduler) buildTasks() []*schedTask {
+	return []*schedTask{
+		{name: "curate+digest", enabled: s.autoEnabled, interval: s.interval, run: s.runCurateDigest},
+		{name: "fill", enabled: func() bool { return s.boolSetting(SettingAutoFillEnabled, false) }, interval: func() time.Duration { return s.intervalSetting(SettingFillIntervalMins, defaultMaintInterval) }, run: s.runFill},
+		{name: "feed", enabled: func() bool { return s.boolSetting(SettingAutoFeedEnabled, false) }, interval: func() time.Duration { return s.intervalSetting(SettingFeedIntervalMins, defaultMaintInterval) }, run: s.runFeed},
+		{name: "propose", enabled: func() bool { return s.boolSetting(SettingAutoProposeEnabled, false) }, interval: func() time.Duration { return s.intervalSetting(SettingProposeIntervalMins, defaultMaintInterval) }, run: s.runPropose},
+	}
+}
+
+// runGuarded 串行执行一个任务：若已有任务在跑则返回 errSchedulerBusy（本 tick 让出，避免并发写 vault/抢 LLM 队列）。
+func (s *Scheduler) runGuarded(ctx context.Context, fn func(context.Context) (string, error)) (string, error) {
 	s.mu.Lock()
 	if s.running {
 		s.mu.Unlock()
-		return runSummary{}, nil
+		return "", errSchedulerBusy
 	}
 	s.running = true
 	s.mu.Unlock()
@@ -149,23 +178,133 @@ func (s *Scheduler) runOnce(ctx context.Context) (runSummary, error) {
 		s.running = false
 		s.mu.Unlock()
 	}()
-
 	select {
 	case <-ctx.Done():
-		return runSummary{}, ctx.Err()
+		return "", ctx.Err()
 	default:
 	}
+	return fn(ctx)
+}
 
-	curator, err := NewCurator(s.cfg, Options{
-		ConfigDir: s.configDir,
-		LLMJobs:   s.llmJobs,
-		Context:   ctx,
+func (s *Scheduler) newCurator(ctx context.Context) (*Curator, error) {
+	return NewCurator(s.cfg, Options{
+		ConfigDir:  s.configDir,
+		LLMJobs:    s.llmJobs,
+		Context:    ctx,
+		DomainRepo: s.domainRepo, // fill 缺口填充 G3 冷却让路用
 	}, s.articleRepo)
+}
+
+// runCurateDigest 主维护任务：curate（打分/重构落卡）→ digest 全域（渲染骨架 + 新卡确定性归位
+// + 综述）。digest 内含 placeCardsOntoSkeleton，故跑完即「新卡挂骨架」。digest 失败不致命
+// （curate 已落卡），仅记录。
+func (s *Scheduler) runCurateDigest(ctx context.Context) (string, error) {
+	c, err := s.newCurator(ctx)
 	if err != nil {
-		return runSummary{}, err
+		return "", err
 	}
-	err = curator.Run()
-	return curator.lastSummary, err
+	if err := c.Run(); err != nil {
+		return "", err
+	}
+	summary := formatRunSummary("PKB 自动维护完成", c.lastSummary)
+	if err := c.RunDigest(DigestOptions{}); err != nil {
+		log.Printf("[PKBScheduler] curate 后 digest 归位失败: %v", err)
+		summary += "（digest 归位失败，详见日志）"
+	}
+	return summary, nil
+}
+
+// runFill 缺口填充：遍历开启了 gap_fill 的知识域（跳过 feed/兜底/无 scope），逐域补缺口。
+func (s *Scheduler) runFill(ctx context.Context) (string, error) {
+	doms, err := LoadDomains(filepath.Join(s.configDir, "domains.yaml"))
+	if err != nil {
+		return "", err
+	}
+	c, err := s.newCurator(ctx)
+	if err != nil {
+		return "", err
+	}
+	n := 0
+	for _, d := range doms.Domains {
+		if d.Feed || d.IsDefault || strings.TrimSpace(d.Scope) == "" {
+			continue
+		}
+		if !doms.Defaults.GapFillEnabledFor(d.Name) {
+			continue
+		}
+		if err := c.RunGapFill(GapFillOptions{Domain: d.Name}); err != nil {
+			log.Printf("[PKBScheduler] fill %s: %v", d.Name, err)
+			continue
+		}
+		n++
+	}
+	return fmt.Sprintf("PKB 自动缺口填充完成（%d 个领域）", n), nil
+}
+
+// runFeed 资讯库：全域生成当日资讯存档 + 晋升闸（耐久知识点→知识库卡）。
+func (s *Scheduler) runFeed(ctx context.Context) (string, error) {
+	c, err := s.newCurator(ctx)
+	if err != nil {
+		return "", err
+	}
+	if err := c.RunFeed(FeedOptions{}); err != nil {
+		return "", err
+	}
+	return "PKB 自动资讯库生成完成", nil
+}
+
+// runPropose 骨架结构增长：遍历知识域，从待归位簇生成骨架变更提议（影响半径闸——小动作自动应用、
+// 大动作落待批提议供前端审批）。
+func (s *Scheduler) runPropose(ctx context.Context) (string, error) {
+	doms, err := LoadDomains(filepath.Join(s.configDir, "domains.yaml"))
+	if err != nil {
+		return "", err
+	}
+	c, err := s.newCurator(ctx)
+	if err != nil {
+		return "", err
+	}
+	n := 0
+	for _, d := range doms.Domains {
+		if d.Feed || d.IsDefault || strings.TrimSpace(d.Scope) == "" {
+			continue
+		}
+		if err := c.RunPropose(ProposeOptions{Domain: d.Name}); err != nil {
+			log.Printf("[PKBScheduler] propose %s: %v", d.Name, err)
+			continue
+		}
+		n++
+	}
+	return fmt.Sprintf("PKB 自动骨架提议完成（%d 个领域）", n), nil
+}
+
+// boolSetting 读布尔型 setting（record not found → def）。
+func (s *Scheduler) boolSetting(key string, def bool) bool {
+	setting, err := s.settingRepo.GetByKey(key)
+	if err != nil {
+		if errors.Is(err, gorm.ErrRecordNotFound) {
+			return def
+		}
+		log.Printf("[PKBScheduler] read %s failed: %v", key, err)
+		return false
+	}
+	return parseBoolSetting(setting.Value, def)
+}
+
+// intervalSetting 读分钟数型 setting → Duration（缺省/非法 → def，下限 minAutoInterval）。
+func (s *Scheduler) intervalSetting(key string, def time.Duration) time.Duration {
+	setting, err := s.settingRepo.GetByKey(key)
+	if err != nil {
+		return def
+	}
+	mins, err := strconv.Atoi(strings.TrimSpace(setting.Value))
+	if err != nil || mins <= 0 {
+		return def
+	}
+	if d := time.Duration(mins) * time.Minute; d >= minAutoInterval {
+		return d
+	}
+	return minAutoInterval
 }
 
 func (s *Scheduler) autoEnabled() bool {

@@ -396,6 +396,7 @@ func (a *App) startBackgroundTasks() {
 			a.repos.ArticleTag,
 			pkbQueue,
 			a.services.ActivityLog,
+			a.repos.CrawlDomainProfile,
 		)
 		a.pkbScheduler.Start(context.Background())
 		a.logger.Info("[PKBScheduler] PKB scheduler started")
