@@ -751,4 +751,5 @@ export interface PKBDomainStat {
   waitlist: number
   low_confidence: number
   last_digest_at: string
+  skeleton_pending: boolean // 正在排队/生成骨架
 }

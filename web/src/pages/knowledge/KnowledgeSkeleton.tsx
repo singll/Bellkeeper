@@ -194,13 +194,21 @@ const KnowledgeSkeleton: Component = () => {
     }
   }
 
-  // ---- 生成骨架（后台异步）----
+  // ---- 生成骨架（后台异步，入队插队）----
+  const pollStats = (times: number) => {
+    if (times <= 0) return
+    setTimeout(() => {
+      refetchStats()
+      pollStats(times - 1)
+    }, 12000)
+  }
   const genSkeleton = async (d: PKBDomain) => {
     setBusy(d.name)
     try {
       const res = await pkbSteerApi.generateSkeleton(d.name)
       toast.success(res.data.message)
-      setTimeout(() => refetchStats(), 5000)
+      refetchStats() // 立即刷新 → 显示「生成中」
+      pollStats(15) // ~3min 内轮询捕获完成（has_skeleton 翻 true）
     } catch (err) {
       toast.error('触发失败: ' + (err as Error).message)
     } finally {
@@ -324,7 +332,17 @@ const KnowledgeSkeleton: Component = () => {
                   <Show when={d.is_default}>
                     <span class="badge badge-gray">兜底</span>
                   </Show>
-                  <Show when={d.can_set_scope && statOf(d.name) && !statOf(d.name)?.has_skeleton}>
+                  <Show when={statOf(d.name)?.skeleton_pending}>
+                    <span class="badge badge-primary">⏳ 生成中</span>
+                  </Show>
+                  <Show
+                    when={
+                      d.can_set_scope &&
+                      statOf(d.name) &&
+                      !statOf(d.name)?.has_skeleton &&
+                      !statOf(d.name)?.skeleton_pending
+                    }
+                  >
                     <span class="badge badge-danger">无骨架</span>
                   </Show>
                 </div>
@@ -363,8 +381,12 @@ const KnowledgeSkeleton: Component = () => {
                     <button class="btn btn-sm btn-ghost" disabled={busy() === d.name} onClick={() => startRename(d)}>
                       改名
                     </button>
-                    <button class="btn btn-sm btn-secondary" disabled={busy() === d.name} onClick={() => genSkeleton(d)}>
-                      生成骨架
+                    <button
+                      class="btn btn-sm btn-secondary"
+                      disabled={busy() === d.name || (statOf(d.name)?.skeleton_pending ?? false)}
+                      onClick={() => genSkeleton(d)}
+                    >
+                      {statOf(d.name)?.skeleton_pending ? '生成中…' : '生成骨架'}
                     </button>
                     <button class="btn btn-sm btn-danger" disabled={busy() === d.name} onClick={() => removeDomain(d)}>
                       删除

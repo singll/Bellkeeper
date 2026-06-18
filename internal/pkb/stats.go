@@ -23,6 +23,9 @@ type DomainStat struct {
 	Waitlist       int    `json:"waitlist"`        // 待归位卡数
 	LowConfidence  int    `json:"low_confidence"`  // 低置信卡数（unverified/llm-only）
 	LastDigestAt   string `json:"last_digest_at"`  // 最近 digest 生成时间（RFC3339，空=无）
+	// SkeletonPending 标识该域是否正在排队/生成骨架（由 handler 据 scheduler 队列填，
+	// DomainStatsOverview 本身不设——它只扫文件系统）。
+	SkeletonPending bool `json:"skeleton_pending"`
 }
 
 // DomainStatsOverview 扫描各领域 vault 目录，汇总每域的卡片/骨架/待归位/低置信/最近 digest

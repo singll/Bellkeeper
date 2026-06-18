@@ -49,11 +49,12 @@ type Scheduler struct {
 	activity    *service.ActivityLogService
 	domainRepo  *repository.CrawlDomainProfileRepository
 
-	cancel      context.CancelFunc
-	done        chan struct{}
-	mu          sync.Mutex
-	running     bool
-	manualQueue []string // 手动「生成骨架」请求(域名)，loop 插队优先于自动任务，去重
+	cancel          context.CancelFunc
+	done            chan struct{}
+	mu              sync.Mutex
+	running         bool
+	manualQueue     []string // 手动「生成骨架」请求(域名)，loop 插队优先于自动任务，去重
+	runningSkeleton string   // 当前正在生成骨架的域名(供前端显示「生成中」)，空=无
 }
 
 func NewScheduler(
@@ -137,6 +138,9 @@ func (s *Scheduler) loop(ctx context.Context) {
 				s.logActivity("success", summary, durationMs)
 				log.Printf("[PKBScheduler] 手动 skeleton(%s) 完成", dom)
 			}
+			s.mu.Lock()
+			s.runningSkeleton = ""
+			s.mu.Unlock()
 			continue
 		}
 		for _, t := range tasks {
@@ -306,6 +310,9 @@ func (s *Scheduler) runPropose(ctx context.Context) (string, error) {
 func (s *Scheduler) TriggerSkeleton(domain string) error {
 	s.mu.Lock()
 	defer s.mu.Unlock()
+	if s.runningSkeleton == domain {
+		return nil // 正在生成该域，去重
+	}
 	for _, d := range s.manualQueue {
 		if d == domain {
 			return nil // 已在队列，去重（重复点击不堆积）
@@ -322,7 +329,7 @@ func (s *Scheduler) isRunning() bool {
 	return s.running
 }
 
-// popManual 取出一个待处理的手动 skeleton 请求（FIFO），无则返回空串。
+// popManual 取出一个待处理的手动 skeleton 请求（FIFO），无则返回空串；取出即标记为「生成中」。
 func (s *Scheduler) popManual() string {
 	s.mu.Lock()
 	defer s.mu.Unlock()
@@ -331,7 +338,16 @@ func (s *Scheduler) popManual() string {
 	}
 	d := s.manualQueue[0]
 	s.manualQueue = s.manualQueue[1:]
+	s.runningSkeleton = d
 	return d
+}
+
+// SkeletonStatus 返回正在排队的域名列表 + 当前正在生成的域名（供前端显示「排队中/生成中」）。
+func (s *Scheduler) SkeletonStatus() (queued []string, running string) {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	queued = append([]string{}, s.manualQueue...)
+	return queued, s.runningSkeleton
 }
 
 // runSkeletonDomain 为单个领域生成骨架（手动插队任务体）。

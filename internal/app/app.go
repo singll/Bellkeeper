@@ -403,6 +403,7 @@ func (a *App) startBackgroundTasks() {
 		// 把骨架生成触发器注入掌舵面 handler（前端「生成骨架」按钮 → 后台异步 RunSkeleton）。
 		if a.handlers.PKBSteer != nil {
 			a.handlers.PKBSteer.SetSkeletonRunner(a.pkbScheduler.TriggerSkeleton)
+			a.handlers.PKBSteer.SetSkeletonStatusFn(a.pkbScheduler.SkeletonStatus)
 		}
 	}
 
