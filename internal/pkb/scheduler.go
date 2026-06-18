@@ -278,6 +278,37 @@ func (s *Scheduler) runPropose(ctx context.Context) (string, error) {
 	return fmt.Sprintf("PKB 自动骨架提议完成（%d 个领域）", n), nil
 }
 
+// TriggerSkeleton 后台异步为某领域生成/重建骨架（前端「生成骨架」按钮）。预检串行锁：若正有
+// PKB 任务在跑返回 errSchedulerBusy；否则启 goroutine 跑，立即返回，结果经 domains/stats 的
+// has_skeleton 反映。
+func (s *Scheduler) TriggerSkeleton(domain string) error {
+	s.mu.Lock()
+	busy := s.running
+	s.mu.Unlock()
+	if busy {
+		return errSchedulerBusy
+	}
+	go func() {
+		summary, err := s.runGuarded(context.Background(), func(ctx context.Context) (string, error) {
+			c, cerr := s.newCurator(ctx)
+			if cerr != nil {
+				return "", cerr
+			}
+			if rerr := c.RunSkeleton(SkeletonOptions{Domain: domain}); rerr != nil {
+				return "", rerr
+			}
+			return fmt.Sprintf("PKB 骨架生成完成（%s）", domain), nil
+		})
+		if err != nil {
+			log.Printf("[PKBScheduler] 手动触发 skeleton(%s) 失败: %v", domain, err)
+			s.logActivity("failed", fmt.Sprintf("PKB 骨架生成失败(%s): %v", domain, err), 0)
+			return
+		}
+		s.logActivity("success", summary, 0)
+	}()
+	return nil
+}
+
 // boolSetting 读布尔型 setting（record not found → def）。
 func (s *Scheduler) boolSetting(key string, def bool) bool {
 	setting, err := s.settingRepo.GetByKey(key)

@@ -341,6 +341,7 @@ func registerPKBSteerRoutes(api *gin.RouterGroup, h *handler.PKBSteerHandler) {
 	pkb.POST("/domains", h.CreateDomain)
 	pkb.PUT("/domains/:name/scope", h.SetScope)
 	pkb.PUT("/domains/:name/display", h.SetDisplay)
+	pkb.POST("/domains/:name/skeleton", h.GenerateSkeleton)
 	pkb.DELETE("/domains/:name", h.DeleteDomain)
 }
 

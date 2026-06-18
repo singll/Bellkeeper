@@ -1,18 +1,28 @@
 package handler
 
 import (
+	"net/http"
+	"strings"
+
 	"github.com/gin-gonic/gin"
 	"github.com/singll/bellkeeper/internal/pkb"
 	"github.com/singll/bellkeeper/internal/pkg/response"
 )
 
+// SkeletonRunner 注入的骨架生成触发器（app 层在 scheduler 就绪后提供，避免 handler 依赖构造顺序）。
+type SkeletonRunner func(domain string) error
+
 // PKBSteerHandler 知识骨架「调方向」掌舵面（Phase I / ADR-0004 Q9/Q12）：把原本只能走
 // Matrix !pkb / CLI 的「待批骨架提议审批」与「领域大方向(scope)设定」搬到前端 REST，
 // 让人用窄掌舵面调方向。浏览仍归 Obsidian、骨架文件仍机器独占写（W1），本 handler 不做文件编辑。
 type PKBSteerHandler struct {
-	basePath    string // vault 根（待批提议落 basePath/_提议/<id>.md）
-	domainsPath string // config/pkb/domains.yaml（设 scope 的落点）
+	basePath       string         // vault 根（待批提议落 basePath/_提议/<id>.md）
+	domainsPath    string         // config/pkb/domains.yaml（设 scope 的落点）
+	skeletonRunner SkeletonRunner // 后台触发骨架生成（由 app 注入 scheduler.TriggerSkeleton）
 }
+
+// SetSkeletonRunner 注入骨架生成触发器（app 在 pkbScheduler 构造后调用）。
+func (h *PKBSteerHandler) SetSkeletonRunner(fn SkeletonRunner) { h.skeletonRunner = fn }
 
 // NewPKBSteerHandler 构造掌舵面 handler。basePath 为 vault 根（同 Matrix !pkb 闭包取值），
 // domainsPath 为 domains.yaml 路径（同 scheduler 的 config/pkb 约定）。
@@ -211,4 +221,47 @@ func (h *PKBSteerHandler) DomainStats(c *gin.Context) {
 		return
 	}
 	response.Success(c, stats)
+}
+
+// GenerateSkeleton POST /api/pkb/domains/:name/skeleton —— 后台异步为某领域生成/重建骨架。
+// skeleton 调顶级模型画树（约 1-3 分钟），故异步触发、立即返回，结果经 domains/stats 反映。
+func (h *PKBSteerHandler) GenerateSkeleton(c *gin.Context) {
+	name := c.Param("name")
+	if name == "" {
+		response.BadRequest(c, "缺少领域 name")
+		return
+	}
+	dc, err := pkb.LoadDomains(h.domainsPath)
+	if err != nil {
+		response.InternalError(c, err.Error())
+		return
+	}
+	var dom *pkb.Domain
+	for i := range dc.Domains {
+		if dc.Domains[i].Name == name {
+			dom = &dc.Domains[i]
+			break
+		}
+	}
+	if dom == nil {
+		response.BadRequest(c, "领域 "+name+" 不存在")
+		return
+	}
+	if dom.Feed || dom.IsDefault {
+		response.BadRequest(c, "领域 "+name+" 不生成骨架（资讯流/兜底域）")
+		return
+	}
+	if strings.TrimSpace(dom.Scope) == "" {
+		response.BadRequest(c, "领域 "+name+" 未设 scope，先设大方向再生成骨架")
+		return
+	}
+	if h.skeletonRunner == nil {
+		response.InternalError(c, "骨架生成器未就绪（PKB 调度器未启用）")
+		return
+	}
+	if err := h.skeletonRunner(name); err != nil {
+		response.Error(c, http.StatusConflict, "系统正在跑其它 PKB 任务，稍后再触发")
+		return
+	}
+	response.Success(c, gin.H{"message": "⏳ 已触发「" + name + "」骨架生成，约 1-3 分钟后刷新状态可见"})
 }

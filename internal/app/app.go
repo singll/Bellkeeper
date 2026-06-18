@@ -400,6 +400,10 @@ func (a *App) startBackgroundTasks() {
 		)
 		a.pkbScheduler.Start(context.Background())
 		a.logger.Info("[PKBScheduler] PKB scheduler started")
+		// 把骨架生成触发器注入掌舵面 handler（前端「生成骨架」按钮 → 后台异步 RunSkeleton）。
+		if a.handlers.PKBSteer != nil {
+			a.handlers.PKBSteer.SetSkeletonRunner(a.pkbScheduler.TriggerSkeleton)
+		}
 	}
 
 	if a.cfg.DailyReport.Enabled && a.cfg.DailyReport.WatchdogEnabled {
