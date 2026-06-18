@@ -714,3 +714,24 @@ export interface KnowledgeAskResponse {
   search_ms: number
   llm_ms?: number
 }
+
+// PKB 调方向掌舵面（Phase I）
+export interface PKBProposal {
+  id: string
+  domain: string
+  action: string // add | delete | merge | restructure | none
+  summary: string
+  impact_radius: number
+  proposed_tree: string
+  vault_subpath: string
+}
+
+export interface PKBDomain {
+  name: string
+  display: string
+  scope: string
+  vault_subpath: string
+  feed: boolean
+  is_default: boolean
+  can_set_scope: boolean // 资讯流/兜底域不生成骨架，false
+}

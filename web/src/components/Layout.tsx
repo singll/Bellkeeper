@@ -234,6 +234,7 @@ const navGroups: NavGroup[] = [
     items: [
       { path: '/knowledge/search', label: '知识搜索', icon: <SearchIcon /> },
       { path: '/knowledge/ask', label: '知识问答', icon: <LLMProxyIcon /> },
+      { path: '/knowledge/skeleton', label: '知识骨架', icon: <GroupIcon /> },
       { path: '/rss', label: '订阅源', icon: <RSSIcon /> },
       { path: '/tags', label: '标签', icon: <TagIcon /> },
       { path: '/datasets', label: '数据集', icon: <DatasetIcon /> },
