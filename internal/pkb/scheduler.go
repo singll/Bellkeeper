@@ -49,10 +49,11 @@ type Scheduler struct {
 	activity    *service.ActivityLogService
 	domainRepo  *repository.CrawlDomainProfileRepository
 
-	cancel  context.CancelFunc
-	done    chan struct{}
-	mu      sync.Mutex
-	running bool
+	cancel      context.CancelFunc
+	done        chan struct{}
+	mu          sync.Mutex
+	running     bool
+	manualQueue []string // 手动「生成骨架」请求(域名)，loop 插队优先于自动任务，去重
 }
 
 func NewScheduler(
@@ -118,7 +119,26 @@ func (s *Scheduler) loop(ctx context.Context) {
 			return
 		case <-ticker.C:
 		}
+		if s.isRunning() {
+			continue // 有任务在跑，本 tick 让出（手动/自动都等当前任务完成）
+		}
 		now := time.Now()
+		// 手动「生成骨架」插队：优先于所有自动任务，避免被慢任务(fill)饿死。
+		if dom := s.popManual(); dom != "" {
+			start := time.Now()
+			summary, err := s.runGuarded(ctx, func(ctx context.Context) (string, error) {
+				return s.runSkeletonDomain(ctx, dom)
+			})
+			durationMs := int(time.Since(start).Milliseconds())
+			if err != nil {
+				log.Printf("[PKBScheduler] 手动 skeleton(%s) 失败: %v", dom, err)
+				s.logActivity("failed", fmt.Sprintf("PKB 骨架生成失败(%s): %v", dom, err), durationMs)
+			} else {
+				s.logActivity("success", summary, durationMs)
+				log.Printf("[PKBScheduler] 手动 skeleton(%s) 完成", dom)
+			}
+			continue
+		}
 		for _, t := range tasks {
 			if !t.enabled() || now.Before(t.nextRun) {
 				continue
@@ -232,7 +252,9 @@ func (s *Scheduler) runFill(ctx context.Context) (string, error) {
 		if !doms.Defaults.GapFillEnabledFor(d.Name) {
 			continue
 		}
-		if err := c.RunGapFill(GapFillOptions{Domain: d.Name}); err != nil {
+		// 小批量(每轮每域 3 缺口)：fill 单缺口慢(~10min)，限小让单轮快速完成、及时让出串行锁，
+		// 避免长期阻塞手动「生成骨架」插队；缺口靠每日多轮渐进填满。
+		if err := c.RunGapFill(GapFillOptions{Domain: d.Name, PerRun: 3}); err != nil {
 			log.Printf("[PKBScheduler] fill %s: %v", d.Name, err)
 			continue
 		}
@@ -278,35 +300,50 @@ func (s *Scheduler) runPropose(ctx context.Context) (string, error) {
 	return fmt.Sprintf("PKB 自动骨架提议完成（%d 个领域）", n), nil
 }
 
-// TriggerSkeleton 后台异步为某领域生成/重建骨架（前端「生成骨架」按钮）。预检串行锁：若正有
-// PKB 任务在跑返回 errSchedulerBusy；否则启 goroutine 跑，立即返回，结果经 domains/stats 的
-// has_skeleton 反映。
+// TriggerSkeleton 把手动「生成骨架」请求入队（去重）；loop 会在当前任务完成后**优先**执行
+// （插队，先于所有自动任务），故不会被慢任务(fill)饿死。立即返回，结果经 domains/stats
+// 的 has_skeleton 反映。
 func (s *Scheduler) TriggerSkeleton(domain string) error {
 	s.mu.Lock()
-	busy := s.running
-	s.mu.Unlock()
-	if busy {
-		return errSchedulerBusy
-	}
-	go func() {
-		summary, err := s.runGuarded(context.Background(), func(ctx context.Context) (string, error) {
-			c, cerr := s.newCurator(ctx)
-			if cerr != nil {
-				return "", cerr
-			}
-			if rerr := c.RunSkeleton(SkeletonOptions{Domain: domain}); rerr != nil {
-				return "", rerr
-			}
-			return fmt.Sprintf("PKB 骨架生成完成（%s）", domain), nil
-		})
-		if err != nil {
-			log.Printf("[PKBScheduler] 手动触发 skeleton(%s) 失败: %v", domain, err)
-			s.logActivity("failed", fmt.Sprintf("PKB 骨架生成失败(%s): %v", domain, err), 0)
-			return
+	defer s.mu.Unlock()
+	for _, d := range s.manualQueue {
+		if d == domain {
+			return nil // 已在队列，去重（重复点击不堆积）
 		}
-		s.logActivity("success", summary, 0)
-	}()
+	}
+	s.manualQueue = append(s.manualQueue, domain)
 	return nil
+}
+
+// isRunning 当前是否有 PKB 任务在执行（持锁）。
+func (s *Scheduler) isRunning() bool {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	return s.running
+}
+
+// popManual 取出一个待处理的手动 skeleton 请求（FIFO），无则返回空串。
+func (s *Scheduler) popManual() string {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	if len(s.manualQueue) == 0 {
+		return ""
+	}
+	d := s.manualQueue[0]
+	s.manualQueue = s.manualQueue[1:]
+	return d
+}
+
+// runSkeletonDomain 为单个领域生成骨架（手动插队任务体）。
+func (s *Scheduler) runSkeletonDomain(ctx context.Context, domain string) (string, error) {
+	c, err := s.newCurator(ctx)
+	if err != nil {
+		return "", err
+	}
+	if err := c.RunSkeleton(SkeletonOptions{Domain: domain}); err != nil {
+		return "", err
+	}
+	return fmt.Sprintf("PKB 骨架生成完成（%s）", domain), nil
 }
 
 // boolSetting 读布尔型 setting（record not found → def）。

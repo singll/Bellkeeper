@@ -1,7 +1,6 @@
 package handler
 
 import (
-	"net/http"
 	"strings"
 
 	"github.com/gin-gonic/gin"
@@ -260,8 +259,8 @@ func (h *PKBSteerHandler) GenerateSkeleton(c *gin.Context) {
 		return
 	}
 	if err := h.skeletonRunner(name); err != nil {
-		response.Error(c, http.StatusConflict, "系统正在跑其它 PKB 任务，稍后再触发")
+		response.InternalError(c, "排队失败: "+err.Error())
 		return
 	}
-	response.Success(c, gin.H{"message": "⏳ 已触发「" + name + "」骨架生成，约 1-3 分钟后刷新状态可见"})
+	response.Success(c, gin.H{"message": "⏳ 已排队生成「" + name + "」骨架，将在当前任务完成后优先执行（先于自动任务），稍后刷新状态查看"})
 }
