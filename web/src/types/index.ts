@@ -735,3 +735,20 @@ export interface PKBDomain {
   is_default: boolean
   can_set_scope: boolean // 资讯流/兜底域不生成骨架，false
 }
+
+export interface PKBDomainStat {
+  name: string
+  display: string
+  feed: boolean
+  is_default: boolean
+  has_scope: boolean
+  has_skeleton: boolean
+  cards: number
+  cards_today: number
+  cards_week: number
+  skeleton_gaps: number
+  skeleton_filled: number
+  waitlist: number
+  low_confidence: number
+  last_digest_at: string
+}

@@ -1,4 +1,4 @@
-import type { PKBProposal, PKBDomain } from '@/types'
+import type { PKBProposal, PKBDomain, PKBDomainStat } from '@/types'
 
 const API_BASE = '/api'
 
@@ -45,5 +45,34 @@ export const pkbSteerApi = {
     request<{ data: { message: string } }>(`/pkb/domains/${encodeURIComponent(name)}/scope`, {
       method: 'PUT',
       body: JSON.stringify({ scope }),
+    }),
+
+  // 各领域状态概览（卡片数/当天·近7天新增/缺口/待归位/低置信/最近 digest/是否有骨架）
+  listStats: () => request<{ data: PKBDomainStat[] }>('/pkb/domains/stats'),
+
+  // 新建领域（最小字段 display+scope）
+  createDomain: (display: string, scope: string) =>
+    request<{ data: { message: string } }>('/pkb/domains', {
+      method: 'POST',
+      body: JSON.stringify({ display, scope }),
+    }),
+
+  // 删除领域配置（vault 文件保留）
+  deleteDomain: (name: string) =>
+    request<{ data: { message: string } }>(`/pkb/domains/${encodeURIComponent(name)}`, {
+      method: 'DELETE',
+    }),
+
+  // 改领域显示名（仅 display）
+  setDisplay: (name: string, display: string) =>
+    request<{ data: { message: string } }>(`/pkb/domains/${encodeURIComponent(name)}/display`, {
+      method: 'PUT',
+      body: JSON.stringify({ display }),
+    }),
+
+  // 触发骨架生成（后台异步）
+  generateSkeleton: (name: string) =>
+    request<{ data: { message: string } }>(`/pkb/domains/${encodeURIComponent(name)}/skeleton`, {
+      method: 'POST',
     }),
 }
