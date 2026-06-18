@@ -335,3 +335,187 @@ func (d *Defaults) GapFillEnabledFor(domain string) bool {
 	}
 	return false
 }
+
+// SetDomainScope 外科式地把 domains.yaml 中某领域的 scope（一句话「大方向」）改为新值：
+// 逐行定位 → 替换/插入 scope 行，保留全部注释与排版（domains.yaml 注释密集，整体
+// yaml.Marshal 回写会丢注释，故不用）。这是 Phase I 调方向掌舵面「设领域大方向」的落点。
+// 资讯流（feed）/兜底（is_default）领域不生成骨架、不设 scope，调用会被拒。
+// 改完下次 `pkb-curate skeleton <领域>` 运行即读到新值（无需重启/重编）。
+func SetDomainScope(path, name, scope string) error {
+	scope = strings.TrimSpace(scope)
+	if scope == "" {
+		return fmt.Errorf("scope 不能为空")
+	}
+	if strings.ContainsAny(scope, "\r\n") {
+		return fmt.Errorf("scope 必须单行（一句话大方向）")
+	}
+
+	// 先用真解析校验领域存在且可设 scope（拒资讯流/兜底领域）。
+	dc, err := LoadDomains(path)
+	if err != nil {
+		return err
+	}
+	var target *Domain
+	for i := range dc.Domains {
+		if dc.Domains[i].Name == name {
+			target = &dc.Domains[i]
+			break
+		}
+	}
+	if target == nil {
+		return fmt.Errorf("领域 %s 不存在于 %s", name, path)
+	}
+	if target.Feed {
+		return fmt.Errorf("领域 %s 是资讯流容器（feed），不生成骨架、不设 scope", name)
+	}
+	if target.IsDefault {
+		return fmt.Errorf("领域 %s 是兜底领域（is_default），不生成骨架、不设 scope", name)
+	}
+
+	data, err := os.ReadFile(path)
+	if err != nil {
+		return fmt.Errorf("read domains config %s: %w", path, err)
+	}
+	lines := strings.Split(string(data), "\n")
+
+	// 定位目标 `- name: <name>` 块起点与 dash 缩进。
+	blockStart, dashIndent := -1, 0
+	for i, line := range lines {
+		if ind, ok := matchDomainNameLine(line, name); ok {
+			blockStart, dashIndent = i, ind
+			break
+		}
+	}
+	if blockStart < 0 {
+		// LoadDomains 找到了但逐行没匹配到——格式异常（如 name 写在折叠块里），拒绝盲改。
+		return fmt.Errorf("无法在 %s 定位领域 %s 的 `- name:` 行（格式异常，未改动）", path, name)
+	}
+	contentIndent := dashIndent + 2
+
+	// 块范围 [blockStart+1, blockEnd)：到下一个 indent<=dashIndent 的非空非注释行为止。
+	blockEnd := len(lines)
+	for i := blockStart + 1; i < len(lines); i++ {
+		t := strings.TrimSpace(lines[i])
+		if t == "" || strings.HasPrefix(t, "#") {
+			continue
+		}
+		if leadingSpaces(lines[i]) <= dashIndent {
+			blockEnd = i
+			break
+		}
+	}
+
+	rendered := strings.Repeat(" ", contentIndent) + "scope: " + yamlScalar(scope)
+
+	// 块内找已有 scope 行 → 替换；否则在 display 行（无则 name 行）后插入，保持 name/display/scope 序。
+	scopeLine, displayLine := -1, -1
+	for i := blockStart + 1; i < blockEnd; i++ {
+		t := strings.TrimSpace(lines[i])
+		if strings.HasPrefix(t, "scope:") {
+			scopeLine = i
+			break
+		}
+		if strings.HasPrefix(t, "display:") {
+			displayLine = i
+		}
+	}
+
+	if scopeLine >= 0 {
+		lines[scopeLine] = rendered
+	} else {
+		insertAfter := blockStart
+		if displayLine >= 0 {
+			insertAfter = displayLine
+		}
+		out := make([]string, 0, len(lines)+1)
+		out = append(out, lines[:insertAfter+1]...)
+		out = append(out, rendered)
+		out = append(out, lines[insertAfter+1:]...)
+		lines = out
+	}
+
+	newContent := strings.Join(lines, "\n")
+
+	// 安全网：回写前用真解析校验改后内容——目标 scope 正确、领域数不变，否则不写盘。
+	var check DomainsConfig
+	if err := yaml.Unmarshal([]byte(newContent), &check); err != nil {
+		return fmt.Errorf("改后 YAML 解析失败（未写盘）：%w", err)
+	}
+	if len(check.Domains) != len(dc.Domains) {
+		return fmt.Errorf("改后校验失败：领域数量 %d→%d（未写盘）", len(dc.Domains), len(check.Domains))
+	}
+	found := false
+	for _, d := range check.Domains {
+		if d.Name == name {
+			if strings.TrimSpace(d.Scope) != scope {
+				return fmt.Errorf("改后校验失败：领域 %s scope 不符（未写盘）", name)
+			}
+			found = true
+		}
+	}
+	if !found {
+		return fmt.Errorf("改后校验失败：领域 %s 丢失（未写盘）", name)
+	}
+
+	return writeFileAtomic(path, newContent)
+}
+
+// matchDomainNameLine 判断一行是否为 `<indent>- name: <name>`（容忍行尾注释/引号），返回 dash 缩进。
+func matchDomainNameLine(line, name string) (int, bool) {
+	ind := leadingSpaces(line)
+	rest := line[ind:]
+	if !strings.HasPrefix(rest, "- ") {
+		return 0, false
+	}
+	rest = strings.TrimSpace(rest[2:])
+	if !strings.HasPrefix(rest, "name:") {
+		return 0, false
+	}
+	val := strings.TrimSpace(strings.TrimPrefix(rest, "name:"))
+	if idx := strings.Index(val, " #"); idx >= 0 { // 去行尾注释
+		val = strings.TrimSpace(val[:idx])
+	}
+	val = strings.Trim(val, `"'`)
+	return ind, val == name
+}
+
+// leadingSpaces 数一行的前导空格数（YAML 缩进）。
+func leadingSpaces(s string) int {
+	n := 0
+	for n < len(s) && s[n] == ' ' {
+		n++
+	}
+	return n
+}
+
+// yamlScalar 把字符串渲染成安全的 YAML 标量：plain-safe 则原样输出（不给中文句子平添引号），
+// 否则双引号转义（含 `: ` / 前导指示符 / 引号 / 行尾注释等会破坏 plain 解析的情形）。
+func yamlScalar(s string) string {
+	if isPlainSafeYAML(s) {
+		return s
+	}
+	esc := strings.ReplaceAll(s, `\`, `\\`)
+	esc = strings.ReplaceAll(esc, `"`, `\"`)
+	return `"` + esc + `"`
+}
+
+// isPlainSafeYAML 判断字符串能否作为 YAML plain 标量原样写出而不改变语义。
+func isPlainSafeYAML(s string) bool {
+	if s == "" || s != strings.TrimSpace(s) {
+		return false
+	}
+	if strings.Contains(s, ": ") || strings.HasSuffix(s, ":") {
+		return false
+	}
+	if strings.Contains(s, " #") {
+		return false
+	}
+	if strings.ContainsAny(s, "\"'\t") {
+		return false
+	}
+	switch s[0] { // 前导 YAML 指示符（中文/字母字节 >=0x80 或普通字母不在此列，安全）
+	case '-', '?', ':', ',', '[', ']', '{', '}', '#', '&', '*', '!', '|', '>', '%', '@', '`', ' ':
+		return false
+	}
+	return true
+}

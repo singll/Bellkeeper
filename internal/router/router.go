@@ -330,12 +330,14 @@ func registerPKBReportRoutes(api *gin.RouterGroup, h *handler.PKBReportHandler) 
 	pkb.GET("/digests/latest", h.LatestDigests)
 }
 
-// registerPKBSteerRoutes 知识骨架调方向掌舵面（Phase I）：待批提议审批。
+// registerPKBSteerRoutes 知识骨架调方向掌舵面（Phase I）：待批提议审批 + 设领域大方向(scope)。
 func registerPKBSteerRoutes(api *gin.RouterGroup, h *handler.PKBSteerHandler) {
 	pkb := api.Group("/pkb")
 	pkb.GET("/proposals", h.Proposals)
 	pkb.POST("/proposals/:id/approve", h.ApproveProposal)
 	pkb.POST("/proposals/:id/reject", h.RejectProposal)
+	pkb.GET("/domains", h.Domains)
+	pkb.PUT("/domains/:name/scope", h.SetScope)
 }
 
 func registerDashboardRoutes(api *gin.RouterGroup, h *handler.DashboardHandler) {

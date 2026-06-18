@@ -180,9 +180,10 @@ func (a *App) setupKnowledge() error {
 	a.handlers.KnowledgeFiles = handler.NewKnowledgeFilesHandler(
 		service.NewKnowledgeFilesService(a.cfg.Knowledge))
 
-	// PKB 调方向掌舵面（Phase I）：待批骨架提议审批走 REST，复用 vault basePath（同 Matrix !pkb 闭包）。
+	// PKB 调方向掌舵面（Phase I）：待批骨架提议审批 + 设领域大方向(scope)走 REST。
+	// basePath=vault 根（同 Matrix !pkb 闭包）；domains.yaml 同 scheduler 的 config/pkb 约定。
 	if basePath := a.cfg.Knowledge.BasePath; basePath != "" {
-		a.handlers.PKBSteer = handler.NewPKBSteerHandler(basePath)
+		a.handlers.PKBSteer = handler.NewPKBSteerHandler(basePath, "config/pkb/domains.yaml")
 	}
 
 	// Store adapters for wiring in setupMatrixGateway
