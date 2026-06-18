@@ -337,6 +337,7 @@ func registerPKBSteerRoutes(api *gin.RouterGroup, h *handler.PKBSteerHandler) {
 	pkb.POST("/proposals/:id/approve", h.ApproveProposal)
 	pkb.POST("/proposals/:id/reject", h.RejectProposal)
 	pkb.GET("/domains", h.Domains)
+	pkb.GET("/domains/stats", h.DomainStats)
 	pkb.POST("/domains", h.CreateDomain)
 	pkb.PUT("/domains/:name/scope", h.SetScope)
 	pkb.PUT("/domains/:name/display", h.SetDisplay)

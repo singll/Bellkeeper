@@ -201,3 +201,14 @@ func (h *PKBSteerHandler) SetDisplay(c *gin.Context) {
 	}
 	response.Success(c, gin.H{"message": "✅ 领域 " + name + " 显示名已更新为「" + req.Display + "」"})
 }
+
+// DomainStats GET /api/pkb/domains/stats —— 各领域状态概览（卡片数/当天·近7天新增/缺口/待归位/
+// 低置信/最近 digest/是否有骨架），供前端「知识骨架」总览。纯只读，不调 LLM。
+func (h *PKBSteerHandler) DomainStats(c *gin.Context) {
+	stats, err := pkb.DomainStatsOverview(h.basePath, h.domainsPath)
+	if err != nil {
+		response.InternalError(c, err.Error())
+		return
+	}
+	response.Success(c, stats)
+}
