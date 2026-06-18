@@ -184,3 +184,96 @@ func TestIsPlainSafeYAML(t *testing.T) {
 		}
 	}
 }
+
+func TestAddDomain(t *testing.T) {
+	path := writeSampleDomains(t)
+	if err := AddDomain(path, "区块链", "区块链与智能合约——共识机制、EVM、DeFi 与链上安全。"); err != nil {
+		t.Fatalf("AddDomain: %v", err)
+	}
+	dc, err := LoadDomains(path)
+	if err != nil {
+		t.Fatalf("LoadDomains: %v", err)
+	}
+	var d *Domain
+	for i := range dc.Domains {
+		if dc.Domains[i].Name == "区块链" {
+			d = &dc.Domains[i]
+		}
+	}
+	if d == nil {
+		t.Fatal("新域未加入")
+	}
+	if d.Display != "区块链" || d.VaultSubpath != "vault/区块链" || strings.TrimSpace(d.Scope) == "" {
+		t.Fatalf("新域字段不符: %+v", d)
+	}
+	data, _ := os.ReadFile(path)
+	if !strings.Contains(string(data), "# 顶部注释——不应被改动") {
+		t.Fatal("回写后注释丢失")
+	}
+	if err := AddDomain(path, "区块链", "x"); err == nil {
+		t.Fatal("重复 display 应拒绝")
+	}
+	if err := AddDomain(path, "新域X", ""); err == nil {
+		t.Fatal("空 scope 应拒绝")
+	}
+	if err := AddDomain(path, "a/b", "x"); err == nil {
+		t.Fatal("含非法字符应拒绝")
+	}
+}
+
+func TestDeleteDomain(t *testing.T) {
+	path := writeSampleDomains(t)
+	before, _ := LoadDomains(path)
+	if err := DeleteDomain(path, "cs-fundamentals"); err != nil {
+		t.Fatalf("DeleteDomain: %v", err)
+	}
+	after, _ := LoadDomains(path)
+	if len(after.Domains) != len(before.Domains)-1 {
+		t.Fatalf("领域数未减 1：%d→%d", len(before.Domains), len(after.Domains))
+	}
+	for _, d := range after.Domains {
+		if d.Name == "cs-fundamentals" {
+			t.Fatal("目标域仍在")
+		}
+	}
+	data, _ := os.ReadFile(path)
+	if !strings.Contains(string(data), "name: programming") || !strings.Contains(string(data), "# 顶部注释——不应被改动") {
+		t.Fatal("误删了其它领域或注释")
+	}
+	if err := DeleteDomain(path, "misc"); err == nil {
+		t.Fatal("应拒删兜底域(is_default)")
+	}
+	if err := DeleteDomain(path, "news"); err == nil {
+		t.Fatal("应拒删资讯流域(feed)")
+	}
+	if err := DeleteDomain(path, "nope"); err == nil {
+		t.Fatal("不存在领域应报错")
+	}
+}
+
+func TestSetDomainDisplay(t *testing.T) {
+	path := writeSampleDomains(t)
+	if err := SetDomainDisplay(path, "programming", "后端开发"); err != nil {
+		t.Fatalf("SetDomainDisplay: %v", err)
+	}
+	dc, _ := LoadDomains(path)
+	for _, d := range dc.Domains {
+		if d.Name == "programming" {
+			if d.Display != "后端开发" {
+				t.Fatalf("display 未改: %q", d.Display)
+			}
+			if d.VaultSubpath != "vault/编程" {
+				t.Fatalf("vault_subpath 不应随 display 改变: %q", d.VaultSubpath)
+			}
+			if strings.TrimSpace(d.Scope) != "旧的编程大方向" {
+				t.Fatalf("scope 不应被动: %q", d.Scope)
+			}
+		}
+	}
+	if err := SetDomainDisplay(path, "cs-fundamentals", "后端开发"); err == nil {
+		t.Fatal("重复 display 应拒绝")
+	}
+	if err := SetDomainDisplay(path, "nope", "x"); err == nil {
+		t.Fatal("不存在领域应报错")
+	}
+}

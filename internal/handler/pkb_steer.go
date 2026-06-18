@@ -142,3 +142,62 @@ func (h *PKBSteerHandler) SetScope(c *gin.Context) {
 	}
 	response.Success(c, gin.H{"message": "✅ 领域 " + name + " 大方向已更新，下次 pkb-curate skeleton 运行即生效"})
 }
+
+// createDomainRequest 是 POST /domains 的请求体（最小字段）。
+type createDomainRequest struct {
+	Display string `json:"display"`
+	Scope   string `json:"scope"`
+}
+
+// CreateDomain POST /api/pkb/domains —— 新建知识领域（最小字段 display+scope，name/vault_subpath 派生）。
+// 不自动生成骨架，由前端「生成骨架」或下次自动维护播种。
+func (h *PKBSteerHandler) CreateDomain(c *gin.Context) {
+	var req createDomainRequest
+	if err := c.ShouldBindJSON(&req); err != nil {
+		response.BadRequest(c, "请求体应为 {\"display\":\"...\",\"scope\":\"...\"}")
+		return
+	}
+	if err := pkb.AddDomain(h.domainsPath, req.Display, req.Scope); err != nil {
+		response.BadRequest(c, err.Error())
+		return
+	}
+	response.Success(c, gin.H{"message": "✅ 领域「" + req.Display + "」已创建，可点「生成骨架」播种或等自动维护"})
+}
+
+// DeleteDomain DELETE /api/pkb/domains/:name —— 删除领域配置条目（vault 文件保留，浏览归 Obsidian）。
+func (h *PKBSteerHandler) DeleteDomain(c *gin.Context) {
+	name := c.Param("name")
+	if name == "" {
+		response.BadRequest(c, "缺少领域 name")
+		return
+	}
+	if err := pkb.DeleteDomain(h.domainsPath, name); err != nil {
+		response.BadRequest(c, err.Error())
+		return
+	}
+	response.Success(c, gin.H{"message": "🗑 领域 " + name + " 配置已删除（vault 文件保留）"})
+}
+
+// setDisplayRequest 是 PUT /domains/:name/display 的请求体。
+type setDisplayRequest struct {
+	Display string `json:"display"`
+}
+
+// SetDisplay PUT /api/pkb/domains/:name/display —— 改领域显示名（仅 display，不动 name/路径/分类）。
+func (h *PKBSteerHandler) SetDisplay(c *gin.Context) {
+	name := c.Param("name")
+	if name == "" {
+		response.BadRequest(c, "缺少领域 name")
+		return
+	}
+	var req setDisplayRequest
+	if err := c.ShouldBindJSON(&req); err != nil {
+		response.BadRequest(c, "请求体应为 {\"display\":\"...\"}")
+		return
+	}
+	if err := pkb.SetDomainDisplay(h.domainsPath, name, req.Display); err != nil {
+		response.BadRequest(c, err.Error())
+		return
+	}
+	response.Success(c, gin.H{"message": "✅ 领域 " + name + " 显示名已更新为「" + req.Display + "」"})
+}

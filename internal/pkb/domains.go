@@ -519,3 +519,275 @@ func isPlainSafeYAML(s string) bool {
 	}
 	return true
 }
+
+// AddDomain 向 domains.yaml 追加一个新知识领域（最小字段：display + scope）。name 取 display
+// （标识符，允许中文）、vault_subpath = vault/<display>、keywords 留空（可后续补）。外科式追加到
+// domains: 段末尾，保留全部注释。新域不自动生成骨架——由前端「生成骨架」或下次自动维护触发。
+func AddDomain(path, display, scope string) error {
+	display = strings.TrimSpace(display)
+	scope = strings.TrimSpace(scope)
+	if display == "" {
+		return fmt.Errorf("领域显示名不能为空")
+	}
+	if scope == "" {
+		return fmt.Errorf("领域大方向（scope）不能为空")
+	}
+	if strings.ContainsAny(display, "\r\n\t/\\:") || strings.Contains(display, "..") {
+		return fmt.Errorf("领域显示名含非法字符（不可含 / \\ : 制表/换行 或 ..）")
+	}
+	if strings.ContainsAny(scope, "\r\n") {
+		return fmt.Errorf("scope 必须单行")
+	}
+
+	dc, err := LoadDomains(path)
+	if err != nil {
+		return err
+	}
+	name := display // 标识符取显示名（允许中文 key）
+	for _, d := range dc.Domains {
+		if d.Name == name || d.Display == display {
+			return fmt.Errorf("领域 %q 已存在", display)
+		}
+	}
+
+	data, err := os.ReadFile(path)
+	if err != nil {
+		return fmt.Errorf("read domains config %s: %w", path, err)
+	}
+	lines := strings.Split(string(data), "\n")
+
+	// 定位顶级 domains: 段 + 探测现有领域块的 dash 缩进。
+	domainsKeyLine, dashIndent := -1, -1
+	for i, line := range lines {
+		if leadingSpaces(line) == 0 && strings.TrimSpace(line) == "domains:" {
+			domainsKeyLine = i
+			continue
+		}
+		if domainsKeyLine >= 0 && dashIndent < 0 {
+			if t := strings.TrimSpace(line); strings.HasPrefix(t, "- ") {
+				dashIndent = leadingSpaces(line)
+			}
+		}
+	}
+	if domainsKeyLine < 0 {
+		return fmt.Errorf("domains.yaml 未找到顶级 domains: 段")
+	}
+	if dashIndent < 0 {
+		dashIndent = 2 // 空列表，用默认缩进
+	}
+	contentIndent := dashIndent + 2
+
+	// 追加点 = domains: 段结束（下一个顶级 key 或 EOF），回退过尾部空行。
+	insertAt := len(lines)
+	for i := domainsKeyLine + 1; i < len(lines); i++ {
+		t := strings.TrimSpace(lines[i])
+		if t == "" || strings.HasPrefix(t, "#") {
+			continue
+		}
+		if leadingSpaces(lines[i]) == 0 {
+			insertAt = i
+			break
+		}
+	}
+	for insertAt > domainsKeyLine+1 && strings.TrimSpace(lines[insertAt-1]) == "" {
+		insertAt--
+	}
+
+	dash := strings.Repeat(" ", dashIndent)
+	cind := strings.Repeat(" ", contentIndent)
+	block := []string{
+		"",
+		dash + "- name: " + yamlScalar(name),
+		cind + "display: " + yamlScalar(display),
+		cind + "scope: " + yamlScalar(scope),
+		cind + "vault_subpath: " + yamlScalar("vault/"+display),
+		cind + "keywords: []",
+	}
+	out := make([]string, 0, len(lines)+len(block))
+	out = append(out, lines[:insertAt]...)
+	out = append(out, block...)
+	out = append(out, lines[insertAt:]...)
+	newContent := strings.Join(out, "\n")
+
+	// 安全网：回写前真解析校验领域数 +1、新域字段正确。
+	var check DomainsConfig
+	if err := yaml.Unmarshal([]byte(newContent), &check); err != nil {
+		return fmt.Errorf("改后 YAML 解析失败（未写盘）：%w", err)
+	}
+	if len(check.Domains) != len(dc.Domains)+1 {
+		return fmt.Errorf("改后校验失败：领域数 %d→%d（未写盘）", len(dc.Domains), len(check.Domains))
+	}
+	ok := false
+	for _, d := range check.Domains {
+		if d.Name == name && d.Display == display && strings.TrimSpace(d.Scope) == scope {
+			ok = true
+		}
+	}
+	if !ok {
+		return fmt.Errorf("改后校验失败：新域 %q 字段不符（未写盘）", display)
+	}
+	return writeFileAtomic(path, newContent)
+}
+
+// DeleteDomain 从 domains.yaml 移除一个领域条目（整块）。仅删配置——vault 下卡片/骨架文件
+// 原样保留（浏览归 Obsidian、文件不丢）。兜底（is_default）与资讯流容器（feed）不可删。
+func DeleteDomain(path, name string) error {
+	dc, err := LoadDomains(path)
+	if err != nil {
+		return err
+	}
+	var target *Domain
+	for i := range dc.Domains {
+		if dc.Domains[i].Name == name {
+			target = &dc.Domains[i]
+			break
+		}
+	}
+	if target == nil {
+		return fmt.Errorf("领域 %s 不存在", name)
+	}
+	if target.IsDefault {
+		return fmt.Errorf("领域 %s 是兜底领域（is_default），不可删除", name)
+	}
+	if target.Feed {
+		return fmt.Errorf("领域 %s 是资讯流容器（feed），不可删除", name)
+	}
+
+	data, err := os.ReadFile(path)
+	if err != nil {
+		return fmt.Errorf("read domains config %s: %w", path, err)
+	}
+	lines := strings.Split(string(data), "\n")
+
+	blockStart, dashIndent := -1, 0
+	for i, line := range lines {
+		if ind, ok := matchDomainNameLine(line, name); ok {
+			blockStart, dashIndent = i, ind
+			break
+		}
+	}
+	if blockStart < 0 {
+		return fmt.Errorf("无法在 %s 定位领域 %s（格式异常，未改动）", path, name)
+	}
+	// 块结束 = 下一个同缩进 `- ` 兄弟块 或 顶级 dedent key 或 EOF（块内/块后空行随块删）。
+	blockEnd := len(lines)
+	for i := blockStart + 1; i < len(lines); i++ {
+		t := strings.TrimSpace(lines[i])
+		if t == "" || strings.HasPrefix(t, "#") {
+			continue
+		}
+		ls := leadingSpaces(lines[i])
+		if ls < dashIndent || (ls == dashIndent && strings.HasPrefix(t, "- ")) {
+			blockEnd = i
+			break
+		}
+	}
+
+	out := make([]string, 0, len(lines))
+	out = append(out, lines[:blockStart]...)
+	out = append(out, lines[blockEnd:]...)
+	newContent := strings.Join(out, "\n")
+
+	var check DomainsConfig
+	if err := yaml.Unmarshal([]byte(newContent), &check); err != nil {
+		return fmt.Errorf("改后 YAML 解析失败（未写盘）：%w", err)
+	}
+	if len(check.Domains) != len(dc.Domains)-1 {
+		return fmt.Errorf("改后校验失败：领域数 %d→%d（未写盘）", len(dc.Domains), len(check.Domains))
+	}
+	for _, d := range check.Domains {
+		if d.Name == name {
+			return fmt.Errorf("改后校验失败：领域 %s 仍存在（未写盘）", name)
+		}
+	}
+	return writeFileAtomic(path, newContent)
+}
+
+// SetDomainDisplay 改某领域的显示名（display），仅改显示——内部 name / vault_subpath / 分类
+// 关键词不动（用户决策：重命名仅改 display，零迁移）。外科式替换 display 行，保留注释。
+func SetDomainDisplay(path, name, display string) error {
+	display = strings.TrimSpace(display)
+	if display == "" {
+		return fmt.Errorf("显示名不能为空")
+	}
+	if strings.ContainsAny(display, "\r\n") {
+		return fmt.Errorf("显示名必须单行")
+	}
+	dc, err := LoadDomains(path)
+	if err != nil {
+		return err
+	}
+	exists := false
+	for _, d := range dc.Domains {
+		if d.Name == name {
+			exists = true
+		} else if d.Display == display {
+			return fmt.Errorf("显示名 %q 已被领域 %s 占用", display, d.Name)
+		}
+	}
+	if !exists {
+		return fmt.Errorf("领域 %s 不存在", name)
+	}
+
+	data, err := os.ReadFile(path)
+	if err != nil {
+		return fmt.Errorf("read domains config %s: %w", path, err)
+	}
+	lines := strings.Split(string(data), "\n")
+
+	blockStart, dashIndent := -1, 0
+	for i, line := range lines {
+		if ind, ok := matchDomainNameLine(line, name); ok {
+			blockStart, dashIndent = i, ind
+			break
+		}
+	}
+	if blockStart < 0 {
+		return fmt.Errorf("无法在 %s 定位领域 %s（格式异常，未改动）", path, name)
+	}
+	contentIndent := dashIndent + 2
+	blockEnd := len(lines)
+	for i := blockStart + 1; i < len(lines); i++ {
+		t := strings.TrimSpace(lines[i])
+		if t == "" || strings.HasPrefix(t, "#") {
+			continue
+		}
+		if leadingSpaces(lines[i]) <= dashIndent {
+			blockEnd = i
+			break
+		}
+	}
+
+	rendered := strings.Repeat(" ", contentIndent) + "display: " + yamlScalar(display)
+	displayLine := -1
+	for i := blockStart + 1; i < blockEnd; i++ {
+		if strings.HasPrefix(strings.TrimSpace(lines[i]), "display:") {
+			displayLine = i
+			break
+		}
+	}
+	if displayLine >= 0 {
+		lines[displayLine] = rendered
+	} else {
+		out := make([]string, 0, len(lines)+1)
+		out = append(out, lines[:blockStart+1]...)
+		out = append(out, rendered)
+		out = append(out, lines[blockStart+1:]...)
+		lines = out
+	}
+	newContent := strings.Join(lines, "\n")
+
+	var check DomainsConfig
+	if err := yaml.Unmarshal([]byte(newContent), &check); err != nil {
+		return fmt.Errorf("改后 YAML 解析失败（未写盘）：%w", err)
+	}
+	for _, d := range check.Domains {
+		if d.Name == name {
+			if strings.TrimSpace(d.Display) != display {
+				return fmt.Errorf("改后校验失败：display 不符（未写盘）")
+			}
+			return writeFileAtomic(path, newContent)
+		}
+	}
+	return fmt.Errorf("改后校验失败：领域 %s 丢失（未写盘）", name)
+}
