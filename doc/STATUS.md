@@ -63,6 +63,7 @@
 
 | 时间 | 动作 |
 |------|------|
+| 2026-06-18 | PKB 调方向前端 Phase I 落地(ADR-0004 Q9/Q12/Q15,窄掌舵面):复用现有 SolidJS SPA 加「知识骨架」页(`/knowledge/skeleton`),前端表单直接写、Matrix `!pkb`/CLI 保留兜底。①待批骨架提议批准/驳回走 REST(`GET /api/pkb/proposals`、`POST .../:id/approve|reject`,复用 `pkb.ListPendingProposals/ApplySkeletonProposal/RejectSkeletonProposal` 同一路径);②设领域大方向 scope 走 REST(`GET /api/pkb/domains`、`PUT /api/pkb/domains/:name/scope`,`pkb.SetDomainScope` 外科式逐行写回 domains.yaml 保注释、资讯流/兜底域拒设);浏览仍归 Obsidian、骨架机器独占写(W1)不变。③剪节点本期不做(后端零机制 + 触 W1,下一 slice 先定「删节点如何被记住不被 digest 重生」机制)。本地未推,待部署 keeper 自验 |
 | 2026-06-17 | PKB 资讯库+晋升闸 Phase H 落地(ADR-0005 §5):`news` 升级资讯库容器(feed:true,digest/audit 领域遍历跳过、不进骨架/不计知识卡);`pkb-curate feed` 遍历 raw+archive 取当日资讯类(`pkb_type∈news/release`)→按 `pkb_domain` 分领域 promote_model 综述→落 `vault/资讯/<领域>/<日期>.md`(type:pkb_feed,不存独立卡);晋升闸 promote_model 识别耐久知识点→`shouldPromote` 把闸(非事件 && durability≥阈值)→复用 `fillOneGap` 走同一 V2 路径晋升为知识卡+归位,事件性不晋升;日报「今日资讯存档」弱联动;本地未推,待部署 keeper 自验 |
 | 2026-06-17 | PKB 缺口填充 Phase G 落地(ADR-0004 §4):`pkb-curate fill <域>` 自顶向下补骨架缺口——gapfill_model 起草+提议源 → V2 真核实(G3 冷却让路 + Extract 抓取 + verify_model 判支撑) → 落 `source`/`verification`/`confidence` → 复用 Phase F 归位;F1 稳定缺口起草核实 / F2 易变缺口定向爬 reconstruct;新增 `POST /api/files/extract`;低置信卡进 audit;打样开 programming;本地未推,待部署 keeper 自验 |
 | 2026-06-17 | PKB 知识骨架 Phase F 落地(ADR-0004/0005):骨架=结构真相源,`pkb-curate skeleton/match/propose` + digest 每轮确定性归位 + 待归位区 + 影响半径闸(小动作自动应用/大动作 Matrix `!pkb` 审批);本地未推,待部署 keeper 自验 |
