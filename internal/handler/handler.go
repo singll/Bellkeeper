@@ -38,6 +38,8 @@ type Handlers struct {
 	// Knowledge handler (initialized in main.go)
 	Knowledge      *KnowledgeHandler
 	KnowledgeFiles *KnowledgeFilesHandler
+	// PKB 调方向掌舵面（initialized in app.go，需 vault basePath）
+	PKBSteer *PKBSteerHandler
 }
 
 // NewHandlers creates all handler instances

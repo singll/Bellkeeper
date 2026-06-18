@@ -77,6 +77,10 @@ func Setup(r *gin.Engine, handlers *handler.Handlers, mode string, apiKey string
 	if handlers.PKBReport != nil {
 		registerPKBReportRoutes(api, handlers.PKBReport)
 	}
+	// PKB 调方向掌舵面（Phase I）：待批骨架提议审批 REST
+	if handlers.PKBSteer != nil {
+		registerPKBSteerRoutes(api, handlers.PKBSteer)
+	}
 	// Dashboard aggregated stats
 	if handlers.Dashboard != nil {
 		registerDashboardRoutes(api, handlers.Dashboard)
@@ -324,6 +328,14 @@ func registerPKBReportRoutes(api *gin.RouterGroup, h *handler.PKBReportHandler) 
 	pkb.GET("/daily", h.Daily)
 	pkb.GET("/vault-cards", h.VaultCards)
 	pkb.GET("/digests/latest", h.LatestDigests)
+}
+
+// registerPKBSteerRoutes 知识骨架调方向掌舵面（Phase I）：待批提议审批。
+func registerPKBSteerRoutes(api *gin.RouterGroup, h *handler.PKBSteerHandler) {
+	pkb := api.Group("/pkb")
+	pkb.GET("/proposals", h.Proposals)
+	pkb.POST("/proposals/:id/approve", h.ApproveProposal)
+	pkb.POST("/proposals/:id/reject", h.RejectProposal)
 }
 
 func registerDashboardRoutes(api *gin.RouterGroup, h *handler.DashboardHandler) {

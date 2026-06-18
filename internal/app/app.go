@@ -180,6 +180,11 @@ func (a *App) setupKnowledge() error {
 	a.handlers.KnowledgeFiles = handler.NewKnowledgeFilesHandler(
 		service.NewKnowledgeFilesService(a.cfg.Knowledge))
 
+	// PKB 调方向掌舵面（Phase I）：待批骨架提议审批走 REST，复用 vault basePath（同 Matrix !pkb 闭包）。
+	if basePath := a.cfg.Knowledge.BasePath; basePath != "" {
+		a.handlers.PKBSteer = handler.NewPKBSteerHandler(basePath)
+	}
+
 	// Store adapters for wiring in setupMatrixGateway
 	a.knowledgeAskAdapter = knowledgeAskAdapter
 	a.knowledgeSearchAdapter = knowledgeSearchAdapter
