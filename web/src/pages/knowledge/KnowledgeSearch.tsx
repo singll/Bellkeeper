@@ -64,12 +64,33 @@ const KnowledgeSearch: Component = () => {
     return text.replace(regex, '<mark class="bg-yellow-500/30 text-yellow-300">$1</mark>')
   }
 
+  // 域：优先 source_domain，否则从 source_url 解析 host
+  const displayDomain = (hit: KnowledgeSearchHit): string => {
+    if (hit.source_domain) return hit.source_domain
+    if (hit.source_url) {
+      try {
+        return new URL(hit.source_url).host
+      } catch {
+        return ''
+      }
+    }
+    return ''
+  }
+
+  // 时间：Unix 秒 → 本地日期
+  const formatDate = (unix?: number): string => {
+    if (!unix) return ''
+    return new Date(unix * 1000).toLocaleDateString('zh-CN')
+  }
+
   return (
     <div class="animate-fade-in">
       {/* Header */}
       <div class="mb-6">
         <h1 class="text-2xl font-bold text-white">知识搜索</h1>
-        <p class="text-sm text-dark-400 mt-1">在知识库中搜索文档和内容</p>
+        <p class="text-sm text-dark-400 mt-1">
+          搜索 vault / archive 全文（archive 层是 Obsidian 盲区，只能在此检索）；点击域名回原文，不在 Web 渲染卡片正文。
+        </p>
       </div>
 
       {/* Search Form */}
@@ -140,35 +161,45 @@ const KnowledgeSearch: Component = () => {
             {(hit) => (
               <div class="card p-4 hover:bg-dark-700/30 transition-colors">
                 <div class="flex items-start justify-between gap-4">
-                  <div class="flex-1">
+                  <div class="flex-1 min-w-0">
                     {/* Title */}
                     <h3 class="text-lg font-medium text-white mb-1">
-                      <span innerHTML={highlightText(hit.heading || hit.title, query())} />
+                      <span innerHTML={highlightText(hit.title, query())} />
                     </h3>
 
-                    {/* Meta */}
-                    <div class="flex items-center gap-3 text-sm text-dark-400 mb-2">
+                    {/* Meta: layer / category / domain(外链) / time */}
+                    <div class="flex flex-wrap items-center gap-3 text-sm text-dark-400 mb-2">
                       <span class="badge badge-gray">{hit.layer}</span>
                       <Show when={hit.category}>
                         <span>{hit.category}</span>
                       </Show>
-                      <Show when={hit.source_domain}>
-                        <a
-                          href={`https://${hit.source_domain}`}
-                          target="_blank"
-                          rel="noopener"
-                          class="text-primary-400 hover:underline"
+                      <Show when={displayDomain(hit)}>
+                        <Show
+                          when={hit.source_url}
+                          fallback={<span>{displayDomain(hit)}</span>}
                         >
-                          {hit.source_domain}
-                        </a>
+                          <a
+                            href={hit.source_url}
+                            target="_blank"
+                            rel="noopener"
+                            class="text-primary-400 hover:underline"
+                          >
+                            {displayDomain(hit)} ↗
+                          </a>
+                        </Show>
+                      </Show>
+                      <Show when={hit.updated_at}>
+                        <span>{formatDate(hit.updated_at)}</span>
                       </Show>
                     </div>
 
-                    {/* Content snippet */}
-                    <p
-                      class="text-sm text-dark-300 line-clamp-3"
-                      innerHTML={highlightText(hit.highlights?.[0] || hit.content.substring(0, 300), query())}
-                    />
+                    {/* Content snippet（只读片段，不渲染卡片正文） */}
+                    <Show when={hit.snippets?.[0]}>
+                      <p
+                        class="text-sm text-dark-300 line-clamp-3"
+                        innerHTML={highlightText(hit.snippets[0], query())}
+                      />
+                    </Show>
 
                     {/* Tags */}
                     <Show when={hit.tags?.length}>
@@ -180,8 +211,8 @@ const KnowledgeSearch: Component = () => {
                     </Show>
                   </div>
 
-                  {/* File path */}
-                  <div class="text-xs text-dark-500 font-mono whitespace-nowrap">
+                  {/* File path（只读路径，不接全文阅读） */}
+                  <div class="text-xs text-dark-500 font-mono whitespace-nowrap shrink-0">
                     {hit.file_path}
                   </div>
                 </div>

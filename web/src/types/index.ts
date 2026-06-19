@@ -426,16 +426,17 @@ export interface FilesStats {
 // Knowledge Search Types
 
 export interface KnowledgeSearchHit {
+  file_id: string
   file_path: string
   title: string
-  heading: string
-  content: string
+  atomic_concept?: string
   layer: string
   category: string
   tags: string[]
   source_url?: string
   source_domain?: string
-  highlights: string[]
+  updated_at?: number
+  snippets: string[]
 }
 
 export interface KnowledgeSearchResult {
@@ -699,6 +700,7 @@ export interface KnowledgeAskRequest {
   question: string
   layers?: string[]
   top_k?: number
+  history?: { role: 'user' | 'assistant'; content: string }[]
 }
 
 export interface KnowledgeAskReference {

@@ -1,7 +1,7 @@
-import { Component, createEffect, createMemo, createSignal, createResource, For, Show } from 'solid-js'
+import { Component, createSignal, createResource, For, Show } from 'solid-js'
 import { knowledgeAskApi, knowledgeIndexApi } from '@/api/knowledge'
 import { useToast } from '@/components/Toast'
-import type { KnowledgeAskResponse, KnowledgeAskReference } from '@/types'
+import type { KnowledgeAskReference } from '@/types'
 
 interface ChatMessage {
   id: string
@@ -9,6 +9,7 @@ interface ChatMessage {
   content: string
   references?: KnowledgeAskReference[]
   timestamp: Date
+  isError?: boolean
 }
 
 const KnowledgeAsk: Component = () => {
@@ -18,18 +19,9 @@ const KnowledgeAsk: Component = () => {
   const [question, setQuestion] = createSignal('')
   const [history, setHistory] = createSignal<ChatMessage[]>([])
   const [asking, setAsking] = createSignal(false)
-  const [selectedLayers, setSelectedLayers] = createSignal<string[]>([])
 
   // Index status
   const [indexStats] = createResource(() => knowledgeIndexApi.getStats())
-
-  // Available layers
-  const layers = createMemo(() => indexStats()?.data?.available_layers ?? ['archive', 'vault'])
-  createEffect(() => {
-    if (selectedLayers().length === 0 && layers().length > 0) {
-      setSelectedLayers(layers())
-    }
-  })
 
   // Handle ask
   const handleAsk = async (e: Event) => {
@@ -43,6 +35,12 @@ const KnowledgeAsk: Component = () => {
       timestamp: new Date(),
     }
 
+    // 当前问题之前的历史：最近 6 轮（12 条），排除 error 占位
+    const priorTurns = history()
+      .filter((m) => !m.isError)
+      .slice(-12)
+      .map((m) => ({ role: m.role, content: m.content }))
+
     setHistory([...history(), userMsg])
     setQuestion('')
     setAsking(true)
@@ -50,8 +48,8 @@ const KnowledgeAsk: Component = () => {
     try {
       const result = await knowledgeAskApi.ask({
         question: userMsg.content,
-        layers: selectedLayers(),
         top_k: 5,
+        history: priorTurns,
       })
 
       const assistantMsg: ChatMessage = {
@@ -71,6 +69,7 @@ const KnowledgeAsk: Component = () => {
         role: 'assistant',
         content: '抱歉，发生了错误。请稍后重试。',
         timestamp: new Date(),
+        isError: true,
       }
       setHistory([...history(), errorMsg])
     } finally {
@@ -94,7 +93,7 @@ const KnowledgeAsk: Component = () => {
       <div class="flex items-center justify-between mb-4">
         <div>
           <h1 class="text-2xl font-bold text-white">知识问答</h1>
-          <p class="text-sm text-dark-400 mt-1">基于知识库的 AI 问答</p>
+          <p class="text-sm text-dark-400 mt-1">AI 助手（优先知识库）</p>
         </div>
         <Show when={indexStats()?.data}>
           <div class="text-sm text-dark-400">
@@ -186,31 +185,6 @@ const KnowledgeAsk: Component = () => {
 
         {/* Input Area */}
         <div class="border-t border-dark-700 p-4">
-          {/* Layer filter */}
-          <div class="flex items-center gap-2 mb-3 text-sm">
-            <span class="text-dark-400">搜索层级:</span>
-            <For each={layers()}>
-              {(layer) => (
-                <label class="flex items-center gap-1 cursor-pointer">
-                  <input
-                    type="checkbox"
-                    checked={selectedLayers().includes(layer)}
-                    onChange={(e) => {
-                      const layers = selectedLayers()
-                      if (e.currentTarget.checked) {
-                        setSelectedLayers([...layers, layer])
-                      } else {
-                        setSelectedLayers(layers.filter((l) => l !== layer))
-                      }
-                    }}
-                    class="rounded border-dark-600 bg-dark-700 text-primary-500"
-                  />
-                  <span class="text-dark-300">{layer}</span>
-                </label>
-              )}
-            </For>
-          </div>
-
           {/* Input form */}
           <form onSubmit={handleAsk} class="flex gap-3">
             <input
