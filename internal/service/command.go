@@ -8,6 +8,7 @@ import (
 	"github.com/singll/bellkeeper/internal/config"
 	"github.com/singll/bellkeeper/internal/matrix/command"
 	"github.com/singll/bellkeeper/internal/matrix/gateway"
+	"github.com/singll/bellkeeper/internal/model"
 	"github.com/singll/bellkeeper/internal/pkg/defaults"
 	"github.com/singll/bellkeeper/internal/repository"
 )
@@ -150,7 +151,9 @@ func (s *CommandService) ExecuteMessage(ctx context.Context, roomID, sender, eve
 		return nil
 	}
 
-	if s.agent != nil {
+	// 仅对话房间(room_type=chat)的非命令消息才触发对话 agent；
+	// 命令/通知/管理房间忽略非命令消息（守计划「仅对话房间触发」红线）。
+	if s.agent != nil && s.isChatRoom(roomID) {
 		result, err := s.agent.HandleMessage(ctx, roomID, sender, trimmed)
 		if err != nil {
 			log.Printf("[Agent] failed to handle message: %v", err)
@@ -165,6 +168,16 @@ func (s *CommandService) ExecuteMessage(ctx context.Context, roomID, sender, eve
 	}
 
 	return nil
+}
+
+// isChatRoom 判断房间是否为对话房间（room_type=chat）。
+// 仅对话房间的非命令消息才路由到对话 agent；命令/通知/管理房间忽略非命令消息。
+func (s *CommandService) isChatRoom(roomID string) bool {
+	room, err := s.repos.MatrixRoom.GetByRoomID(roomID)
+	if err != nil || room == nil {
+		return false
+	}
+	return room.RoomType == model.RoomTypeChat
 }
 
 // ListCommands returns all available commands

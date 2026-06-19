@@ -290,7 +290,7 @@ func (s *SyncLoop) discoverJoinedRooms(ctx context.Context) {
 	for _, roomID := range rooms {
 		room := &model.MatrixRoom{
 			RoomID:   roomID,
-			RoomType: "command",
+			RoomType: model.RoomTypeCommand,
 			IsActive: true,
 		}
 		if err := s.client.repos.MatrixRoom.Upsert(ctx, room); err != nil {

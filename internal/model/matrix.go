@@ -8,12 +8,20 @@ import (
 	"gorm.io/gorm"
 )
 
+// Room types for MatrixRoom.RoomType.
+const (
+	RoomTypeCommand      = "command"      // 命令房间：响应 ! 命令
+	RoomTypeNotification = "notification" // 通知房间：只接收推送
+	RoomTypeAdmin        = "admin"        // 管理房间
+	RoomTypeChat         = "chat"         // 对话房间：非命令消息触发对话 agent
+)
+
 // MatrixRoom represents a registered Matrix room in the platform.
 type MatrixRoom struct {
 	ID        uint      `gorm:"primaryKey" json:"id"`
 	RoomID    string    `gorm:"size:255;uniqueIndex;notNull" json:"room_id"`
 	RoomName  string    `gorm:"size:255" json:"room_name,omitempty"`
-	RoomType  string    `gorm:"size:50;notNull;index" json:"room_type"` // command, notification, admin
+	RoomType  string    `gorm:"size:50;notNull;index" json:"room_type"` // command, notification, admin, chat
 	IsActive  bool      `gorm:"default:true;index" json:"is_active"`
 	Config    *string   `gorm:"type:jsonb" json:"config,omitempty"`
 	CreatedAt time.Time `json:"created_at"`
