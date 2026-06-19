@@ -7,7 +7,6 @@ import Layout from './components/Layout'
 import Dashboard from './pages/Dashboard'
 import Tags from './pages/Tags'
 import RSSFeeds from './pages/RSSFeeds'
-import Datasets from './pages/Datasets'
 import Workflows from './pages/Workflows'
 import Settings from './pages/Settings'
 import MatrixDashboard from './pages/MatrixDashboard'
@@ -44,7 +43,6 @@ render(() => (
         <Route path="/knowledge/skeleton" component={KnowledgeSkeleton} />
         <Route path="/rss" component={RSSFeeds} />
         <Route path="/tags" component={Tags} />
-        <Route path="/datasets" component={Datasets} />
         {/* LLM (core system, split from old /llm-proxy) */}
         <Route path="/llm" component={LLMOverview} />
         <Route path="/llm/channels" component={LLMChannels} />

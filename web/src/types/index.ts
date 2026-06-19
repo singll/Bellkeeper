@@ -23,20 +23,6 @@ export interface RSSFeed {
   updated_at: string
 }
 
-export interface DatasetMapping {
-  id: number
-  name: string
-  display_name: string
-  dataset_id: string
-  description: string
-  is_default: boolean
-  is_active: boolean
-  parser_id: string
-  tags: Tag[]
-  created_at: string
-  updated_at: string
-}
-
 export interface Setting {
   id: number
   key: string

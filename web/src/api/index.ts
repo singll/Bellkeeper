@@ -1,7 +1,6 @@
 import type {
   Tag,
   RSSFeed,
-  DatasetMapping,
   Setting,
   PaginatedResponse,
   HealthStatus,
@@ -111,32 +110,6 @@ export const rssApi = {
 
   delete: (id: number) =>
     request<{ message: string }>(`/rss/${id}`, { method: 'DELETE' }),
-}
-
-// Datasets API
-export const datasetsApi = {
-  list: (page = 1, perPage = 20) =>
-    request<PaginatedResponse<DatasetMapping>>(
-      `/datasets?page=${page}&per_page=${perPage}`
-    ),
-
-  get: (id: number) =>
-    request<{ data: DatasetMapping }>(`/datasets/${id}`),
-
-  create: (data: Partial<DatasetMapping> & { tag_ids?: number[] }) =>
-    request<{ data: DatasetMapping }>('/datasets', {
-      method: 'POST',
-      body: JSON.stringify(data),
-    }),
-
-  update: (id: number, data: Partial<DatasetMapping> & { tag_ids?: number[] }) =>
-    request<{ data: DatasetMapping }>(`/datasets/${id}`, {
-      method: 'PUT',
-      body: JSON.stringify(data),
-    }),
-
-  delete: (id: number) =>
-    request<{ message: string }>(`/datasets/${id}`, { method: 'DELETE' }),
 }
 
 // Settings API

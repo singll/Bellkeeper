@@ -210,7 +210,7 @@ const Dashboard: Component = () => {
         </A>
 
         {/* PKB Card */}
-        <A href="/knowledge/search" class="card card-hover relative overflow-hidden border-l-4 border-l-blue-500 bg-gradient-to-br from-blue-500/10 to-blue-500/5 group">
+        <A href="/knowledge/overview" class="card card-hover relative overflow-hidden border-l-4 border-l-blue-500 bg-gradient-to-br from-blue-500/10 to-blue-500/5 group">
           <div class="flex items-start justify-between">
             <div class="w-12 h-12 rounded-xl bg-blue-500/20 flex items-center justify-center">
               <svg class="w-6 h-6 text-blue-400" fill="none" stroke="currentColor" viewBox="0 0 24 24">
@@ -332,7 +332,7 @@ const Dashboard: Component = () => {
         <div class="card">
           <div class="flex items-center justify-between mb-4">
             <h2 class="text-lg font-semibold text-white">PKB 知识库</h2>
-            <A href="/knowledge/search" class="text-sm text-blue-400 hover:text-blue-300">查看详情 →</A>
+            <A href="/knowledge/overview" class="text-sm text-blue-400 hover:text-blue-300">查看详情 →</A>
           </div>
           <Show when={!isLoading()} fallback={
             <div class="grid grid-cols-3 gap-4">
