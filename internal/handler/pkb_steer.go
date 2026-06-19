@@ -22,6 +22,8 @@ type PKBSteerHandler struct {
 	domainsPath    string           // config/pkb/domains.yaml（设 scope 的落点）
 	skeletonRunner SkeletonRunner   // 后台触发骨架生成（由 app 注入 scheduler.TriggerSkeleton）
 	skeletonStatus SkeletonStatusFn // 查排队/生成中状态（app 注入 scheduler.SkeletonStatus）
+	waitlistHigh   int              // 总览「需要关注」待归位阈值（≤0 关闭标记，app 据 config 注入）
+	lowConfHigh    int              // 总览「需要关注」低置信阈值（≤0 关闭标记）
 }
 
 // SetSkeletonRunner 注入骨架生成触发器（app 在 pkbScheduler 构造后调用）。
@@ -29,6 +31,12 @@ func (h *PKBSteerHandler) SetSkeletonRunner(fn SkeletonRunner) { h.skeletonRunne
 
 // SetSkeletonStatusFn 注入骨架排队/生成中状态查询（app 在 pkbScheduler 构造后调用）。
 func (h *PKBSteerHandler) SetSkeletonStatusFn(fn SkeletonStatusFn) { h.skeletonStatus = fn }
+
+// SetOverviewThresholds 注入总览「需要关注」阈值（app 据 config.Knowledge 注入；≤0 关闭对应标记）。
+func (h *PKBSteerHandler) SetOverviewThresholds(waitlist, lowConf int) {
+	h.waitlistHigh = waitlist
+	h.lowConfHigh = lowConf
+}
 
 // NewPKBSteerHandler 构造掌舵面 handler。basePath 为 vault 根（同 Matrix !pkb 闭包取值），
 // domainsPath 为 domains.yaml 路径（同 scheduler 的 config/pkb 约定）。
@@ -240,6 +248,15 @@ func (h *PKBSteerHandler) DomainStats(c *gin.Context) {
 			if pending[stats[i].Name] {
 				stats[i].SkeletonPending = true
 			}
+		}
+	}
+	// 据 config 阈值标「需要关注」（待归位/低置信偏高），供总览「需要关注」块直达对应领域。
+	for i := range stats {
+		if h.waitlistHigh > 0 && stats[i].Waitlist >= h.waitlistHigh {
+			stats[i].WaitlistHigh = true
+		}
+		if h.lowConfHigh > 0 && stats[i].LowConfidence >= h.lowConfHigh {
+			stats[i].LowConfidenceHigh = true
 		}
 	}
 	response.Success(c, stats)

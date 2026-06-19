@@ -26,6 +26,10 @@ type DomainStat struct {
 	// SkeletonPending 标识该域是否正在排队/生成骨架（由 handler 据 scheduler 队列填，
 	// DomainStatsOverview 本身不设——它只扫文件系统）。
 	SkeletonPending bool `json:"skeleton_pending"`
+	// WaitlistHigh / LowConfidenceHigh 标识待归位/低置信卡数是否达「需要关注」阈值
+	// （由 handler 据 config 阈值填，同 SkeletonPending 范式；DomainStatsOverview 本身不设）。
+	WaitlistHigh      bool `json:"waitlist_high"`
+	LowConfidenceHigh bool `json:"low_confidence_high"`
 }
 
 // DomainStatsOverview 扫描各领域 vault 目录，汇总每域的卡片/骨架/待归位/低置信/最近 digest

@@ -184,6 +184,7 @@ func (a *App) setupKnowledge() error {
 	// basePath=vault 根（同 Matrix !pkb 闭包）；domains.yaml 同 scheduler 的 config/pkb 约定。
 	if basePath := a.cfg.Knowledge.BasePath; basePath != "" {
 		a.handlers.PKBSteer = handler.NewPKBSteerHandler(basePath, "config/pkb/domains.yaml")
+		a.handlers.PKBSteer.SetOverviewThresholds(a.cfg.Knowledge.OverviewWaitlistHigh, a.cfg.Knowledge.OverviewLowConfHigh)
 	}
 
 	// Store adapters for wiring in setupMatrixGateway

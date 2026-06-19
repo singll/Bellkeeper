@@ -248,6 +248,9 @@ type KnowledgeConfig struct {
 	ChunkMinSize   int             `mapstructure:"chunk_min_size"`
 	ChunkMaxSize   int             `mapstructure:"chunk_max_size"`
 	MaxContextRunes int            `mapstructure:"max_context_runes"`
+	// 总览「需要关注」阈值：领域待归位/低置信卡数达此值即标记需关注（≤0 关闭该项标记）。
+	OverviewWaitlistHigh int `mapstructure:"overview_waitlist_high"`
+	OverviewLowConfHigh  int `mapstructure:"overview_low_conf_high"`
 }
 
 // RSSFetcherConfig RSS 抓取器配置
@@ -548,6 +551,8 @@ func setDefaults(v *viper.Viper) {
 	v.SetDefault("knowledge.scan_interval", 300)
 	v.SetDefault("knowledge.chunk_min_size", 100)
 	v.SetDefault("knowledge.chunk_max_size", 600)
+	v.SetDefault("knowledge.overview_waitlist_high", 10)
+	v.SetDefault("knowledge.overview_low_conf_high", 10)
 	// 三层知识库：raw 绝不进 Meili（仅 ingest 落盘 + pkb-curate 待处理源）；
 	// archive 中等价值归档、vault 高价值卡片均进 Meili（vault 另经 Obsidian LiveSync 下行本地）。
 	// working/ 不在此列——它是 ReportService 的渠道消息存档区，不应进知识检索。
