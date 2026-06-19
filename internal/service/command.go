@@ -21,6 +21,7 @@ type AgentTurnResult struct {
 type AgentHandler interface {
 	HandleMessage(ctx context.Context, roomID, sender, content string) (*AgentTurnResult, error)
 	ResetSession(ctx context.Context, roomID string) error
+	ResetRateLimit(ctx context.Context, roomID string) error
 	SetUserModel(ctx context.Context, userID, group string) error
 	CurrentUserModel(ctx context.Context, userID string) (string, error)
 }
@@ -218,7 +219,10 @@ func (s *CommandService) SetHealthChecker(hs *HealthService) {
 func (s *CommandService) SetAgent(agentSvc AgentHandler) {
 	s.agent = agentSvc
 	s.router.RegisterHandler(command.NewResetHandler(agentSvc))
-	log.Printf("[Command] registered agent and reset command")
+	resetLimit := command.NewResetLimitHandler(agentSvc)
+	s.router.RegisterHandler(resetLimit)                                  // 字母名 resetlimit
+	s.router.RegisterHandler(command.NewAliasHandler("重置额度", resetLimit)) // 中文别名
+	log.Printf("[Command] registered agent, reset and resetlimit commands")
 }
 
 // healthCheckerAdapter adapts HealthService.Detailed() to the healthChecker interface

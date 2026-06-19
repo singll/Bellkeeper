@@ -53,7 +53,7 @@ func NewAgentService(
 		}
 	}
 
-	maxTurns := int64(30)
+	maxTurns := int64(300)
 	if cfg.MaxTurnsPerHour > 0 {
 		maxTurns = int64(cfg.MaxTurnsPerHour)
 	}
@@ -222,6 +222,15 @@ func (s *AgentService) ResetSession(ctx context.Context, roomID string) error {
 	}
 	if err := s.rateLimiter.Reset(ctx, roomID); err != nil {
 		middleware.GetLogger().Warn("failed to reset rate limiter", zap.Error(err))
+	}
+	return nil
+}
+
+// ResetRateLimit 仅清除该房间的限流计数器，保留对话会话上下文。
+// （区别于 ResetSession：后者同时清会话+限流。）
+func (s *AgentService) ResetRateLimit(ctx context.Context, roomID string) error {
+	if err := s.rateLimiter.Reset(ctx, roomID); err != nil {
+		return fmt.Errorf("reset rate limit: %w", err)
 	}
 	return nil
 }

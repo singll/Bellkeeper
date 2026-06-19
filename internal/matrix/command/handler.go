@@ -457,3 +457,43 @@ func (h *ResetHandler) Handle(ctx context.Context, cmdCtx *Context) (*Response, 
 		Message: "✅ Agent 会话已重置",
 	}, nil
 }
+
+// ResetLimitHandler 处理 !resetlimit 命令：仅清除本房间 Agent 限流计数，保留对话上下文。
+type ResetLimitHandler struct {
+	BaseHandler
+	agent interface {
+		ResetRateLimit(ctx context.Context, roomID string) error
+	}
+}
+
+func NewResetLimitHandler(agentSvc interface {
+	ResetRateLimit(ctx context.Context, roomID string) error
+}) *ResetLimitHandler {
+	return &ResetLimitHandler{
+		BaseHandler: BaseHandler{
+			name:        "resetlimit",
+			description: "清除本房间 Agent 回合限流（保留对话上下文）",
+			usage:       "",
+		},
+		agent: agentSvc,
+	}
+}
+
+func (h *ResetLimitHandler) Handle(ctx context.Context, cmdCtx *Context) (*Response, error) {
+	if h.agent == nil {
+		return &Response{
+			Success: false,
+			Message: "Agent 未启用",
+		}, nil
+	}
+	if err := h.agent.ResetRateLimit(ctx, cmdCtx.RoomID); err != nil {
+		return &Response{
+			Success: false,
+			Message: "重置限流失败: " + err.Error(),
+		}, nil
+	}
+	return &Response{
+		Success: true,
+		Message: "✅ 本房间 Agent 限流已清零（对话上下文保留）",
+	}, nil
+}

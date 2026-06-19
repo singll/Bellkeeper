@@ -516,7 +516,7 @@ func setDefaults(v *viper.Viper) {
 	v.SetDefault("matrix.admin_users", []string{"@singll:matrix.singll.net"})
 	v.SetDefault("matrix.agent.enabled", false)
 	v.SetDefault("matrix.agent.model", "pool-chat-balanced")
-	v.SetDefault("matrix.agent.max_turns_per_hour", 30)
+	v.SetDefault("matrix.agent.max_turns_per_hour", 300)
 	v.SetDefault("matrix.agent.session_ttl", "30m")
 	v.SetDefault("matrix.agent.max_tool_iterations", 5)
 	v.SetDefault("matrix.agent.system_prompt", "")

@@ -45,6 +45,19 @@ func NewClient(
 		return nil, fmt.Errorf("failed to authenticate with Matrix homeserver: %w", err)
 	}
 
+	// 加固：以 homeserver 实际身份为准覆盖 BotUserID。
+	// 自我消息过滤（sync.go）依赖 BotUserID==发送者；若配置写错（如历史遗留的
+	// @bellkeeper 而真实账号是 @kb-bot），过滤失效会导致机器人把自己回复当成员
+	// 消息再次应答，形成自循环刷屏。这里强制对齐 token 的真实身份。
+	actualUserID := whoami.UserID.String()
+	if actualUserID != "" && actualUserID != cfg.BotUserID {
+		middleware.GetLogger().Warn("configured matrix bot_user_id mismatch; overriding with whoami identity",
+			zap.String("configured", cfg.BotUserID),
+			zap.String("actual", actualUserID))
+		cfg.BotUserID = actualUserID
+		client.UserID = whoami.UserID
+	}
+
 	middleware.GetLogger().Info("authenticated with Matrix homeserver",
 		zap.String("user_id", whoami.UserID.String()),
 		zap.String("device", string(whoami.DeviceID)))

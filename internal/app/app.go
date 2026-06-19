@@ -611,6 +611,10 @@ func (a *agentServiceAdapter) ResetSession(ctx context.Context, roomID string) e
 	return a.svc.ResetSession(ctx, roomID)
 }
 
+func (a *agentServiceAdapter) ResetRateLimit(ctx context.Context, roomID string) error {
+	return a.svc.ResetRateLimit(ctx, roomID)
+}
+
 func (a *agentServiceAdapter) SetUserModel(ctx context.Context, userID, group string) error {
 	return a.svc.SetUserModel(ctx, userID, group)
 }
