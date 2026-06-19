@@ -348,7 +348,21 @@ func (a *App) setupMatrixGateway() error {
 			toolRegistry,
 		)
 		if agentSvc != nil {
-			commandSvc.SetAgent(&agentServiceAdapter{svc: agentSvc})
+			adapter := &agentServiceAdapter{svc: agentSvc}
+			commandSvc.SetAgent(adapter)
+			// !model：列出/切换「发言用户自己」的对话模型组（按用户持久）。
+			modelLister := func() ([]command.ModelGroupInfo, error) {
+				groups, err := a.repos.LLMModelGroup.List()
+				if err != nil {
+					return nil, err
+				}
+				infos := make([]command.ModelGroupInfo, 0, len(groups))
+				for _, g := range groups {
+					infos = append(infos, command.ModelGroupInfo{Name: g.Name, Description: g.Description})
+				}
+				return infos, nil
+			}
+			commandSvc.GetRouter().RegisterHandler(command.NewModelHandler(modelLister, adapter))
 			a.logger.Info("[Matrix] Agent service initialized")
 		}
 	} else if a.cfg.Matrix.Agent.Enabled {
@@ -595,4 +609,12 @@ func (a *agentServiceAdapter) HandleMessage(ctx context.Context, roomID, sender,
 
 func (a *agentServiceAdapter) ResetSession(ctx context.Context, roomID string) error {
 	return a.svc.ResetSession(ctx, roomID)
+}
+
+func (a *agentServiceAdapter) SetUserModel(ctx context.Context, userID, group string) error {
+	return a.svc.SetUserModel(ctx, userID, group)
+}
+
+func (a *agentServiceAdapter) CurrentUserModel(ctx context.Context, userID string) (string, error) {
+	return a.svc.CurrentUserModel(ctx, userID)
 }

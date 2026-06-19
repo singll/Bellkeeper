@@ -133,13 +133,19 @@ func (s *AgentService) HandleMessage(ctx context.Context, roomID, sender, conten
 		maxIter = s.cfg.MaxToolIterations
 	}
 
+	// 选用模型：优先该发言用户持久化的模型组覆盖（!model 设置），无则房间默认。
+	model := s.cfg.Model
+	if override, err := s.sessions.GetUserModel(ctx, sender); err == nil && override != "" {
+		model = override
+	}
+
 	var reply string
 	var usedTools bool
 	current := session
 
 	for i := 0; i < maxIter; i++ {
 		req := llmclient.ChatRequest{
-			Model:       s.cfg.Model,
+			Model:       model,
 			Messages:    current,
 			Temperature: 0.3,
 			Tools:       s.tools.List(),
@@ -218,6 +224,23 @@ func (s *AgentService) ResetSession(ctx context.Context, roomID string) error {
 		middleware.GetLogger().Warn("failed to reset rate limiter", zap.Error(err))
 	}
 	return nil
+}
+
+// SetUserModel 持久化某用户的对话模型组覆盖（按用户，跨房间生效；group 为空清除）。
+func (s *AgentService) SetUserModel(ctx context.Context, userID, group string) error {
+	return s.sessions.SetUserModel(ctx, userID, group)
+}
+
+// CurrentUserModel 返回某用户当前生效的模型组（无覆盖则返回房间默认 cfg.Model）。
+func (s *AgentService) CurrentUserModel(ctx context.Context, userID string) (string, error) {
+	override, err := s.sessions.GetUserModel(ctx, userID)
+	if err != nil {
+		return "", err
+	}
+	if override == "" {
+		return s.cfg.Model, nil
+	}
+	return override, nil
 }
 
 func (s *AgentService) buildSystemPrompt(isAdmin bool) string {

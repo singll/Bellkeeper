@@ -21,6 +21,8 @@ type AgentTurnResult struct {
 type AgentHandler interface {
 	HandleMessage(ctx context.Context, roomID, sender, content string) (*AgentTurnResult, error)
 	ResetSession(ctx context.Context, roomID string) error
+	SetUserModel(ctx context.Context, userID, group string) error
+	CurrentUserModel(ctx context.Context, userID string) (string, error)
 }
 
 // CommandService handles Matrix command execution

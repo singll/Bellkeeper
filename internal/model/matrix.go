@@ -302,6 +302,16 @@ func SeedMatrixPlatform(db *gorm.DB) error {
 			UsageExample:    "!kb 什么是 RAG？",
 		},
 		{
+			CommandName:     "model",
+			HandlerType:     "agent_model",
+			PermissionLevel: "user",
+			RoomScope:       "any",
+			IsActive:        true,
+			HandlerConfig:   emptyJSON("{}"),
+			Description:     "查看/切换你的对话模型组",
+			UsageExample:    "!model pool-pkb",
+		},
+		{
 			CommandName:     "search",
 			HandlerType:     "knowledge_search",
 			PermissionLevel: "user",

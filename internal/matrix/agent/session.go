@@ -74,3 +74,37 @@ func (s *SessionStore) Append(ctx context.Context, roomID string, msgs ...llmcli
 func (s *SessionStore) Clear(ctx context.Context, roomID string) error {
 	return s.redis.Del(ctx, s.key(roomID)).Err()
 }
+
+// userModelTTL 是 per-user 模型组覆盖的过期时间（远长于会话 TTL，近似「持久」）。
+const userModelTTL = 720 * time.Hour // 30 天
+
+func (s *SessionStore) userModelKey(userID string) string {
+	return fmt.Sprintf("matrix:agent:usermodel:%s", userID)
+}
+
+// GetUserModel 返回该用户持久化的模型组覆盖；无则返回空串。
+func (s *SessionStore) GetUserModel(ctx context.Context, userID string) (string, error) {
+	v, err := s.redis.Get(ctx, s.userModelKey(userID)).Result()
+	if err == redis.Nil {
+		return "", nil
+	}
+	if err != nil {
+		return "", fmt.Errorf("get user model: %w", err)
+	}
+	return v, nil
+}
+
+// SetUserModel 持久化该用户的模型组覆盖（独立于会话 key，故 !reset 不清除）。
+// group 为空串表示清除覆盖、回退到房间默认模型。
+func (s *SessionStore) SetUserModel(ctx context.Context, userID, group string) error {
+	if group == "" {
+		if err := s.redis.Del(ctx, s.userModelKey(userID)).Err(); err != nil {
+			return fmt.Errorf("clear user model: %w", err)
+		}
+		return nil
+	}
+	if err := s.redis.Set(ctx, s.userModelKey(userID), group, userModelTTL).Err(); err != nil {
+		return fmt.Errorf("set user model: %w", err)
+	}
+	return nil
+}
