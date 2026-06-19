@@ -1,4 +1,10 @@
-import type { PKBProposal, PKBDomain, PKBDomainStat } from '@/types'
+import type {
+  PKBProposal,
+  PKBDomain,
+  PKBDomainStat,
+  PKBFeedDay,
+  PKBFeedArchiveContent,
+} from '@/types'
 
 const API_BASE = '/api'
 
@@ -75,4 +81,21 @@ export const pkbSteerApi = {
     request<{ data: { message: string } }>(`/pkb/domains/${encodeURIComponent(name)}/skeleton`, {
       method: 'POST',
     }),
+}
+
+// 资讯库每日存档时间线 API（ADR-0006 唯一例外：资讯库存档可 Web 只读渲染）。
+// 后端 internal/handler/pkb_report.go，复用 PKBReportService.FeedTimeline/FeedArchiveHTML。
+export const pkbFeedApi = {
+  // 列最近 N 天有资讯库存档的日子（before 传当前最旧日期，往前翻全部历史）
+  timeline: (days = 14, before?: string) => {
+    const params = new URLSearchParams({ days: String(days) })
+    if (before) params.set('before', before)
+    return request<{ data: PKBFeedDay[] }>(`/pkb/feed/timeline?${params}`)
+  },
+
+  // 读单篇资讯库每日存档（已服务端渲染+清洗的 HTML，前端只读显示）
+  archive: (date: string, domain: string) => {
+    const params = new URLSearchParams({ date, domain })
+    return request<{ data: PKBFeedArchiveContent }>(`/pkb/feed/archive?${params}`)
+  },
 }

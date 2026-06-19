@@ -754,4 +754,24 @@ export interface PKBDomainStat {
   low_confidence: number
   last_digest_at: string
   skeleton_pending: boolean // 正在排队/生成骨架
+  waitlist_high?: boolean // 待归位卡数达「需要关注」阈值
+  low_confidence_high?: boolean // 低置信卡数达「需要关注」阈值
+}
+
+// 资讯库每日存档时间线（ADR-0006 唯一例外：资讯库存档可 Web 只读渲染）
+export interface PKBFeedArchive {
+  domain: string
+  rel_path: string
+}
+
+export interface PKBFeedDay {
+  date: string
+  archives: PKBFeedArchive[]
+}
+
+export interface PKBFeedArchiveContent {
+  date: string
+  domain: string
+  title: string
+  html: string // 已服务端 goldmark 渲染 + bluemonday 清洗
 }

@@ -1,4 +1,5 @@
 export { default as KnowledgeFiles } from './KnowledgeFiles'
+export { default as KnowledgeOverview } from './KnowledgeOverview'
 export { default as KnowledgeSearch } from './KnowledgeSearch'
 export { default as KnowledgeAsk } from './KnowledgeAsk'
 export { default as KnowledgeSkeleton } from './KnowledgeSkeleton'
