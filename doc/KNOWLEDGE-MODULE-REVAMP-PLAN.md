@@ -1,6 +1,6 @@
 # 知识库模块重做计划（KNOWLEDGE MODULE REVAMP）
 
-> 状态：**规划完成、待实施**（2026-06-19，经 grill-with-docs 对齐）。
+> 状态：**阶段 1（Matrix agent 通电）已实施**（2026-06-19）；阶段 2/3 待做。详见 §6.5 实施纪要。
 > 本计划只产出文档与决策，**尚无任何代码改动**。落档：ADR-0006 + CONTEXT.md（调方向前端/对话问答/对话房间）+ 本文件。
 > 权威边界见 `docs/adr/0006-web-frontend-boundary.md`；术语见 `CONTEXT.md`；上游体系见 ADR-0004/0005 与 `doc/PKB-KNOWLEDGE-SKELETON-PLAN.md`。
 
@@ -32,7 +32,7 @@ PKB 已从早期「RAGFlow 知识库问答 + 切分」彻底转向「自维护�
 | 8 | 问答重点 | **Matrix agent**（Web 顺带）；agent 已建好未通电，已含 knowledge 工具 |
 | 9 | 触发 | (a) 对话房间(room_type=chat)非命令消息触发；`!kb` 保留作强制 RAG |
 | 10 | 命令 | 全字母化(待办→todo, 问→kb)；`!` 前缀（`/` 被客户端吞） |
-| 11 | 模型 | 房间默认模型组(agent.model) + `!model` 切换(模型组, 房间持久) |
+| 11 | 模型 | 房间默认模型组(agent.model) + `!model` 切换(模型组, **按用户持久**，见 §6.5) |
 
 ## 3. 目标模块结构
 
@@ -96,13 +96,14 @@ PKB 已从早期「RAGFlow 知识库问答 + 切分」彻底转向「自维护�
 - Web/Matrix 共用 `internal/service/knowledge_ask.go`：纯 RAG，搜不到回「知识库中未找到相关信息」**不调 LLM**(`:89`)，prompt 写死「只基于知识库」(`:156`)；**不传对话历史**（伪多轮）。
 - Matrix `!问` = `handler_qa.go` → AskService。
 - **Matrix agent 已建好但没通电**：`internal/matrix/agent/agent.go AgentService`（LLM + ToolRegistry + Redis SessionStore 按房间多轮 + 限流 + 权限 + `HandleMessage:97` + `ResetSession`），已注册 `knowledge_search`+`knowledge_ask` 工具（`tools_readonly.go:59-60`）。但 `matrix.agent.enabled=false`(`config.go:517`)，且 `HandleMessage` **无调用方**——`gateway/sync.go:61 handleRoomMessage` 只走命令路由，非命令消息被忽略。
+> ✏️ **阶段1实施修正**：此判断有误——分流脚手架早已存在于 `service/command.go ExecuteMessage`（非命令消息→`agent.HandleMessage` 并回帖）。真实缺口是「分流不判 room_type」+ enabled 默认关，见 §6.5。
 
 ### 6.2 阶段 1（重点 · Matrix agent 通电）
 1. 开 `matrix.agent.enabled`（配 model/限流/权限）。
 2. `RoomType` 加 `chat` 类型（现 `model/matrix.go:16`：command/notification/admin）。
 3. `handleRoomMessage`：对话房间(room_type=chat)的**非命令消息** → `agent.HandleMessage`（= 去掉 `!问` 前缀，直接说话即对话）。
 4. 命令字母化：`待办`(`handler_memos.go:28`)→`todo`、`问`(`handler_qa.go`)→`kb`；`!kb` 保留 QAHandler 作**强制纯 RAG**（= `/kb` 扩展口子，零成本）。前缀仍 `!,！`（`config.go:514`）——`/` 被 Matrix 客户端当 slash command 吞掉，不可用。
-5. 新增 `!model` 命令：列出/切换 LLM 模型组（`pool-chat-balanced`/`pool-pkb`…），**按房间持久**覆盖 agent 模型（存进 agent 已有的 Redis 会话；`!reset` 只清对话不清模型）。
+5. 新增 `!model` 命令：列出/切换 LLM 模型组（`pool-chat-balanced`/`pool-pkb`…），**按用户持久**覆盖 agent 模型（存独立 Redis key `matrix:agent:usermodel:<user>`，与会话 key 分离 → `!reset` 只清对话不清模型）。
 6. 会话管理**全现成**：房间=会话、切房间=切会话、新房间=新会话、`!reset`=清当前会话；多轮/引用由 agent + knowledge 工具自带。
 
 ### 6.3 阶段 2（Web 顺带）
@@ -113,6 +114,16 @@ PKB 已从早期「RAGFlow 知识库问答 + 切分」彻底转向「自维护�
 
 ### 6.4 阶段 3（留口不做）
 - `/kb` 模式参数、限定领域/layer 等：对话端点/agent 预留「模式」入参即可，先不实现。
+
+### 6.5 阶段 1 实施纪要（2026-06-19 完成）
+
+提交 `1c782bf`(门禁) / `a3180fb`(别名) / `11acd3e`(!model)。**纯后端**，本地止于 `go build`+`go vet`（无真实 Matrix）。
+
+- **现状修正**：grill 时判断「`HandleMessage` 无调用方」**有误**——分流脚手架早已在 `service/command.go ExecuteMessage`（非命令消息→`agent.HandleMessage` 并回帖），`SetAgent`/`ResetHandler`/`agentServiceAdapter` 也都接好。真实缺口仅：①分流**不判 room_type**（任何房间都触发 agent）；②无 todo/kb 别名；③无 `!model`；④enabled 默认关。
+- **分流点偏离**：计划写「`handleRoomMessage` 分流」，实改在 `service.CommandService.ExecuteMessage` 加 `isChatRoom` 门禁。原因：`sync.go`(gateway 包) 反向 import agent 会**循环依赖**（agent 已 import gateway 发消息）；现状用 service 层 + `AgentHandler` interface 解耦，语义与「非命令→agent」一致。
+- **模型粒度偏离**：决策11/§6.2.5 原写「房间持久」，按用户最新指示改为**按发言用户(sender)持久**——每人切自己的模型组（权限 user），同房间多人各用各的；会话仍按房间(房间=会话)，仅「本轮用哪个模型」按发言人。
+- **命令字母化**：中文+字母**并存**（不删 待办/问/搜），新增 `todo`/`kb`；`!kb`=`QAHandler`（纯 RAG，不经 agent）。
+- **部署待办**（未做，本地难跑）：开 `matrix.agent.enabled` + 标一个房间 `room_type=chat`（`PUT /api/matrix/admin/rooms/:id` body `{"room_type":"chat"}`）后在 keeper 冒烟。
 
 ## 7. 关键非显然要点（避免重复踩坑）
 
