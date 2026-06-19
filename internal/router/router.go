@@ -328,6 +328,8 @@ func registerPKBReportRoutes(api *gin.RouterGroup, h *handler.PKBReportHandler) 
 	pkb.GET("/daily", h.Daily)
 	pkb.GET("/vault-cards", h.VaultCards)
 	pkb.GET("/digests/latest", h.LatestDigests)
+	pkb.GET("/feed/timeline", h.FeedTimeline)
+	pkb.GET("/feed/archive", h.FeedArchive)
 }
 
 // registerPKBSteerRoutes 知识骨架调方向掌舵面（Phase I）：待批提议审批 + 设领域大方向(scope)。

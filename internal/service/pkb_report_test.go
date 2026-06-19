@@ -1,8 +1,10 @@
 package service
 
 import (
+	"errors"
 	"os"
 	"path/filepath"
+	"strings"
 	"testing"
 
 	"github.com/singll/bellkeeper/internal/config"
@@ -150,5 +152,66 @@ func TestFeedArchivesByDate(t *testing.T) {
 	}
 	if archives[1].RelPath != "vault/资讯/编程/2026-06-17.md" {
 		t.Fatalf("编程存档相对路径 = %q", archives[1].RelPath)
+	}
+}
+
+// TestFeedTimeline 守住资讯时间线：自 before 前一天起往前数天，仅保留有存档的日子，按日期降序。
+func TestFeedTimeline(t *testing.T) {
+	base := t.TempDir()
+	writeTestFile(t, filepath.Join(base, "vault", "资讯", "编程", "2026-06-17.md"), "---\ntype: pkb_feed\n---\n编程资讯。\n")
+	writeTestFile(t, filepath.Join(base, "vault", "资讯", "安全", "2026-06-17.md"), "---\ntype: pkb_feed\n---\n安全资讯。\n")
+	writeTestFile(t, filepath.Join(base, "vault", "资讯", "编程", "2026-06-16.md"), "---\ntype: pkb_feed\n---\n昨天的资讯。\n")
+
+	svc := NewPKBReportService(config.KnowledgeConfig{BasePath: base}, config.DailyReportConfig{}, nil)
+	days, err := svc.FeedTimeline(7, "2026-06-18") // 自 2026-06-17 往前 7 天
+	if err != nil {
+		t.Fatalf("FeedTimeline returned error: %v", err)
+	}
+	if len(days) != 2 {
+		t.Fatalf("应有 2 天有存档（06-17、06-16），实得 %d: %+v", len(days), days)
+	}
+	if days[0].Date != "2026-06-17" || len(days[0].Archives) != 2 {
+		t.Fatalf("days[0] 应为 06-17 含 2 篇，实得 %+v", days[0])
+	}
+	if days[1].Date != "2026-06-16" || len(days[1].Archives) != 1 {
+		t.Fatalf("days[1] 应为 06-16 含 1 篇，实得 %+v", days[1])
+	}
+}
+
+// TestFeedArchiveHTML 守住单篇资讯只读渲染：剥 frontmatter、取首个一级标题、goldmark 渲染、
+// 并拒绝路径穿越（ADR-0006 仅限资讯库存档）。
+func TestFeedArchiveHTML(t *testing.T) {
+	base := t.TempDir()
+	writeTestFile(t, filepath.Join(base, "vault", "资讯", "编程", "2026-06-17.md"), "---\ntype: pkb_feed\n---\n# 编程速览\n\n- 要点一\n- 要点二\n")
+
+	svc := NewPKBReportService(config.KnowledgeConfig{BasePath: base}, config.DailyReportConfig{}, nil)
+
+	got, err := svc.FeedArchiveHTML("2026-06-17", "编程")
+	if err != nil {
+		t.Fatalf("FeedArchiveHTML returned error: %v", err)
+	}
+	if got.Title != "编程速览" {
+		t.Fatalf("Title = %q, want 编程速览", got.Title)
+	}
+	if !strings.Contains(got.HTML, "<li>") || !strings.Contains(got.HTML, "要点一") {
+		t.Fatalf("HTML 应含渲染后的列表，实得 %q", got.HTML)
+	}
+	if strings.Contains(got.HTML, "type: pkb_feed") || strings.Contains(got.HTML, "---") {
+		t.Fatalf("HTML 不应残留 frontmatter，实得 %q", got.HTML)
+	}
+
+	// 路径穿越 / 非法 domain 必须被拒
+	for _, bad := range []string{"../编程", "编程/../资讯", `编程\x`, ""} {
+		if _, err := svc.FeedArchiveHTML("2026-06-17", bad); err == nil {
+			t.Fatalf("domain=%q 应被拒", bad)
+		}
+	}
+	// 非法日期
+	if _, err := svc.FeedArchiveHTML("2026/06/17", "编程"); err == nil {
+		t.Fatalf("非法日期应被拒")
+	}
+	// 不存在的存档返回 os.ErrNotExist（供 handler 转 404）
+	if _, err := svc.FeedArchiveHTML("2026-06-17", "不存在域"); !errors.Is(err, os.ErrNotExist) {
+		t.Fatalf("不存在存档应返回 os.ErrNotExist，实得 %v", err)
 	}
 }

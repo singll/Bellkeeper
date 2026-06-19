@@ -12,6 +12,7 @@ import (
 
 	"github.com/singll/bellkeeper/internal/config"
 	"github.com/singll/bellkeeper/internal/model"
+	"github.com/singll/bellkeeper/internal/pkg/sanitizer"
 )
 
 const defaultPKBDailyLimit = 20
@@ -267,6 +268,97 @@ func (s *PKBReportService) FeedArchivesByDate(date string) ([]PKBFeedArchive, er
 	}
 	sort.Slice(out, func(i, j int) bool { return out[i].Domain < out[j].Domain })
 	return out, nil
+}
+
+// PKBFeedDay 是某一天的资讯库存档集合（供总览「资讯时间线」按日浏览）。
+type PKBFeedDay struct {
+	Date     string           `json:"date"`
+	Archives []PKBFeedArchive `json:"archives"`
+}
+
+// PKBFeedArchiveContent 是单篇资讯库每日存档的只读渲染结果（ADR-0006 唯一例外：资讯库
+// 每日存档允许 Web 只读渲染）。HTML 已服务端 goldmark 渲染 + bluemonday 清洗。
+type PKBFeedArchiveContent struct {
+	Date   string `json:"date"`
+	Domain string `json:"domain"`
+	Title  string `json:"title"`
+	HTML   string `json:"html"`
+}
+
+const maxFeedTimelineDays = 60
+
+// FeedTimeline 列出最近 days 天有资讯库存档的日子（自 before 前一天起往前数；before 空=从今天起）。
+// 逐日复用 FeedArchivesByDate，仅保留有存档的天；before 供「往前翻全部历史」分页（传当前最旧日期，
+// 取严格更早的那批）。供总览资讯时间线只读浏览（ADR-0006 例外条款）。
+func (s *PKBReportService) FeedTimeline(days int, before string) ([]PKBFeedDay, error) {
+	if days <= 0 {
+		days = 14
+	}
+	if days > maxFeedTimelineDays {
+		days = maxFeedTimelineDays
+	}
+	start, ok := s.ReportDate("")
+	if !ok {
+		return nil, fmt.Errorf("resolve today failed")
+	}
+	if before != "" {
+		b, valid := s.ReportDate(before)
+		if !valid {
+			return nil, fmt.Errorf("invalid before date; expected YYYY-MM-DD")
+		}
+		start = b.AddDate(0, 0, -1) // 严格早于 before，支持分页续翻
+	}
+	out := make([]PKBFeedDay, 0, days)
+	for i := 0; i < days; i++ {
+		dateStr := start.AddDate(0, 0, -i).Format("2006-01-02")
+		archives, err := s.FeedArchivesByDate(dateStr)
+		if err != nil {
+			return nil, err
+		}
+		if len(archives) == 0 {
+			continue
+		}
+		out = append(out, PKBFeedDay{Date: dateStr, Archives: archives})
+	}
+	return out, nil
+}
+
+// FeedArchiveHTML 读取并只读渲染单篇资讯库每日存档 vault/资讯/<domain>/<date>.md。
+// 严格校验 date/domain 防路径穿越；剥 frontmatter → goldmark → bluemonday 清洗。
+// 仅用于资讯库存档（ADR-0006 例外），不得据此渲染知识卡片正文。
+func (s *PKBReportService) FeedArchiveHTML(date, domain string) (PKBFeedArchiveContent, error) {
+	if _, ok := s.ReportDate(date); !ok {
+		return PKBFeedArchiveContent{}, fmt.Errorf("invalid date; expected YYYY-MM-DD")
+	}
+	if domain == "" || strings.ContainsAny(domain, `/\`) || strings.Contains(domain, "..") {
+		return PKBFeedArchiveContent{}, fmt.Errorf("invalid domain")
+	}
+	path := filepath.Join(s.basePath, "vault", "资讯", domain, date+".md")
+	raw, err := os.ReadFile(path)
+	if err != nil {
+		if os.IsNotExist(err) {
+			return PKBFeedArchiveContent{}, os.ErrNotExist
+		}
+		return PKBFeedArchiveContent{}, fmt.Errorf("read feed archive: %w", err)
+	}
+	body := stripReportFrontmatter(string(raw))
+	title := firstMarkdownHeading(body)
+	if title == "" {
+		title = domain + " · " + date
+	}
+	html := sanitizer.SanitizeHTML(markdownToHTML(body))
+	return PKBFeedArchiveContent{Date: date, Domain: domain, Title: title, HTML: html}, nil
+}
+
+// firstMarkdownHeading 取首个一级标题（# ）文本，无则空。
+func firstMarkdownHeading(md string) string {
+	for _, line := range strings.Split(md, "\n") {
+		t := strings.TrimSpace(line)
+		if strings.HasPrefix(t, "# ") {
+			return strings.TrimSpace(strings.TrimPrefix(t, "# "))
+		}
+	}
+	return ""
 }
 
 func (s *PKBReportService) LatestDigests() ([]PKBDigestSummary, error) {
