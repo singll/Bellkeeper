@@ -288,9 +288,15 @@ func (s *SyncLoop) discoverJoinedRooms(ctx context.Context) {
 
 	count := 0
 	for _, roomID := range rooms {
+		// 发现逻辑只标记「已加入 & 活跃」，不应改写管理员设过的 room_type（如 chat）。
+		// 新房间默认 command；已存在的保留原 room_type。
+		roomType := model.RoomTypeCommand
+		if existing, err := s.client.repos.MatrixRoom.GetByRoomID(roomID); err == nil && existing.RoomType != "" {
+			roomType = existing.RoomType
+		}
 		room := &model.MatrixRoom{
 			RoomID:   roomID,
-			RoomType: model.RoomTypeCommand,
+			RoomType: roomType,
 			IsActive: true,
 		}
 		if err := s.client.repos.MatrixRoom.Upsert(ctx, room); err != nil {
