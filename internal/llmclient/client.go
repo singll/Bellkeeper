@@ -72,6 +72,7 @@ type ChatResponse struct {
 	Content   string     `json:"content"`
 	ToolCalls []ToolCall `json:"tool_calls,omitempty"`
 	FinishReason string  `json:"finish_reason,omitempty"`
+	Model     string     `json:"model,omitempty"` // 实际命中的底层模型（proxy 回填）
 }
 
 type HTTPError struct {
@@ -145,6 +146,7 @@ func (c *Client) ChatCompletionFull(ctx context.Context, req ChatRequest, opts C
 		}
 	}
 	var out struct {
+		Model   string `json:"model"`
 		Choices []struct {
 			Message struct {
 				Content    string     `json:"content"`
@@ -164,6 +166,7 @@ func (c *Client) ChatCompletionFull(ctx context.Context, req ChatRequest, opts C
 		Content:      choice.Message.Content,
 		ToolCalls:    choice.Message.ToolCalls,
 		FinishReason: choice.FinishReason,
+		Model:        out.Model,
 	}, nil
 }
 

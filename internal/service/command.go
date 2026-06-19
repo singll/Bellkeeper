@@ -16,10 +16,12 @@ import (
 type AgentTurnResult struct {
 	Reply     string
 	UsedTools bool
+	Model     string
 }
 
 type AgentHandler interface {
 	HandleMessage(ctx context.Context, roomID, sender, content string) (*AgentTurnResult, error)
+	HandleDirectMessage(ctx context.Context, roomID, sender, content string) (*AgentTurnResult, error)
 	ResetSession(ctx context.Context, roomID string) error
 	ResetRateLimit(ctx context.Context, roomID string) error
 	SetUserModel(ctx context.Context, userID, group string) error
@@ -157,33 +159,47 @@ func (s *CommandService) ExecuteMessage(ctx context.Context, roomID, sender, eve
 		return nil
 	}
 
-	// 仅对话房间(room_type=chat)的非命令消息才触发对话 agent；
-	// 命令/通知/管理房间忽略非命令消息（守计划「仅对话房间触发」红线）。
-	if s.agent != nil && s.isChatRoom(roomID) {
-		result, err := s.agent.HandleMessage(ctx, roomID, sender, trimmed)
-		if err != nil {
-			log.Printf("[Agent] failed to handle message: %v", err)
+	// 非命令消息按房间类型分流：
+	//   chat   → 知识库 agent（注入 prompt + 工具 + 引用）
+	//   direct → 纯对话（直连大模型，无 prompt/工具，回复尾注模型）
+	//   其它   → 忽略（命令/通知/管理房间）
+	if s.agent == nil {
+		return nil
+	}
+	roomType := s.roomType(roomID)
+	var (
+		result *AgentTurnResult
+		err    error
+	)
+	switch roomType {
+	case model.RoomTypeChat:
+		result, err = s.agent.HandleMessage(ctx, roomID, sender, trimmed)
+	case model.RoomTypeDirect:
+		result, err = s.agent.HandleDirectMessage(ctx, roomID, sender, trimmed)
+	default:
+		return nil
+	}
+	if err != nil {
+		log.Printf("[Agent] failed to handle message (room_type=%s): %v", roomType, err)
+		return err
+	}
+	if result != nil && result.Reply != "" {
+		if _, err := s.client.SendMessage(ctx, roomID, result.Reply); err != nil {
+			log.Printf("[Agent] failed to send reply: %v", err)
 			return err
-		}
-		if result != nil && result.Reply != "" {
-			if _, err := s.client.SendMessage(ctx, roomID, result.Reply); err != nil {
-				log.Printf("[Agent] failed to send reply: %v", err)
-				return err
-			}
 		}
 	}
 
 	return nil
 }
 
-// isChatRoom 判断房间是否为对话房间（room_type=chat）。
-// 仅对话房间的非命令消息才路由到对话 agent；命令/通知/管理房间忽略非命令消息。
-func (s *CommandService) isChatRoom(roomID string) bool {
+// roomType 返回房间的 room_type（查不到返回空串）。
+func (s *CommandService) roomType(roomID string) string {
 	room, err := s.repos.MatrixRoom.GetByRoomID(roomID)
 	if err != nil || room == nil {
-		return false
+		return ""
 	}
-	return room.RoomType == model.RoomTypeChat
+	return room.RoomType
 }
 
 // ListCommands returns all available commands

@@ -13,7 +13,8 @@ const (
 	RoomTypeCommand      = "command"      // 命令房间：响应 ! 命令
 	RoomTypeNotification = "notification" // 通知房间：只接收推送
 	RoomTypeAdmin        = "admin"        // 管理房间
-	RoomTypeChat         = "chat"         // 对话房间：非命令消息触发对话 agent
+	RoomTypeChat         = "chat"         // 对话房间：非命令消息触发对话 agent（知识库工具+引用）
+	RoomTypeDirect       = "direct"       // 纯对话房间：非命令消息直连大模型（无 system prompt、无工具）
 )
 
 // MatrixRoom represents a registered Matrix room in the platform.

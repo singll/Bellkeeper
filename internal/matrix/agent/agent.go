@@ -92,6 +92,7 @@ func NewAgentService(
 type TurnResult struct {
 	Reply string
 	UsedTools bool
+	Model string // 实际命中的底层模型（纯对话房间用于尾注）
 }
 
 func (s *AgentService) HandleMessage(ctx context.Context, roomID, sender, content string) (*TurnResult, error) {
@@ -213,6 +214,69 @@ func (s *AgentService) HandleMessage(ctx context.Context, roomID, sender, conten
 	return &TurnResult{
 		Reply:     reply,
 		UsedTools: usedTools,
+	}, nil
+}
+
+// HandleDirectMessage 纯对话路径：直连大模型，不注入 system prompt、不挂工具、单次调用。
+// 多轮、限流、按用户模型覆盖均复用现有组件；回复尾部标注实际命中的底层模型。
+func (s *AgentService) HandleDirectMessage(ctx context.Context, roomID, sender, content string) (*TurnResult, error) {
+	allowed, _, err := s.rateLimiter.Allow(ctx, roomID)
+	if err != nil {
+		return nil, fmt.Errorf("rate limit check: %w", err)
+	}
+	if !allowed {
+		return &TurnResult{
+			Reply: fmt.Sprintf("⏳ 此房间 Agent 回合已达上限（%d/小时），请稍后再试。", s.rateLimiter.max),
+		}, nil
+	}
+
+	// session 复用按房间多轮，但不放 system 消息（纯对话不限制提示词）。
+	session, err := s.sessions.Get(ctx, roomID)
+	if err != nil {
+		middleware.GetLogger().Warn("failed to get session, starting fresh", zap.Error(err))
+		session = nil
+	}
+	if session == nil {
+		session = []llmclient.ChatMessage{}
+	}
+	session = append(session, llmclient.ChatMessage{Role: "user", Content: content})
+
+	// 选用模型：优先该发言用户持久化的模型组覆盖（!model），无则房间默认。
+	model := s.cfg.Model
+	if override, err := s.sessions.GetUserModel(ctx, sender); err == nil && override != "" {
+		model = override
+	}
+
+	resp, err := s.llm.ChatCompletionFull(ctx, llmclient.ChatRequest{
+		Model:       model,
+		Messages:    session,
+		Temperature: 0.3,
+		// 无 Tools：纯对话不挂工具。
+	}, llmclient.ChatOptions{
+		CallerID:       "matrix-direct",
+		TaskType:       "chat",
+		ConversationID: roomID,
+	})
+	if err != nil {
+		return nil, fmt.Errorf("llm call: %w", err)
+	}
+
+	if err := s.sessions.Append(ctx, roomID,
+		llmclient.ChatMessage{Role: "user", Content: content},
+		llmclient.ChatMessage{Role: "assistant", Content: resp.Content},
+	); err != nil {
+		middleware.GetLogger().Warn("failed to save session", zap.Error(err))
+	}
+
+	// 尾注实际命中的底层模型。
+	display := resp.Content
+	if resp.Model != "" {
+		display = resp.Content + fmt.Sprintf("\n\n— by %s", resp.Model)
+	}
+
+	return &TurnResult{
+		Reply: display,
+		Model: resp.Model,
 	}, nil
 }
 

@@ -604,6 +604,22 @@ func (a *agentServiceAdapter) HandleMessage(ctx context.Context, roomID, sender,
 	return &service.AgentTurnResult{
 		Reply:     result.Reply,
 		UsedTools: result.UsedTools,
+		Model:     result.Model,
+	}, nil
+}
+
+func (a *agentServiceAdapter) HandleDirectMessage(ctx context.Context, roomID, sender, content string) (*service.AgentTurnResult, error) {
+	result, err := a.svc.HandleDirectMessage(ctx, roomID, sender, content)
+	if err != nil {
+		return nil, err
+	}
+	if result == nil {
+		return nil, nil
+	}
+	return &service.AgentTurnResult{
+		Reply:     result.Reply,
+		UsedTools: result.UsedTools,
+		Model:     result.Model,
 	}, nil
 }
 
