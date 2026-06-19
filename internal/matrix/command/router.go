@@ -221,7 +221,9 @@ func (r *Router) createHandlerFromDB(cmd *model.MatrixCommand) Handler {
 		}
 		return NewN8NTriggerHandler(cmd.CommandName, webhookURL)
 
-	case "knowledge_qa", "knowledge_search":
+	case "knowledge_qa", "knowledge_search", "memos_todo":
+		// 这些命令的真实 handler 由 service 层代码直接注册（含中文/字母别名），
+		// DB 项仅用于权限/scope，故此处不建 handler。
 		return nil
 
 	case "builtin_ping", "builtin_status", "builtin_help", "builtin_health", "builtin_rooms", "builtin_commands":

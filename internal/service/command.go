@@ -80,6 +80,7 @@ func (s *CommandService) registerHandlers() {
 		s.router.RegisterHandler(command.NewShortcutAliasHandler("列表", "列表", directMemos))
 		s.router.RegisterHandler(command.NewShortcutAliasHandler("新增", "新增", directMemos))
 		s.router.RegisterHandler(command.NewShortcutAliasHandler("完成", "完成", directMemos))
+		s.router.RegisterHandler(command.NewAliasHandler("todo", directMemos)) // 字母别名 = !待办
 		log.Printf("[Command] registered direct Memos handler with aliases")
 	} else if s.n8nCfg.WebhookBaseURL != "" {
 		// Fallback: n8n webhook
@@ -89,6 +90,7 @@ func (s *CommandService) registerHandlers() {
 		s.router.RegisterHandler(command.NewAliasHandler("列表", memosHandler))
 		s.router.RegisterHandler(command.NewAliasHandler("新增", memosHandler))
 		s.router.RegisterHandler(command.NewAliasHandler("完成", memosHandler))
+		s.router.RegisterHandler(command.NewAliasHandler("todo", memosHandler)) // 字母别名 = !待办
 		log.Printf("[Command] registered n8n Memos handler with aliases")
 	}
 
@@ -110,6 +112,7 @@ func (s *CommandService) SetKnowledgeHandlers(askHandler command.AskHandler, sea
 	qaHandler := command.NewQAHandler(askHandler)
 	s.router.RegisterHandler(qaHandler)
 	s.router.RegisterHandler(command.NewAliasHandler("问", qaHandler))
+	s.router.RegisterHandler(command.NewAliasHandler("kb", qaHandler)) // 字母别名 = !问（强制纯 RAG，不经 agent）
 
 	searchMatrixHandler := command.NewMatrixSearchHandler(searchHandler)
 	s.router.RegisterHandler(searchMatrixHandler)
