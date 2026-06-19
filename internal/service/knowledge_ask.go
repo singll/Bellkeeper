@@ -9,12 +9,22 @@ import (
 	"github.com/singll/bellkeeper/internal/llmclient"
 )
 
+// ChatTurn 一轮对话历史
+type ChatTurn struct {
+	Role    string `json:"role"`    // user | assistant
+	Content string `json:"content"`
+}
+
 // AskRequest 问答请求
 type AskRequest struct {
-	Question string   `json:"question"`
-	Layers   []string `json:"layers,omitempty"`
-	TopK     int      `json:"top_k,omitempty"`
+	Question string     `json:"question"`
+	Layers   []string   `json:"layers,omitempty"`
+	TopK     int        `json:"top_k,omitempty"`
+	History  []ChatTurn `json:"history,omitempty"` // 多轮上下文（前端传最近 N 轮，后端再封顶）
 }
+
+// maxHistoryMessages 后端拼入 LLM 的历史消息数上限（防上下文膨胀，6 轮 ≈ 12 条）
+const maxHistoryMessages = 12
 
 // AskResponse 问答响应
 type AskResponse struct {
@@ -86,20 +96,15 @@ func (s *AskService) Ask(ctx context.Context, req AskRequest) (*AskResponse, err
 	}
 	searchMs := time.Since(searchStart).Milliseconds()
 
-	if len(searchResult.Files) == 0 {
-		return &AskResponse{
-			Answer:     "知识库中未找到相关信息",
-			References: []Reference{},
-			SearchMs:   searchMs,
-		}, nil
+	// 2. 组装上下文（无命中时为空，仍走通用回答，不再拒答）
+	var contextContent string
+	if len(searchResult.Files) > 0 {
+		contextContent = s.buildContext(searchResult.Files)
 	}
 
-	// 2. 组装上下文
-	context := s.buildContext(searchResult.Files)
-
-	// 3. 调用 LLM
+	// 3. 调用 LLM（命中=优先据库回答，未命中=通用助手）
 	llmStart := time.Now()
-	answer, err := s.callLLM(ctx, req.Question, context)
+	answer, err := s.callLLM(ctx, req.Question, contextContent, req.History)
 	if err != nil {
 		return nil, fmt.Errorf("call llm: %w", err)
 	}
@@ -152,17 +157,38 @@ func (s *AskService) buildContext(files []FileHit) string {
 	return string(runes)
 }
 
-func (s *AskService) callLLM(ctx context.Context, question, contextContent string) (string, error) {
-	systemPrompt := `你是一个知识库助手。基于以下知识库内容回答问题。
-要求:
-1. 只基于提供的内容回答，不要编造
-2. 在回答中引用来源文件名
-3. 如果知识库中没有相关信息，明确告知用户`
+func (s *AskService) callLLM(ctx context.Context, question, contextContent string, history []ChatTurn) (string, error) {
+	systemPrompt := `你是 Bellkeeper 的 AI 助手。
+- 若提供了知识库片段：优先据其回答，并在相关处标注来源卡片标题（只读引用，不复制正文）。
+- 若片段为空或不相关：作为通用助手正常回答，不要回「未找到」。
+- 不要编造知识库里没有的事实来源。中文回答，简洁实用。`
 
-	messages := []llmclient.ChatMessage{
-		{Role: "system", Content: systemPrompt},
-		{Role: "user", Content: fmt.Sprintf("问题: %s\n\n相关文档:\n%s", question, contextContent)},
+	messages := make([]llmclient.ChatMessage, 0, len(history)+2)
+	messages = append(messages, llmclient.ChatMessage{Role: "system", Content: systemPrompt})
+
+	// 拼入最近 maxHistoryMessages 条历史（取尾部，防上下文膨胀）
+	if n := len(history); n > 0 {
+		start := 0
+		if n > maxHistoryMessages {
+			start = n - maxHistoryMessages
+		}
+		for _, turn := range history[start:] {
+			if turn.Role == "" || turn.Content == "" {
+				continue
+			}
+			messages = append(messages, llmclient.ChatMessage{Role: turn.Role, Content: turn.Content})
+		}
 	}
+
+	// 当前问题：命中时附知识库片段，未命中时只含问题
+	var userContent string
+	if contextContent != "" {
+		userContent = fmt.Sprintf("问题: %s\n\n相关文档:\n%s", question, contextContent)
+	} else {
+		userContent = question
+	}
+	messages = append(messages, llmclient.ChatMessage{Role: "user", Content: userContent})
+
 	return s.llmClient.ChatCompletion(
 		ctx,
 		llmclient.ChatRequest{

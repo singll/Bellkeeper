@@ -29,6 +29,8 @@ type FileHit struct {
 	Category      string   `json:"category"`
 	Tags          []string `json:"tags"`
 	SourceURL     string   `json:"source_url,omitempty"`
+	SourceDomain  string   `json:"source_domain,omitempty"`
+	UpdatedAt     int64    `json:"updated_at,omitempty"`
 	Snippets      []string `json:"snippets"`
 }
 
@@ -108,6 +110,8 @@ func (s *FileSearchService) Search(ctx context.Context, req FileSearchRequest) (
 			Category:      getStringValue(hit, "category"),
 			Tags:          tags,
 			SourceURL:     getStringValue(hit, "source_url"),
+			SourceDomain:  getStringValue(hit, "source_domain"),
+			UpdatedAt:     getInt64Value(hit, "updated_at"),
 			Snippets:      snippets,
 		}
 		hits = append(hits, h)
@@ -161,6 +165,27 @@ func (s *FileSearchService) extractSnippets(m map[string]interface{}) []string {
 	}
 
 	return snippets
+}
+
+// getInt64Value 安全获取整数值（处理 float64/json.Number/int 等 JSON 反序列化类型）
+func getInt64Value(m map[string]interface{}, key string) int64 {
+	v, ok := m[key]
+	if !ok {
+		return 0
+	}
+	switch typed := v.(type) {
+	case float64:
+		return int64(typed)
+	case int64:
+		return typed
+	case int:
+		return int64(typed)
+	case json.Number:
+		if n, err := typed.Int64(); err == nil {
+			return n
+		}
+	}
+	return 0
 }
 
 // getStringValue 安全获取字符串值（处理 string、json.RawMessage 和 []byte 类型）
