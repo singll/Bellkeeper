@@ -12,7 +12,9 @@ import (
 	"time"
 
 	"github.com/singll/bellkeeper/internal/config"
+	"github.com/singll/bellkeeper/internal/middleware"
 	"github.com/singll/bellkeeper/internal/pkg/meili"
+	"go.uber.org/zap"
 )
 
 // KnowledgeIndexService 知识库索引服务
@@ -50,6 +52,12 @@ func (s *KnowledgeIndexService) StartFullScan(ctx context.Context) {
 	s.wg.Add(1)
 	go func() {
 		defer s.wg.Done()
+		defer func() {
+			if r := recover(); r != nil {
+				middleware.GetLogger().Error("KnowledgeIndex full scan panic recovered",
+					zap.Any("panic", r))
+			}
+		}()
 		log.Println("[KnowledgeIndex] starting full scan...")
 
 		if err := s.FullScan(ctx); err != nil {
@@ -87,6 +95,12 @@ func (s *KnowledgeIndexService) StartIncrementalScan(ctx context.Context) {
 	s.wg.Add(1)
 	go func() {
 		defer s.wg.Done()
+		defer func() {
+			if r := recover(); r != nil {
+				middleware.GetLogger().Error("KnowledgeIndex incremental scan panic recovered",
+					zap.Any("panic", r))
+			}
+		}()
 
 		// 首次等待 30 秒，让服务完全启动
 		firstTick := time.NewTimer(30 * time.Second)
@@ -158,12 +172,21 @@ func (s *KnowledgeIndexService) indexFiles(ctx context.Context, files []FileInfo
 		go func(f FileInfo) {
 			defer wg.Done()
 			defer func() { <-sem }()
+			defer func() {
+				if r := recover(); r != nil {
+					middleware.GetLogger().Error("knowledge index file panic recovered",
+						zap.String("file", f.RelPath),
+						zap.Any("panic", r))
+				}
+			}()
 
 			if err := s.indexFile(ctx, &f); err != nil {
 				errMu.Lock()
 				lastErr = err
 				errMu.Unlock()
-				log.Printf("[KnowledgeIndex] index file %s: %v", f.RelPath, err)
+				middleware.GetLogger().Error("knowledge index file failed",
+					zap.String("file", f.RelPath),
+					zap.Error(err))
 			}
 		}(file)
 	}

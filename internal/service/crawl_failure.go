@@ -42,19 +42,20 @@ func (s *CrawlFailureService) Retry(id uint) error {
 		return fmt.Errorf("cannot retry abandoned failure %d", id)
 	}
 
-	if s.jobRepo != nil {
-		job := &model.CrawlJob{
-			SourceID:     failure.SourceID,
-			URL:          failure.URL,
-			Title:        failure.Title,
-			Status:       model.CrawlJobPending,
-			ChannelType:  "auto",
-			SourceDomain: failure.SourceDomain,
-			MaxRetries:   3,
-		}
-		if err := s.jobRepo.Enqueue(job); err != nil {
-			return fmt.Errorf("enqueue retry job for failure %d: %w", id, err)
-		}
+	if s.jobRepo == nil {
+		return fmt.Errorf("crawl failure retry: job repository not configured")
+	}
+	job := &model.CrawlJob{
+		SourceID:     failure.SourceID,
+		URL:          failure.URL,
+		Title:        failure.Title,
+		Status:       model.CrawlJobPending,
+		ChannelType:  "auto",
+		SourceDomain: failure.SourceDomain,
+		MaxRetries:   3,
+	}
+	if err := s.jobRepo.Enqueue(job); err != nil {
+		return fmt.Errorf("enqueue retry job for failure %d: %w", id, err)
 	}
 
 	if err := s.failureRepo.MarkRecoveryAttempt(id); err != nil {

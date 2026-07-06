@@ -124,7 +124,8 @@ SELECT id FROM (
 	WHERE j.deleted_at IS NULL
 		AND j.status IN (?, ?)
 		AND (j.next_retry_at IS NULL OR j.next_retry_at <= ?)
-		AND (p.next_allowed_at IS NULL OR p.next_allowed_at <= ?)`
+		AND (p.next_allowed_at IS NULL OR p.next_allowed_at <= ?)
+		AND (p.is_paused IS NULL OR p.is_paused = false)`
 	args := []interface{}{string(model.CrawlJobPending), string(model.CrawlJobRetrying), now, now}
 	if channelType != "" && channelType != "auto" {
 		// Specific-channel workers also pick up "auto" jobs.
@@ -287,6 +288,7 @@ func (r *CrawlJobRepository) List(opts ListCrawlJobOpts) ([]model.CrawlJob, int6
 type CrawlQueueStats struct {
 	Pending  int64 `json:"pending"`
 	Running  int64 `json:"running"`
+	Crawled  int64 `json:"crawled"` // 1.0: 抓取完成待 extract-worker 入库
 	Success  int64 `json:"success"`
 	Retrying int64 `json:"retrying"`
 	Failed   int64 `json:"failed"`
@@ -327,6 +329,7 @@ func (r *CrawlJobRepository) Stats() (*CrawlQueueStats, error) {
 	statuses := map[string]*int64{
 		string(model.CrawlJobPending):  &stats.Pending,
 		string(model.CrawlJobRunning):  &stats.Running,
+		string(model.CrawlJobCrawled):  &stats.Crawled,
 		string(model.CrawlJobSuccess):  &stats.Success,
 		string(model.CrawlJobRetrying): &stats.Retrying,
 		string(model.CrawlJobFailed):   &stats.Failed,
@@ -550,6 +553,21 @@ func (r *CrawlJobRepository) RecoverStaleRunningJobs(staleTimeout time.Duration)
 	cutoff := time.Now().Add(-staleTimeout)
 	result := r.db.Model(&model.CrawlJob{}).
 		Where("status = ? AND started_at < ?", string(model.CrawlJobRunning), cutoff).
+		Updates(map[string]interface{}{
+			"status":     string(model.CrawlJobPending),
+			"started_at": nil,
+		})
+	return result.RowsAffected, result.Error
+}
+
+// RecoverStaleCrawledJobs resets jobs stuck in "crawled" (pending extract-worker
+// ingestion) longer than staleTimeout. 1.0 事件化后：extract-worker 崩溃或 NATS
+// 消息丢失会导致 job 卡在 crawled；本方法把它们回退到 pending 重走爬取，
+// 保证不卡死（代价是重复抓取，但 crawl.dedup + IngestURL hash 去重兜底）。
+func (r *CrawlJobRepository) RecoverStaleCrawledJobs(staleTimeout time.Duration) (int64, error) {
+	cutoff := time.Now().Add(-staleTimeout)
+	result := r.db.Model(&model.CrawlJob{}).
+		Where("status = ? AND updated_at < ?", string(model.CrawlJobCrawled), cutoff).
 		Updates(map[string]interface{}{
 			"status":     string(model.CrawlJobPending),
 			"started_at": nil,

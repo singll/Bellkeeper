@@ -13,6 +13,7 @@ type CrawlJobStatus string
 const (
 	CrawlJobPending  CrawlJobStatus = "pending"
 	CrawlJobRunning  CrawlJobStatus = "running"
+	CrawlJobCrawled  CrawlJobStatus = "crawled" // 1.0: 抓取+提取完成，待 extract-worker 入库（中间态）
 	CrawlJobSuccess  CrawlJobStatus = "success"
 	CrawlJobFailed   CrawlJobStatus = "failed"
 	CrawlJobRetrying CrawlJobStatus = "retrying"

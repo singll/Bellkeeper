@@ -1,0 +1,9 @@
+# 知识库非 PKB 专属提示词 registry（classify / knowledge_ask / rule_optimizer）。
+# 复用 PKB 的 registry 模式：active 指向当前启用的提示词文件，切换版本改这里不改代码。
+# 文件位于同目录（config/prompts/）。
+active:
+  classify_system: classify_system.md
+  classify_user: classify_user.md
+  knowledge_ask_system: knowledge_ask_system.md
+  rule_optimizer_system: rule_optimizer_system.md
+  rule_optimizer_user: rule_optimizer_user.md

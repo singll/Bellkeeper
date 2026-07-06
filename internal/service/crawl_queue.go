@@ -15,20 +15,23 @@ import (
 	"time"
 
 	"github.com/singll/bellkeeper/internal/config"
+	"github.com/singll/bellkeeper/internal/middleware"
 	"github.com/singll/bellkeeper/internal/model"
 	"github.com/singll/bellkeeper/internal/repository"
+	"go.uber.org/zap"
 )
 
 // CrawlQueueService manages the persistent crawl queue with worker pools.
 type CrawlQueueService struct {
-	cfg          config.CrawlQueueConfig
-	repo         *repository.CrawlJobRepository
-	domainRepo   *repository.CrawlDomainProfileRepository
-	failureRepo  *repository.CrawlFailureRepository
-	extractor    *ExtractorService
-	ingestion    *FileIngestionService
-	activityLog  *ActivityLogService
-	notification *NotificationService
+	cfg           config.CrawlQueueConfig
+	repo          *repository.CrawlJobRepository
+	domainRepo    *repository.CrawlDomainProfileRepository
+	failureRepo   *repository.CrawlFailureRepository
+	extractor     *ExtractorService
+	ingestion     *FileIngestionService
+	activityLog   *ActivityLogService
+	notification  *NotificationService
+	eventPublisher *KBEventPublisher
 
 	// Worker management
 	cancel context.CancelFunc
@@ -148,6 +151,12 @@ func (s *CrawlQueueService) SetNotificationService(svc *NotificationService) {
 	s.notification = svc
 }
 
+// SetEventPublisher 注入知识库事件发布器（1.0 事件化）。
+// 未注入时 crawl worker 走 fallback 同步入库（行为等同重构前）。
+func (s *CrawlQueueService) SetEventPublisher(pub *KBEventPublisher) {
+	s.eventPublisher = pub
+}
+
 // Domain cooling backoff bounds (exponential: base * 2^(failures-1), capped at max).
 // Cooling is persisted on crawl_domain_profiles.next_allowed_at so it survives restarts
 // and is enforced at dequeue time by DequeueFair's LEFT JOIN — no in-memory state.
@@ -234,8 +243,13 @@ func (s *CrawlQueueService) Enqueue(sourceID uint, rawURL, title, channelType st
 		MaxRetries:   s.cfg.MaxRetries,
 	}
 	if metadata != nil {
-		b, _ := json.Marshal(metadata)
-		job.Metadata = b
+		b, err := json.Marshal(metadata)
+		if err != nil {
+			middleware.GetLogger().Warn("crawl queue: marshal metadata failed",
+				zap.String("url", rawURL), zap.Error(err))
+		} else {
+			job.Metadata = b
+		}
 	}
 
 	if err := s.repo.Enqueue(job); err != nil {
@@ -298,6 +312,15 @@ func (s *CrawlQueueService) staleJobRecoveryLoop(ctx context.Context) {
 			}
 			if recovered > 0 {
 				log.Printf("[CrawlQueue] recovered %d stale running jobs (stale>%s)", recovered, staleTimeout)
+			}
+			// 1.0 事件化：回收卡在 crawled（待 extract-worker 入库）超时的 job。
+			crawledRecovered, err := s.repo.RecoverStaleCrawledJobs(staleTimeout)
+			if err != nil {
+				log.Printf("[CrawlQueue] stale crawled recovery error: %v", err)
+				continue
+			}
+			if crawledRecovered > 0 {
+				log.Printf("[CrawlQueue] recovered %d stale crawled jobs (stale>%s) — extract-worker stuck or event lost", crawledRecovered, staleTimeout)
 			}
 		}
 	}
@@ -387,6 +410,12 @@ func normalizePositive(value, fallback int) int {
 }
 
 // processJob executes a single crawl job.
+//
+// 1.0 重构（§2.1.2）：crawl worker 只负责"抓取+提取正文"（extractor.Extract），
+// 成功后发布 knowledge.crawl.done 事件并将 job 状态置 crawled（待 extract-worker
+// 入库）；入库（IngestURL）与 Meili 索引由独立 extract-worker / index-worker 经
+// eventbus 消费完成。事件发布失败或 payload 超限时走 fallback 同步入库（行为
+// 等同重构前），保证不丢内容。
 func (s *CrawlQueueService) processJob(ctx context.Context, job *model.CrawlJob, workerChannel string, cb *circuitBreaker) {
 	startTime := time.Now()
 
@@ -396,7 +425,7 @@ func (s *CrawlQueueService) processJob(ctx context.Context, job *model.CrawlJob,
 		extractorName = "" // let ExtractorService decide (trafilatura first, firecrawl fallback)
 	}
 
-	// Extract content
+	// Extract content (抓取+提取正文一步完成)
 	extractReq := &ExtractionRequest{URL: job.URL}
 	if overrides := s.getRequestOverrides(job.SourceDomain); overrides != nil {
 		extractReq.Overrides = overrides
@@ -414,7 +443,6 @@ func (s *CrawlQueueService) processJob(ctx context.Context, job *model.CrawlJob,
 		return
 	}
 
-	// Success path
 	content := result.Content
 	extractorUsed := result.Extractor
 
@@ -426,23 +454,64 @@ func (s *CrawlQueueService) processJob(ctx context.Context, job *model.CrawlJob,
 
 	// Layer 3: paywall keyword detection
 	if s.detectPaywallKeywords(content) {
-		// Cooling is applied uniformly by handleExtractionFailure (classified as
-		// "paywall"); no separate pre-cooling here.
 		s.handleExtractionFailure(job, fmt.Errorf("paywall keywords detected"), extractorUsed, cb, durationMs)
 		return
 	}
 
-	// Ingest the extracted content
+	// 抓取+提取成功 → 尝试发布 knowledge.crawl.done 事件，交 extract-worker 入库。
+	if s.eventPublisher != nil {
+		payload := KBCrawlDonePayload{
+			JobID:         job.ID,
+			URL:           job.URL,
+			Title:         coalesce(job.Title, result.Title),
+			SourceID:      job.SourceID,
+			SourceDomain:  job.SourceDomain,
+			Content:       content,
+			Extractor:     extractorUsed,
+			ContentLength: len(content),
+		}
+		published, perr := s.eventPublisher.PublishCrawlDone(ctx, payload)
+		if perr != nil {
+			log.Printf("[CrawlQueue] publish crawl.done failed for job %d: %v (fallback to sync ingest)", job.ID, perr)
+		}
+		if published {
+			// 事件已投递：状态置 crawled（待 extract-worker 入库），退出冷却。
+			updates := map[string]interface{}{
+				"content_length": len(content),
+				"extractor_used": extractorUsed,
+			}
+			s.clearCooling(job.SourceDomain)
+			if err := s.repo.UpdateStatus(job.ID, model.CrawlJobCrawled, updates); err != nil {
+				log.Printf("[CrawlQueue] failed to mark job %d crawled: %v", job.ID, err)
+			}
+			s.logActivity("job_crawled", "crawled",
+				fmt.Sprintf("Crawled (pending extract): %s extractor=%s len=%d", job.URL, extractorUsed, len(content)),
+				job.SourceID)
+			s.recordDomainOutcome(job, string(model.CrawlJobCrawled), "", "success", nil)
+			if cb != nil {
+				cb.recordSuccess()
+			}
+			return
+		}
+		// published=false：payload 超限或 bus 未配置 → fallback 同步入库。
+	}
+
+	// Fallback：同步入库（无 eventPublisher 或 payload 超限），行为等同重构前。
+	s.ingestAndFinalize(ctx, job, content, extractorUsed, cb)
+}
+
+// ingestAndFinalize 同步执行入库 + 状态终结（fallback 路径，或 extract-worker 内部复用）。
+func (s *CrawlQueueService) ingestAndFinalize(ctx context.Context, job *model.CrawlJob, content, extractorUsed string, cb *circuitBreaker) {
 	ingestResult, err := s.ingestion.IngestURL(&IngestURLRequest{
 		URL:      job.URL,
-		Title:    coalesce(job.Title, result.Title),
+		Title:    coalesce(job.Title, ""),
 		Content:  content,
 		Category: "",
 		Layer:    "",
 	})
 
 	if err != nil {
-		s.handleExtractionFailure(job, err, extractorUsed, cb, durationMs)
+		s.handleExtractionFailure(job, err, extractorUsed, cb, 0)
 		return
 	}
 
@@ -451,11 +520,7 @@ func (s *CrawlQueueService) processJob(ctx context.Context, job *model.CrawlJob,
 		"content_length": len(content),
 		"extractor_used": extractorUsed,
 	}
-	// Content extracted+ingested OK → exit cooling (zero failure_count, clear
-	// next_allowed_at). recordDomainOutcome below then re-applies the normal
-	// politeness delay. Done unconditionally so recovery isn't gated on throttling.
 	s.clearCooling(job.SourceDomain)
-	// Drop any stale failure-archive entry for this URL — it's no longer failing.
 	if s.failureRepo != nil {
 		if err := s.failureRepo.ResolveByURL(job.URL); err != nil {
 			log.Printf("[CrawlQueue] resolve failure record for %s failed: %v", job.URL, err)
@@ -509,6 +574,7 @@ func (s *CrawlQueueService) handleExtractionFailure(job *model.CrawlJob, err err
 		s.logActivity("job_archived", "skipped",
 			fmt.Sprintf("Archived to failures (max retries): %s retries=%d err=%s", job.URL, job.RetryCount, errMsg), job.SourceID)
 		s.recordDomainOutcome(job, string(model.CrawlJobSkipped), errType, errMsg, nil)
+		s.publishCrawlFailed(job, errType, errMsg, true)
 		return
 	}
 
@@ -526,11 +592,35 @@ func (s *CrawlQueueService) handleExtractionFailure(job *model.CrawlJob, err err
 		fmt.Sprintf("Retry: %s attempt=%d next=%s type=%s err=%s", job.URL, job.RetryCount+1, nextRetry.Format(time.Kitchen), errType, errMsg),
 		job.SourceID)
 	s.recordDomainOutcome(job, string(model.CrawlJobRetrying), errType, errMsg, &nextRetry)
+	// 1.0 §2.1.1：发布 crawl.failed 事件（非终结，将重试）供域名健康度 worker 评估。
+	s.publishCrawlFailed(job, errType, errMsg, false)
+}
+
+// publishCrawlFailed 发布 knowledge.crawl.failed 事件（eventPublisher 未配置时静默跳过）。
+func (s *CrawlQueueService) publishCrawlFailed(job *model.CrawlJob, errType, errMsg string, terminal bool) {
+	if s.eventPublisher == nil {
+		return
+	}
+	if perr := s.eventPublisher.PublishCrawlFailed(context.Background(), KBCrawlFailedPayload{
+		JobID:        job.ID,
+		URL:          job.URL,
+		SourceDomain: job.SourceDomain,
+		ErrorType:    errType,
+		ErrorMessage: errMsg,
+		RetryCount:   job.RetryCount,
+		Terminal:     terminal,
+	}); perr != nil {
+		log.Printf("[CrawlQueue] publish crawl.failed for job %d failed: %v", job.ID, perr)
+	}
 }
 
 // handleEmptyContent handles extraction that returned too-short content.
 func (s *CrawlQueueService) handleEmptyContent(job *model.CrawlJob, extractor string, cb *circuitBreaker, durationMs int) {
 	s.enterCooling(job.SourceDomain, "empty_content", "content too short")
+
+	if cb != nil {
+		cb.recordFailure()
+	}
 
 	if job.RetryCount >= job.MaxRetries {
 		if s.failureRepo != nil {
@@ -547,6 +637,7 @@ func (s *CrawlQueueService) handleEmptyContent(job *model.CrawlJob, extractor st
 		s.logActivity("job_archived", "skipped",
 			fmt.Sprintf("Archived (repeated empty): %s domain=%s", job.URL, job.SourceDomain), job.SourceID)
 		s.recordDomainOutcome(job, string(model.CrawlJobSkipped), "empty_content", "content too short", nil)
+		s.publishCrawlFailed(job, "empty_content", "content too short", true)
 		return
 	}
 
@@ -557,6 +648,7 @@ func (s *CrawlQueueService) handleEmptyContent(job *model.CrawlJob, extractor st
 	s.logActivity("job_retry", "retrying",
 		fmt.Sprintf("Retry (empty content): %s", job.URL), job.SourceID)
 	s.recordDomainOutcome(job, string(model.CrawlJobRetrying), "empty_content", "content too short", &nextRetry)
+	s.publishCrawlFailed(job, "empty_content", "content too short", false)
 }
 
 // detectPaywallKeywords checks for paywall/anti-crawl keywords in extracted content.

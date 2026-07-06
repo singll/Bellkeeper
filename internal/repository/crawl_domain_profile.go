@@ -2,6 +2,7 @@ package repository
 
 import (
 	"errors"
+	"fmt"
 	"time"
 
 	"github.com/singll/bellkeeper/internal/model"
@@ -184,13 +185,18 @@ func (r *CrawlDomainProfileRepository) FindCoolingWithoutOverrides(limit int) ([
 
 // EnterCooling marks a domain as cooling: increments failure_count and pushes
 // next_allowed_at out by exponential backoff (base*2^(n-1), capped at max).
+// 1.0 同时递增 ConsecutiveFailures、递减 HealthScore（健康度评估依据）。
 func (r *CrawlDomainProfileRepository) EnterCooling(domain string, base, max time.Duration) error {
 	if _, err := r.FindOrCreate(domain, 0, 0); err != nil {
 		return err
 	}
 	if err := r.db.Model(&model.CrawlDomainProfile{}).
 		Where("domain = ?", domain).
-		Update("failure_count", gorm.Expr("failure_count + 1")).Error; err != nil {
+		Updates(map[string]interface{}{
+			"failure_count":         gorm.Expr("failure_count + 1"),
+			"consecutive_failures":  gorm.Expr("consecutive_failures + 1"),
+			"health_score":          gorm.Expr("GREATEST(health_score - 10, 0)"),
+		}).Error; err != nil {
 		return err
 	}
 
@@ -221,13 +227,59 @@ func (r *CrawlDomainProfileRepository) EnterCooling(domain string, base, max tim
 }
 
 // ClearCooling resets cooling state after a success: zeroes failure_count and clears next_allowed_at.
+// 1.0 同时重置 ConsecutiveFailures、回血 HealthScore（成功恢复健康度）。
 func (r *CrawlDomainProfileRepository) ClearCooling(domain string) error {
 	return r.db.Model(&model.CrawlDomainProfile{}).
 		Where("domain = ?", domain).
 		Updates(map[string]interface{}{
-			"failure_count":   0,
-			"next_allowed_at": nil,
+			"failure_count":        0,
+			"consecutive_failures": 0,
+			"health_score":         gorm.Expr("LEAST(health_score + 20, 100)"),
+			"next_allowed_at":      nil,
 		}).Error
+}
+
+// EvaluateDomainHealth 按阈值评估域名健康度并自动暂停/恢复（1.0 §2.1.1）。
+// ConsecutiveFailures≥pauseThreshold → 暂停；HealthScore≥resumeThreshold 且已暂停 → 恢复。
+// 返回 (action, error)：action ∈ {"paused","resumed","none"}。
+func (r *CrawlDomainProfileRepository) EvaluateDomainHealth(domain string, pauseThreshold, resumeThreshold int) (string, error) {
+	if pauseThreshold <= 0 {
+		pauseThreshold = 5
+	}
+	if resumeThreshold <= 0 {
+		resumeThreshold = 30
+	}
+	var profile model.CrawlDomainProfile
+	if err := r.db.Where("domain = ?", domain).First(&profile).Error; err != nil {
+		return "none", err
+	}
+	if !profile.IsPaused && profile.ConsecutiveFailures >= pauseThreshold {
+		now := time.Now()
+		reason := fmt.Sprintf("consecutive_failures=%d >= %d", profile.ConsecutiveFailures, pauseThreshold)
+		if err := r.db.Model(&model.CrawlDomainProfile{}).
+			Where("domain = ?", domain).
+			Updates(map[string]interface{}{
+				"is_paused":     true,
+				"paused_reason": reason,
+				"paused_at":     &now,
+			}).Error; err != nil {
+			return "none", err
+		}
+		return "paused", nil
+	}
+	if profile.IsPaused && profile.HealthScore >= resumeThreshold {
+		if err := r.db.Model(&model.CrawlDomainProfile{}).
+			Where("domain = ?", domain).
+			Updates(map[string]interface{}{
+				"is_paused":     false,
+				"paused_reason": "",
+				"paused_at":     nil,
+			}).Error; err != nil {
+			return "none", err
+		}
+		return "resumed", nil
+	}
+	return "none", nil
 }
 
 // IsCooling reports whether the domain is currently within its cooling window.
