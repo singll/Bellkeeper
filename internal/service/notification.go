@@ -11,6 +11,7 @@ import (
 	"time"
 
 	"github.com/singll/bellkeeper/internal/config"
+	"github.com/singll/bellkeeper/internal/eventbus"
 	"github.com/singll/bellkeeper/internal/matrix/infra"
 	"github.com/singll/bellkeeper/internal/model"
 	"github.com/singll/bellkeeper/internal/repository"
@@ -20,7 +21,7 @@ import (
 type NotificationService struct {
 	cfg          config.NATSConfig
 	redis        *infra.RedisClient
-	nats         *infra.NATSClient
+	bus          *eventbus.Client
 	repos        *repository.Repositories
 	channelsMu   sync.RWMutex
 	channels     map[string]*model.MatrixChannel // cached channel config
@@ -66,13 +67,13 @@ type NotificationResponse struct {
 func NewNotificationService(
 	cfg config.NATSConfig,
 	redis *infra.RedisClient,
-	nats *infra.NATSClient,
+	bus *eventbus.Client,
 	repos *repository.Repositories,
 ) *NotificationService {
 	svc := &NotificationService{
 		cfg:       cfg,
 		redis:     redis,
-		nats:      nats,
+		bus:       bus,
 		repos:     repos,
 		channels:  make(map[string]*model.MatrixChannel),
 		aggBuf:    make(map[string]*aggEntry),
@@ -222,7 +223,7 @@ func (s *NotificationService) Send(ctx context.Context, req *NotificationRequest
 	}
 
 	subject := fmt.Sprintf("%s.%s", s.cfg.Streams.Notifications, req.Channel)
-	if err := s.nats.Publish(subject, msgBytes); err != nil {
+	if err := s.bus.Publish(subject, msgBytes); err != nil {
 		if err := s.repos.MatrixNotification.UpdateStatus(ctx, req.ID, "failed", err.Error()); err != nil {
 			log.Printf("[Notify] failed to update notification %s status to failed: %v", req.ID, err)
 		}
@@ -347,7 +348,7 @@ func (s *NotificationService) flushAggregation() {
 			continue
 		}
 		subject := fmt.Sprintf("%s.%s", s.cfg.Streams.Notifications, entry.Channel)
-		if err := s.nats.Publish(subject, msgBytes); err != nil {
+		if err := s.bus.Publish(subject, msgBytes); err != nil {
 			log.Printf("[Notify] failed to publish aggregation summary: %v", err)
 		} else {
 			log.Printf("[Notify] sent aggregation summary for dedup_key=%s (×%d)", dedupKey, entry.Count)

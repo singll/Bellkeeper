@@ -237,7 +237,11 @@ nats:
   url: ${NATS_URL}
   streams:
     notifications: ${NATS_STREAM_NOTIFICATIONS}
-    commands: ${NATS_STREAM_COMMANDS}
+    knowledge: ${NATS_STREAM_KNOWLEDGE}
+    llm: ${NATS_STREAM_LLM}
+    matrix: ${NATS_STREAM_MATRIX}
+    system: ${NATS_STREAM_SYSTEM}
+    logs: ${NATS_STREAM_LOGS}
 
 # Meilisearch 搜索服务
 meilisearch:
@@ -285,6 +289,17 @@ daily_report:
   timezone: Asia/Shanghai
   report_channel: daily
   alert_channel: alerts
+
+# 日志中心（LogCenter）配置
+log_center:
+  retention_days: 30              # 日志保留天数
+  cleanup_interval_hrs: 24        # 清理间隔（小时）
+
+# Memos 集成配置（可选）
+memos:
+  enabled: false
+  base_url: ""                    # Memos 实例 URL，如 http://sp-memos:5230
+  api_token: ""                   # Memos API 令牌
 
 health:
   services:

@@ -8,8 +8,8 @@ import (
 
 	"github.com/nats-io/nats.go"
 	"github.com/singll/bellkeeper/internal/config"
+	"github.com/singll/bellkeeper/internal/eventbus"
 	"github.com/singll/bellkeeper/internal/matrix/gateway"
-	"github.com/singll/bellkeeper/internal/matrix/infra"
 	"github.com/singll/bellkeeper/internal/middleware"
 	"github.com/singll/bellkeeper/internal/service"
 	"go.uber.org/zap"
@@ -18,7 +18,7 @@ import (
 // NotificationWorker consumes notification messages from NATS
 type NotificationWorker struct {
 	cfg       config.NATSConfig
-	nats      *infra.NATSClient
+	bus       *eventbus.Client
 	sender    *service.NotificationSender
 	maxRetry  int
 	stopCh    chan struct{}
@@ -35,13 +35,13 @@ func (w *NotificationWorker) UpdateMatrixClient(client *gateway.Client) {
 // NewNotificationWorker creates a new notification worker
 func NewNotificationWorker(
 	cfg config.NATSConfig,
-	nats *infra.NATSClient,
+	bus *eventbus.Client,
 	sender *service.NotificationSender,
 	maxRetry int,
 ) *NotificationWorker {
 	return &NotificationWorker{
 		cfg:      cfg,
-		nats:     nats,
+		bus:      bus,
 		sender:   sender,
 		maxRetry: maxRetry,
 		stopCh:   make(chan struct{}),
@@ -64,7 +64,7 @@ func (w *NotificationWorker) Start(ctx context.Context) error {
 	subject := w.cfg.Streams.Notifications + ".*" // notifications.<channel>
 	durableName := "bellkeeper-notify-worker"
 
-	sub, err := w.nats.Subscribe(subject, durableName)
+	sub, err := w.bus.Subscribe(subject, durableName)
 	if err != nil {
 		return err
 	}

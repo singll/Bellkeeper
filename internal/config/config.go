@@ -29,6 +29,7 @@ type Config struct {
 	CrawlQueue    CrawlQueueConfig    `mapstructure:"crawl_queue"`
 	DailyReport   DailyReportConfig   `mapstructure:"daily_report"`
 	Health        HealthConfig        `mapstructure:"health"`
+	LogCenter     LogCenterConfig     `mapstructure:"log_center"`
 }
 
 type LLMProxyConfig struct {
@@ -221,9 +222,16 @@ type NATSConfig struct {
 	Streams NATSStreamsConfig `mapstructure:"streams"`
 }
 
+// NATSStreamsConfig 定义 JetStream 各 stream 名称。
+// commands stream 在 1.0 重构中删除（僵尸配置，全仓无 Publish/Subscribe）；
+// knowledge/llm/matrix/system/logs 为 1.0 新增事件总线 stream（见规划 §1.2.1）。
 type NATSStreamsConfig struct {
 	Notifications string `mapstructure:"notifications"`
-	Commands      string `mapstructure:"commands"`
+	Knowledge     string `mapstructure:"knowledge"`
+	LLM           string `mapstructure:"llm"`
+	Matrix        string `mapstructure:"matrix"`
+	System        string `mapstructure:"system"`
+	Logs          string `mapstructure:"logs"`
 }
 
 type MemosConfig struct {
@@ -288,6 +296,10 @@ type CrawlQueueConfig struct {
 	RuleQualityMinChars      int      `mapstructure:"rule_quality_min_chars"`
 	RuleOptimizerModel       string   `mapstructure:"rule_optimizer_model"`
 	RuleOptimizerTemperature float64  `mapstructure:"rule_optimizer_temperature"`
+	// 1.0 域名健康度（§2.1.1）：ConsecutiveFailures≥PauseThreshold 自动暂停，
+	// HealthScore≥ResumeThreshold 自动恢复。阈值 0 时用默认值。
+	DomainPauseThreshold    int `mapstructure:"domain_pause_threshold"`     // 默认 5
+	DomainResumeThreshold   int `mapstructure:"domain_resume_threshold"`   // 默认 30（HealthScore）
 }
 
 // DailyReportConfig controls the n8n-backed daily report handoff and watchdog.
@@ -312,6 +324,12 @@ type ServiceProbe struct {
 	URL     string `mapstructure:"url"`
 	Type    string `mapstructure:"type"`    // http (default) or tcp
 	Timeout int    `mapstructure:"timeout"` // seconds, 0 = use default (5s)
+}
+
+// LogCenterConfig 日志中心配置（1.0 §2.4.2）。
+type LogCenterConfig struct {
+	RetentionDays      int `mapstructure:"retention_days"`       // log_entries 保留天数，0=默认 30
+	CleanupIntervalHrs int `mapstructure:"cleanup_interval_hrs"` // 清理周期（小时），0=默认 24
 }
 
 // ScanDirConfig 扫描目录配置
@@ -533,7 +551,11 @@ func setDefaults(v *viper.Viper) {
 	// NATS
 	v.SetDefault("nats.url", "nats://sp-nats:4222")
 	v.SetDefault("nats.streams.notifications", "notifications")
-	v.SetDefault("nats.streams.commands", "commands")
+	v.SetDefault("nats.streams.knowledge", "knowledge")
+	v.SetDefault("nats.streams.llm", "llm")
+	v.SetDefault("nats.streams.matrix", "matrix")
+	v.SetDefault("nats.streams.system", "system")
+	v.SetDefault("nats.streams.logs", "logs")
 
 	// Memos
 	v.SetDefault("memos.enabled", false)
@@ -593,6 +615,8 @@ func setDefaults(v *viper.Viper) {
 	v.SetDefault("crawl_queue.rule_quality_min_chars", 200)
 	v.SetDefault("crawl_queue.rule_optimizer_model", "pool-chat-free")
 	v.SetDefault("crawl_queue.rule_optimizer_temperature", 0.3)
+	v.SetDefault("crawl_queue.domain_pause_threshold", 5)
+	v.SetDefault("crawl_queue.domain_resume_threshold", 30)
 
 	// Daily report
 	v.SetDefault("daily_report.enabled", true)
@@ -615,4 +639,8 @@ func setDefaults(v *viper.Viper) {
 		{"name": "postgres", "url": "sp-bellkeeper-db:5432", "type": "tcp"},
 		{"name": "rss_fetcher", "url": "", "type": "internal"},
 	})
+
+	// LogCenter
+	v.SetDefault("log_center.retention_days", 30)
+	v.SetDefault("log_center.cleanup_interval_hrs", 24)
 }
