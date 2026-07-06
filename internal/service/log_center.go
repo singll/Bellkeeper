@@ -5,13 +5,18 @@ import (
 	"encoding/hex"
 	"encoding/json"
 	"fmt"
-	"log"
+	"regexp"
 	"time"
 
+	"github.com/singll/bellkeeper/internal/middleware"
 	"github.com/singll/bellkeeper/internal/model"
 	"github.com/singll/bellkeeper/internal/repository"
+	"go.uber.org/zap"
 	"gorm.io/datatypes"
 )
+
+// patternScanLimit 限制单条正则告警扫描的 entries 上限，避免超大窗口全表扫描。
+const patternScanLimit = 1000
 
 type LogCenterService struct {
 	entryRepo     *repository.LogEntryRepository
@@ -45,30 +50,39 @@ type LogEntryParams struct {
 }
 
 func (s *LogCenterService) LogActivity(p LogEntryParams) {
-	go func() {
+	SafeGo("log_center.LogActivity", func() {
 		var detailJSON datatypes.JSON
-		if p.Detail != nil {
-			if b, err := json.Marshal(p.Detail); err == nil {
-				detailJSON = datatypes.JSON(b)
-			}
+	if p.Detail != nil {
+		b, err := json.Marshal(p.Detail)
+		if err != nil {
+			middleware.GetLogger().Warn("log_center: marshal detail failed",
+				zap.String("module", p.Module),
+				zap.String("action", p.Action),
+				zap.Error(err))
+		} else {
+			detailJSON = datatypes.JSON(b)
 		}
-		entry := &model.LogEntry{
-			SourceID:   p.SourceID,
-			Module:     p.Module,
-			Action:     p.Action,
-			Level:      p.Level,
-			Status:     p.Status,
-			Summary:    p.Summary,
-			Detail:     detailJSON,
-			RefID:      p.RefID,
-			DurationMs: p.DurationMs,
-			TraceID:    p.TraceID,
-			CreatedAt:  time.Now(),
-		}
-		if err := s.entryRepo.Create(entry); err != nil {
-			log.Printf("[ERROR] LogCenter: failed to log entry: module=%s action=%s error=%v", p.Module, p.Action, err)
-		}
-	}()
+	}
+	entry := &model.LogEntry{
+		SourceID:   p.SourceID,
+		Module:     p.Module,
+		Action:     p.Action,
+		Level:      p.Level,
+		Status:     p.Status,
+		Summary:    p.Summary,
+		Detail:     detailJSON,
+		RefID:      p.RefID,
+		DurationMs: p.DurationMs,
+		TraceID:    p.TraceID,
+		CreatedAt:  time.Now(),
+	}
+	if err := s.entryRepo.Create(entry); err != nil {
+		middleware.GetLogger().Error("log_center: create entry failed",
+			zap.String("module", p.Module),
+			zap.String("action", p.Action),
+			zap.Error(err))
+	}
+	})
 }
 
 type ListEntriesQuery struct {
@@ -294,10 +308,21 @@ func (s *LogCenterService) CheckAlerts() ([]AlertCheckResult, error) {
 	for _, rule := range rules {
 		var cond AlertCondition
 		if err := json.Unmarshal(rule.Condition, &cond); err != nil {
+			middleware.GetLogger().Warn("log_center: unmarshal alert condition failed",
+				zap.String("rule", rule.Name),
+				zap.Error(err))
 			continue
 		}
 
 		since := time.Now().Add(-time.Duration(cond.WindowMinutes) * time.Minute)
+
+		if cond.Pattern != "" {
+			// 1.0 §2.4.2：pattern（正则）告警类型——拉时间窗内 entries，正则匹配 Summary 计数。
+			results = append(results, s.checkPatternRule(rule.Name, cond, since))
+			continue
+		}
+
+		// 原 threshold 路径：按 Module+Level 计数。
 		query := repository.LogEntryQuery{
 			Module: cond.Module,
 			Level:  cond.Level,
@@ -319,11 +344,53 @@ func (s *LogCenterService) CheckAlerts() ([]AlertCheckResult, error) {
 	return results, nil
 }
 
+// checkPatternRule 执行正则告警检查：按 Module/Level/时间窗拉 entries（上限 patternScanLimit），
+// 用 cond.Pattern 正则匹配 summary，匹配数≥Threshold 触发。
+func (s *LogCenterService) checkPatternRule(ruleName string, cond AlertCondition, since time.Time) AlertCheckResult {
+	re, err := regexp.Compile(cond.Pattern)
+	if err != nil {
+		middleware.GetLogger().Warn("log_center: compile pattern failed",
+			zap.String("rule", ruleName),
+			zap.String("pattern", cond.Pattern),
+			zap.Error(err))
+		return AlertCheckResult{RuleName: ruleName}
+	}
+	query := repository.LogEntryQuery{
+		Module: cond.Module,
+		Level:  cond.Level,
+		Since:  since,
+		Page:   1,
+		Limit:  patternScanLimit,
+	}
+	entries, _, err := s.entryRepo.List(query)
+	if err != nil {
+		middleware.GetLogger().Warn("log_center: list entries for pattern check failed",
+			zap.String("rule", ruleName),
+			zap.Error(err))
+		return AlertCheckResult{RuleName: ruleName}
+	}
+	var matched int64
+	for _, e := range entries {
+		if re.MatchString(e.Summary) {
+			matched++
+		}
+	}
+	return AlertCheckResult{
+		RuleName:  ruleName,
+		Triggered: matched >= int64(cond.Threshold),
+		Count:     matched,
+	}
+}
+
 type AlertCondition struct {
 	Module        string `json:"module"`
 	Level         string `json:"level"`
 	Threshold     int    `json:"threshold"`
 	WindowMinutes int    `json:"window_minutes"`
+	// 1.0 §2.4.2：pattern（正则）告警类型。非空时按正则匹配 log_entries.summary，
+	// 匹配条数≥Threshold 触发（与 Module/Level/WindowMinutes 叠加过滤）。
+	// 为空时走原 threshold 路径（按 Module+Level 计数）。
+	Pattern string `json:"pattern,omitempty"`
 }
 
 func generateSourceAPIKey() (string, error) {

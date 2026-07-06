@@ -13,6 +13,7 @@ var (
 	defaultLogger *zap.Logger
 	loggerMu      sync.RWMutex
 	currentLevel  zapcore.Level
+	loggerOnce    sync.Once
 )
 
 // InitLogger initializes the global logger. Call this during application startup.
@@ -59,11 +60,22 @@ func parseLevel(level string) zapcore.Level {
 // GetLogger returns the global logger instance.
 func GetLogger() *zap.Logger {
 	loggerMu.RLock()
-	defer loggerMu.RUnlock()
-	if defaultLogger == nil {
-		// Fallback to production logger if not initialized
-		defaultLogger, _ = zap.NewProduction()
+	l := defaultLogger
+	loggerMu.RUnlock()
+	if l != nil {
+		return l
 	}
+	loggerOnce.Do(func() {
+		prod, err := zap.NewProduction()
+		if err != nil {
+			panic("failed to init default zap logger: " + err.Error())
+		}
+		loggerMu.Lock()
+		defaultLogger = prod
+		loggerMu.Unlock()
+	})
+	loggerMu.RLock()
+	defer loggerMu.RUnlock()
 	return defaultLogger
 }
 

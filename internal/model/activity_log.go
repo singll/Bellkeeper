@@ -11,6 +11,7 @@ type ActivityLog struct {
 	Summary    string    `gorm:"size:500" json:"summary"`
 	Detail     string    `gorm:"type:text" json:"detail,omitempty"`
 	RefID      string    `gorm:"size:100;index" json:"ref_id,omitempty"`
+	TraceID    string    `gorm:"size:64;index" json:"trace_id,omitempty"`
 	DurationMs int       `json:"duration_ms,omitempty"`
 	CreatedAt  time.Time `gorm:"index" json:"created_at"`
 }
