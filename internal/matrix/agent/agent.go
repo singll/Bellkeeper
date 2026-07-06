@@ -10,6 +10,7 @@ import (
 	"github.com/redis/go-redis/v9"
 	"github.com/singll/bellkeeper/internal/config"
 	"github.com/singll/bellkeeper/internal/llmclient"
+	"github.com/singll/bellkeeper/internal/llmgateway"
 	"github.com/singll/bellkeeper/internal/matrix/gateway"
 	"github.com/singll/bellkeeper/internal/middleware"
 	"github.com/singll/bellkeeper/internal/model"
@@ -18,7 +19,7 @@ import (
 )
 
 type AgentService struct {
-	llm         *llmclient.Client
+	llm         llmgateway.Gateway
 	tools       *ToolRegistry
 	sessions    *SessionStore
 	rateLimiter *RateLimiter
@@ -34,8 +35,7 @@ type PolicyChecker interface {
 
 func NewAgentService(
 	cfg config.MatrixAgentConfig,
-	llmProxyURL string,
-	apiKey string,
+	llmGateway llmgateway.Gateway,
 	redisClient *redis.Client,
 	gatewayClient *gateway.Client,
 	repos *repository.Repositories,
@@ -58,19 +58,8 @@ func NewAgentService(
 		maxTurns = int64(cfg.MaxTurnsPerHour)
 	}
 
-	maxIter := 5
-	if cfg.MaxToolIterations > 0 {
-		maxIter = cfg.MaxToolIterations
-	}
-
-	llm := llmclient.New(llmclient.Options{
-		BaseURL: llmProxyURL,
-		APIKey:  apiKey,
-		Timeout: 120 * time.Second,
-	})
-
 	svc := &AgentService{
-		llm:         llm,
+		llm:         llmGateway,
 		tools:       tools,
 		sessions:    NewSessionStore(redisClient, sessionTTL, 20),
 		rateLimiter: NewRateLimiter(redisClient, maxTurns),
@@ -80,7 +69,6 @@ func NewAgentService(
 		policy:      policy,
 	}
 
-	_ = maxIter
 	middleware.GetLogger().Info("agent service initialized",
 		zap.String("model", cfg.Model),
 		zap.Int64("max_turns_per_hour", maxTurns),
@@ -158,7 +146,7 @@ func (s *AgentService) HandleMessage(ctx context.Context, roomID, sender, conten
 			ConversationID: roomID,
 		}
 
-		resp, err := s.llm.ChatCompletionFull(ctx, req, opts)
+		resp, err := s.llm.Chat(ctx, req, opts)
 		if err != nil {
 			return nil, fmt.Errorf("llm call (iter %d): %w", i, err)
 		}
@@ -247,7 +235,7 @@ func (s *AgentService) HandleDirectMessage(ctx context.Context, roomID, sender, 
 		model = override
 	}
 
-	resp, err := s.llm.ChatCompletionFull(ctx, llmclient.ChatRequest{
+	resp, err := s.llm.Chat(ctx, llmclient.ChatRequest{
 		Model:       model,
 		Messages:    session,
 		Temperature: 0.3,

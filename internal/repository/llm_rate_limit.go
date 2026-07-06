@@ -38,16 +38,16 @@ func (r *LLMRateLimitRepository) Update(rl *model.LLMModelRateLimit) error {
 	return r.db.Save(rl).Error
 }
 
-func (r *LLMRateLimitRepository) ListByChannel(channelID uint) ([]model.LLMModelRateLimit, error) {
-	var rls []model.LLMModelRateLimit
+func (r *LLMRateLimitRepository) ListByChannel(channelID uint) ([]*model.LLMModelRateLimit, error) {
+	var rls []*model.LLMModelRateLimit
 	if err := r.db.Where("channel_id = ?", channelID).Find(&rls).Error; err != nil {
 		return nil, err
 	}
 	return rls, nil
 }
 
-func (r *LLMRateLimitRepository) ListAll() ([]model.LLMModelRateLimit, error) {
-	var rls []model.LLMModelRateLimit
+func (r *LLMRateLimitRepository) ListAll() ([]*model.LLMModelRateLimit, error) {
+	var rls []*model.LLMModelRateLimit
 	if err := r.db.Find(&rls).Error; err != nil {
 		return nil, err
 	}

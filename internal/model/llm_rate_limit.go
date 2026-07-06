@@ -1,11 +1,13 @@
 package model
 
 import (
+	"sync"
 	"time"
 )
 
 // LLMModelRateLimit stores adaptive rate-limit learning state per channel×model.
 type LLMModelRateLimit struct {
+	Mu                     sync.Mutex `gorm:"-" json:"-"`
 	ID                     uint      `gorm:"primaryKey" json:"id"`
 	ChannelID              uint      `gorm:"index;not null" json:"channel_id"`
 	Model                  string    `gorm:"size:200;index;not null" json:"model"`
@@ -25,6 +27,7 @@ type LLMModelRateLimit struct {
 	UpdatedAt              time.Time `json:"updated_at"`
 }
 
-func (LLMModelRateLimit) TableName() string {
+func (m *LLMModelRateLimit) TableName() string {
 	return "llm_model_rate_limits"
 }
+

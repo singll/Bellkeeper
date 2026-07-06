@@ -10,9 +10,9 @@ import (
 	"strings"
 	"time"
 
+	"github.com/singll/bellkeeper/internal/llmgateway"
 	"github.com/singll/bellkeeper/internal/config"
 	"github.com/singll/bellkeeper/internal/repository"
-	"github.com/singll/bellkeeper/internal/service"
 )
 
 // Options pkb-curate 运行选项
@@ -21,7 +21,7 @@ type Options struct {
 	DryRun    bool
 	Rescan    bool // 全量重扫：包含已处理条目（默认 false=只取未处理，幂等）
 	PerRun    int  // 0 = 用 domains.yaml defaults.per_run
-	LLMJobs   *service.LLMJobQueueService
+	LLMJobs   *llmgateway.LLMJobQueueService
 	Context   context.Context
 	// DomainRepo 供缺口填充 G3 冷却让路查 crawl_domain_profiles.next_allowed_at；仅 fill 子命令注入，其余命令为 nil。
 	DomainRepo *repository.CrawlDomainProfileRepository
@@ -63,7 +63,7 @@ type Curator struct {
 	reconstructCalls      int
 	digestCalls           int
 	lastSummary           runSummary
-	llmJobs               *service.LLMJobQueueService
+	llmJobs               *llmgateway.LLMJobQueueService
 	domainRepo            *repository.CrawlDomainProfileRepository
 }
 

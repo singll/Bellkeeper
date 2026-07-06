@@ -9,8 +9,10 @@ import (
 	"sync"
 	"time"
 
+	"github.com/singll/bellkeeper/internal/llmgateway"
 	"github.com/singll/bellkeeper/internal/config"
 	"github.com/singll/bellkeeper/internal/llmclient"
+	"github.com/singll/bellkeeper/internal/model"
 	"github.com/singll/bellkeeper/internal/repository"
 	"gorm.io/datatypes"
 )
@@ -20,9 +22,10 @@ type RuleOptimizerService struct {
 	ruleRepo    *repository.CrawlExtractionRuleRepository
 	domainRepo  *repository.CrawlDomainProfileRepository
 	failureRepo *repository.CrawlFailureRepository
-	llmClient   *llmclient.Client
+	llm         llmgateway.Gateway
 	extractor   *ExtractorService
 	activityLog *ActivityLogService
+	promptLoader *KBPromptLoader
 
 	cancel context.CancelFunc
 	wg     sync.WaitGroup
@@ -33,20 +36,24 @@ func NewRuleOptimizerService(
 	ruleRepo *repository.CrawlExtractionRuleRepository,
 	domainRepo *repository.CrawlDomainProfileRepository,
 	failureRepo *repository.CrawlFailureRepository,
-	llmBaseURL, apiKey string,
+	llm llmgateway.Gateway,
 	extractor *ExtractorService,
 	activityLog *ActivityLogService,
 ) *RuleOptimizerService {
-	timeout := 3 * time.Minute
 	return &RuleOptimizerService{
 		cfg:         cfg,
 		ruleRepo:    ruleRepo,
 		domainRepo:  domainRepo,
 		failureRepo: failureRepo,
-		llmClient:   llmclient.New(llmclient.Options{BaseURL: llmBaseURL, APIKey: apiKey, Timeout: timeout}),
+		llm:         llm,
 		extractor:   extractor,
 		activityLog: activityLog,
 	}
+}
+
+// SetPromptLoader 注入知识库提示词加载器（1.0 §2.1.3）。
+func (s *RuleOptimizerService) SetPromptLoader(loader *KBPromptLoader) {
+	s.promptLoader = loader
 }
 
 func (s *RuleOptimizerService) Start(ctx context.Context) {
@@ -292,33 +299,10 @@ type llmOverridesOutput struct {
 
 func (s *RuleOptimizerService) generateRequestOverrides(ctx context.Context, domain string, samples []repository.DomainFailureSample) (*RequestOverrides, string, error) {
 	samplesJSON, _ := json.Marshal(samples)
-	prompt := fmt.Sprintf(`You are a web extraction failure analyst. Given a domain and its recent extraction failures, analyze the root cause and suggest request parameter overrides to improve extraction success.
-
-Domain: %s
-Recent failures:
-%s
-
-Respond with ONLY a JSON object (no markdown fences):
-{
-  "user_agent": "custom User-Agent string if needed, e.g. Mozilla/5.0...",
-  "timeout_seconds": 60,
-  "headers": {"Accept-Language": "en-US", "Cookie": "consent=yes"},
-  "strategy": "firecrawl or trafilatura (which extractor to prefer)",
-  "firecrawl_wait_for": 3000,
-  "firecrawl_actions": [{"type": "click", "selector": ".consent-btn"}],
-  "analysis": "Brief explanation of failure root cause and why these overrides should help",
-  "none": false
-}
-
-Rules:
-- Only set fields that differ from defaults. Omit fields you don't want to change.
-- Use "firecrawl" strategy if the site requires JavaScript rendering.
-- Use "trafilatura" strategy if the site is simple HTML.
-- Set firecrawl_wait_for (milliseconds) if content loads dynamically after page render.
-- Set firecrawl_actions for cookie consent popups or other overlays that block content.
-- Set headers for sites that check Referer, Accept-Language, or require consent cookies.
-- Do NOT suggest ways to bypass paywalls or login walls. If the site is paywalled, set {"none": true}.
-- If you cannot determine a fix, set {"none": true}.`, domain, string(samplesJSON))
+	// 1.0 §2.1.3：system/user 分离 + 外置提示词（loader 缺失回退内置）+ ResponseFormat=json_object。
+	systemPrompt := s.promptLoader.GetWithDefault("rule_optimizer_system", "You are a web extraction failure analyst.")
+	userTemplate := s.promptLoader.GetWithDefault("rule_optimizer_user", "Domain: %s\nRecent failures:\n%s\n")
+	userContent := fmt.Sprintf(userTemplate, domain, string(samplesJSON))
 
 	llmModel := s.cfg.RuleOptimizerModel
 	if llmModel == "" {
@@ -328,17 +312,18 @@ Rules:
 	if temp <= 0 {
 		temp = 0.3
 	}
-	resp, err := s.llmClient.ChatCompletion(ctx, llmclient.ChatRequest{
-		Model:       llmModel,
-		Messages:    []llmclient.ChatMessage{{Role: "user", Content: prompt}},
-		Temperature: temp,
-	}, llmclient.ChatOptions{CallerID: "rule_optimizer", TaskType: string(TaskRuleGeneration)})
+	resp, err := s.llm.Chat(ctx, llmclient.ChatRequest{
+		Model:          llmModel,
+		Messages:       []llmclient.ChatMessage{{Role: "system", Content: systemPrompt}, {Role: "user", Content: userContent}},
+		Temperature:    temp,
+		ResponseFormat: &llmclient.ResponseFormat{Type: "json_object"},
+	}, llmclient.ChatOptions{CallerID: "rule_optimizer", TaskType: string(llmgateway.TaskRuleGeneration)})
 	if err != nil {
 		return nil, "", fmt.Errorf("LLM call failed: %w", err)
 	}
 
 	var output llmOverridesOutput
-	body := strings.TrimSpace(resp)
+	body := strings.TrimSpace(resp.Content)
 	if idx := strings.Index(body, "{"); idx >= 0 {
 		last := strings.LastIndex(body, "}")
 		if last > idx {
@@ -461,6 +446,33 @@ func (s *RuleOptimizerService) scoreContent(content string, minChars int) float6
 		score = 0
 	}
 	return score
+}
+
+// --- Extraction Rule CRUD (1.0 §5 分层合规：handler 不持 repo，全部经 service) ---
+
+// ListExtractionRules 列出抽取规则。
+func (s *RuleOptimizerService) ListExtractionRules(opts repository.ListExtractionRuleOpts) ([]model.CrawlExtractionRule, int64, error) {
+	return s.ruleRepo.List(opts)
+}
+
+// GetExtractionRule 获取域名抽取规则。
+func (s *RuleOptimizerService) GetExtractionRule(domain string) (*model.CrawlExtractionRule, error) {
+	return s.ruleRepo.FindActiveByDomain(domain)
+}
+
+// CreateExtractionRule 创建抽取规则。
+func (s *RuleOptimizerService) CreateExtractionRule(rule *model.CrawlExtractionRule) error {
+	return s.ruleRepo.Create(rule)
+}
+
+// UpdateExtractionRuleStatus 更新规则状态。
+func (s *RuleOptimizerService) UpdateExtractionRuleStatus(id uint, status model.ExtractionRuleStatus) error {
+	return s.ruleRepo.UpdateStatus(id, status)
+}
+
+// ListExtractionTrials 列出规则试跑记录。
+func (s *RuleOptimizerService) ListExtractionTrials(ruleID uint) ([]model.CrawlRuleTrial, error) {
+	return s.ruleRepo.ListTrialsByRule(ruleID)
 }
 
 func (s *RuleOptimizerService) logActivity(action, status, summary string) {

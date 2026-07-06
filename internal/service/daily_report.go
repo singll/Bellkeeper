@@ -7,6 +7,7 @@ import (
 	"sync"
 	"time"
 
+	"github.com/singll/bellkeeper/internal/llmgateway"
 	"github.com/singll/bellkeeper/internal/config"
 	"github.com/singll/bellkeeper/internal/llmclient"
 	"github.com/singll/bellkeeper/internal/model"
@@ -21,8 +22,8 @@ type DailyReportService struct {
 	crawlJobRepo *repository.CrawlJobRepository
 	notify       *NotificationService
 	report       *ReportService
-	llmClient    *llmclient.Client
-	llmJobs      *LLMJobQueueService
+	llm          llmgateway.Gateway
+	llmJobs      *llmgateway.LLMJobQueueService
 	cfg          config.DailyReportConfig
 	loc          *time.Location
 }
@@ -36,23 +37,14 @@ func NewDailyReportService(
 	notify *NotificationService,
 	report *ReportService,
 	cfg config.DailyReportConfig,
-	llmProxyURL string,
-	apiKey string,
-	llmJobs *LLMJobQueueService,
+	llm llmgateway.Gateway,
+	llmJobs *llmgateway.LLMJobQueueService,
 ) *DailyReportService {
 	loc := time.Local
 	if cfg.Timezone != "" {
 		if loaded, err := time.LoadLocation(cfg.Timezone); err == nil {
 			loc = loaded
 		}
-	}
-	var llmClient *llmclient.Client
-	if llmProxyURL != "" {
-		llmClient = llmclient.New(llmclient.Options{
-			BaseURL: llmProxyURL,
-			APIKey:  apiKey,
-			Timeout: 120 * time.Second,
-		})
 	}
 	return &DailyReportService{
 		health:       health,
@@ -62,7 +54,7 @@ func NewDailyReportService(
 		crawlJobRepo: crawlJobRepo,
 		notify:       notify,
 		report:       report,
-		llmClient:    llmClient,
+		llm:          llm,
 		llmJobs:      llmJobs,
 		cfg:          cfg,
 		loc:          loc,
@@ -417,14 +409,14 @@ func (s *DailyReportService) generateAISummary(ctx context.Context, data *DailyR
 	}
 
 	if s.llmJobs != nil {
-		job, err := s.llmJobs.EnqueueChat(EnqueueLLMChatOptions{
+		job, err := s.llmJobs.EnqueueChat(llmgateway.EnqueueLLMChatOptions{
 			TaskType:       "summary",
 			CallerID:       "daily-report-service",
 			Model:          "pool-summary",
 			Messages:       messages,
 			Temperature:    0.3,
 			Priority:       30,
-			IdempotencyKey: llmJobIdempotencyKey("daily-summary", data.Date),
+			IdempotencyKey: llmgateway.LLMJobIdempotencyKey("daily-summary", data.Date),
 		})
 		if err != nil {
 			return "", fmt.Errorf("enqueue llm job: %w", err)
@@ -436,18 +428,18 @@ func (s *DailyReportService) generateAISummary(ctx context.Context, data *DailyR
 			return "", fmt.Errorf("wait llm job: %w", err)
 		}
 		if done.Status != model.LLMJobSuccess {
-			return "", LLMJobTerminalError(done)
+			return "", llmgateway.LLMJobTerminalError(done)
 		}
 		return done.ResponseText, nil
 	}
 
 	log.Printf("[DailyReport] llm_jobs not configured, falling back to direct LLM call")
-	if s.llmClient == nil {
+	if s.llm == nil {
 		return "", fmt.Errorf("llm client not available")
 	}
 	summarizeCtx, cancel := context.WithTimeout(ctx, 120*time.Second)
 	defer cancel()
-	resp, err := s.llmClient.ChatCompletion(summarizeCtx, llmclient.ChatRequest{
+	resp, err := s.llm.Chat(summarizeCtx, llmclient.ChatRequest{
 		Model:       "pool-summary",
 		Messages:    messages,
 		Temperature: 0.3,
@@ -458,7 +450,7 @@ func (s *DailyReportService) generateAISummary(ctx context.Context, data *DailyR
 	if err != nil {
 		return "", fmt.Errorf("llm summarize: %w", err)
 	}
-	return resp, nil
+	return resp.Content, nil
 }
 
 func formatTopicsForPrompt(topics []string) string {

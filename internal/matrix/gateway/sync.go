@@ -4,7 +4,6 @@ import (
 	"context"
 	"encoding/json"
 	"fmt"
-	"log"
 	"sync"
 	"sync/atomic"
 	"time"
@@ -83,7 +82,7 @@ func (s *SyncLoop) Start(ctx context.Context) error {
 	if token != "" {
 		middleware.GetLogger().Info("resuming sync from token", zap.String("token_prefix", token[:min(len(token), 20)]))
 		if err := s.client.client.Store.SaveNextBatch(context.Background(), s.client.client.UserID, token); err != nil {
-			log.Printf("[SyncLoop] failed to save next batch from redis token: %v", err)
+			middleware.GetLogger().Warn("sync loop: failed to save next batch from redis token", zap.Error(err))
 		}
 	} else {
 		middleware.GetLogger().Info("starting fresh sync (no previous token)")
@@ -94,7 +93,7 @@ func (s *SyncLoop) Start(ctx context.Context) error {
 	if err == nil && syncState != nil && syncState.NextBatch != "" {
 		middleware.GetLogger().Info("found DB sync token", zap.String("token_prefix", syncState.NextBatch[:min(len(syncState.NextBatch), 20)]))
 		if err := s.client.client.Store.SaveNextBatch(context.Background(), s.client.client.UserID, syncState.NextBatch); err != nil {
-			log.Printf("[SyncLoop] failed to save next batch from DB token: %v", err)
+			middleware.GetLogger().Warn("sync loop: failed to save next batch from DB token", zap.Error(err))
 		}
 	}
 
@@ -268,7 +267,7 @@ func (s *SyncLoop) dispatchCommand(ctx context.Context, evt *event.Event, body s
 		if err := s.commandService.ExecuteMessage(ctx, evt.RoomID.String(), evt.Sender.String(), evt.ID.String(), body); err != nil {
 			middleware.GetLogger().Warn("command execution failed", zap.Error(err))
 			if err := s.client.repos.MatrixEvent.UpdateStatus(evt.ID.String(), "failed", err.Error()); err != nil {
-				log.Printf("[SyncLoop] failed to update event status to failed: %v", err)
+				middleware.GetLogger().Warn("sync loop: failed to update event status to failed", zap.Error(err))
 			}
 			return
 		}

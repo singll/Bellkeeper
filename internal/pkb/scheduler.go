@@ -11,6 +11,7 @@ import (
 	"sync"
 	"time"
 
+	"github.com/singll/bellkeeper/internal/llmgateway"
 	"github.com/singll/bellkeeper/internal/config"
 	"github.com/singll/bellkeeper/internal/repository"
 	"github.com/singll/bellkeeper/internal/service"
@@ -45,7 +46,7 @@ type Scheduler struct {
 	configDir   string
 	settingRepo *repository.SettingRepository
 	articleRepo *repository.ArticleTagRepository
-	llmJobs     *service.LLMJobQueueService
+	llmJobs     *llmgateway.LLMJobQueueService
 	activity    *service.ActivityLogService
 	domainRepo  *repository.CrawlDomainProfileRepository
 
@@ -62,7 +63,7 @@ func NewScheduler(
 	configDir string,
 	settingRepo *repository.SettingRepository,
 	articleRepo *repository.ArticleTagRepository,
-	llmJobs *service.LLMJobQueueService,
+	llmJobs *llmgateway.LLMJobQueueService,
 	activity *service.ActivityLogService,
 	domainRepo *repository.CrawlDomainProfileRepository,
 ) *Scheduler {

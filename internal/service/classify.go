@@ -6,6 +6,7 @@ import (
 	"fmt"
 	"time"
 
+	"github.com/singll/bellkeeper/internal/llmgateway"
 	"github.com/singll/bellkeeper/internal/config"
 	"github.com/singll/bellkeeper/internal/llmclient"
 	"github.com/singll/bellkeeper/internal/model"
@@ -14,27 +15,29 @@ import (
 
 // ClassifyService handles article classification using LLM
 type ClassifyService struct {
-	cfg         config.ClassifyConfig
-	llmClient   *llmclient.Client
-	llmJobs     *LLMJobQueueService
-	activityLog *ActivityLogService
+	cfg          config.ClassifyConfig
+	llm          llmgateway.Gateway
+	llmJobs      *llmgateway.LLMJobQueueService
+	activityLog  *ActivityLogService
+	promptLoader *KBPromptLoader
 }
 
 // NewClassifyService creates a new classify service
-func NewClassifyService(cfg config.ClassifyConfig, apiKey string, activityLog *ActivityLogService) *ClassifyService {
+func NewClassifyService(cfg config.ClassifyConfig, gateway llmgateway.Gateway, activityLog *ActivityLogService) *ClassifyService {
 	return &ClassifyService{
-		cfg: cfg,
-		llmClient: llmclient.New(llmclient.Options{
-			BaseURL: cfg.LLMProxyURL,
-			APIKey:  apiKey,
-			Timeout: time.Duration(cfg.Timeout) * time.Second,
-		}),
+		cfg:         cfg,
+		llm:         gateway,
 		activityLog: activityLog,
 	}
 }
 
-func (s *ClassifyService) SetLLMJobQueue(queue *LLMJobQueueService) {
+func (s *ClassifyService) SetLLMJobQueue(queue *llmgateway.LLMJobQueueService) {
 	s.llmJobs = queue
+}
+
+// SetPromptLoader 注入知识库提示词加载器（1.0 §2.1.3）。未注入时回退到内置默认提示词。
+func (s *ClassifyService) SetPromptLoader(loader *KBPromptLoader) {
+	s.promptLoader = loader
 }
 
 // ClassifyRequest represents the classification request
@@ -93,16 +96,23 @@ func (s *ClassifyService) ClassifyArticle(req *ClassifyRequest) (*ClassifyRespon
 		content = string([]rune(content)[:s.cfg.MaxContentLen])
 	}
 
-	// Build prompt — use configured prompt if set, otherwise built-in default
-	promptTemplate := defaultClassifyPrompt
+	// Build prompt — 1.0 §2.1.3：system/user 分离。
+	// 优先级：s.cfg.Prompt（向后兼容整段覆盖）> promptLoader 外置 > 内置默认。
+	systemPrompt := ""
+	userTemplate := defaultClassifyPrompt
 	if s.cfg.Prompt != "" {
-		promptTemplate = s.cfg.Prompt
+		// 向后兼容：cfg.Prompt 为整段提示词（含占位符），全走 user 角色。
+		userTemplate = s.cfg.Prompt
+	} else if s.promptLoader != nil {
+		systemPrompt = s.promptLoader.GetWithDefault("classify_system", "")
+		userTemplate = s.promptLoader.GetWithDefault("classify_user", defaultClassifyPrompt)
 	}
-	prompt := fmt.Sprintf(promptTemplate, req.Title, req.URL, content)
+	userContent := fmt.Sprintf(userTemplate, req.Title, req.URL, content)
 
 	// Call LLM
-	llmResp, err := s.callLLM(prompt)
+	llmResp, err := s.callLLM(systemPrompt, userContent)
 	if err != nil {
+		// 自修复重试：结构化输出解析失败时，带错误回喂一次（§2.1.3）。
 		if s.activityLog != nil {
 			s.activityLog.LogActivity(LogActivityParams{
 				Module: "classify", Action: "classify_article", Status: "error",
@@ -116,14 +126,24 @@ func (s *ClassifyService) ClassifyArticle(req *ClassifyRequest) (*ClassifyRespon
 	// Parse response
 	result, err := s.parseClassifyResponse(llmResp)
 	if err != nil {
-		if s.activityLog != nil {
-			s.activityLog.LogActivity(LogActivityParams{
-				Module: "classify", Action: "classify_article", Status: "error",
-				Summary:    fmt.Sprintf("分类解析失败: %s - %v", req.Title, err),
-				DurationMs: int(time.Since(start).Milliseconds()),
-			})
+		// 自修复重试：解析失败带错误回喂一次，要求严格 JSON。
+		retryPrompt := fmt.Sprintf("上一次返回无法解析为 JSON：%s\n错误：%v\n请仅返回合法 JSON 对象，不要 markdown fence。", llmResp, err)
+		if resp2, rerr := s.callLLM(systemPrompt, retryPrompt); rerr == nil {
+			if result2, perr := s.parseClassifyResponse(resp2); perr == nil {
+				result = result2
+				err = nil
+			}
 		}
-		return nil, fmt.Errorf("failed to parse LLM response: %w", err)
+		if err != nil {
+			if s.activityLog != nil {
+				s.activityLog.LogActivity(LogActivityParams{
+					Module: "classify", Action: "classify_article", Status: "error",
+					Summary:    fmt.Sprintf("分类解析失败: %s - %v", req.Title, err),
+					DurationMs: int(time.Since(start).Milliseconds()),
+				})
+			}
+			return nil, fmt.Errorf("failed to parse LLM response: %w", err)
+		}
 	}
 
 	if s.activityLog != nil {
@@ -138,16 +158,24 @@ func (s *ClassifyService) ClassifyArticle(req *ClassifyRequest) (*ClassifyRespon
 	return result, nil
 }
 
-func (s *ClassifyService) callLLM(prompt string) (string, error) {
+func (s *ClassifyService) callLLM(systemPrompt, userContent string) (string, error) {
+	// 1.0 §2.1.3：system/user 分离 + ResponseFormat=json_object 强制结构化输出。
+	systemMsgs := []llmclient.ChatMessage{}
+	if systemPrompt != "" {
+		systemMsgs = append(systemMsgs, llmclient.ChatMessage{Role: "system", Content: systemPrompt})
+	}
+	systemMsgs = append(systemMsgs, llmclient.ChatMessage{Role: "user", Content: userContent})
+	jsonFmt := &llmclient.ResponseFormat{Type: "json_object"}
 	if s.llmJobs != nil {
-		job, err := s.llmJobs.EnqueueChat(EnqueueLLMChatOptions{
+		job, err := s.llmJobs.EnqueueChat(llmgateway.EnqueueLLMChatOptions{
 			TaskType:       "classify",
 			CallerID:       "classify",
 			Model:          s.cfg.Model,
-			Messages:       []llmclient.ChatMessage{{Role: "user", Content: prompt}},
+			Messages:       systemMsgs,
 			Temperature:    s.cfg.Temperature,
 			Priority:       30,
-			IdempotencyKey: llmJobIdempotencyKey("classify", s.cfg.Model, prompt),
+			IdempotencyKey: llmgateway.LLMJobIdempotencyKey("classify", s.cfg.Model, userContent),
+			ResponseFormat: jsonFmt,
 		})
 		if err != nil {
 			return "", err
@@ -159,21 +187,24 @@ func (s *ClassifyService) callLLM(prompt string) (string, error) {
 			return "", err
 		}
 		if done.Status != model.LLMJobSuccess {
-			return "", LLMJobTerminalError(done)
+			return "", llmgateway.LLMJobTerminalError(done)
 		}
 		return done.ResponseText, nil
 	}
-	return s.llmClient.ChatCompletion(
+	resp, err := s.llm.Chat(
 		context.Background(),
 		llmclient.ChatRequest{
-			Model: s.cfg.Model,
-			Messages: []llmclient.ChatMessage{
-				{Role: "user", Content: prompt},
-			},
-			Temperature: s.cfg.Temperature,
+			Model:          s.cfg.Model,
+			Messages:       systemMsgs,
+			Temperature:    s.cfg.Temperature,
+			ResponseFormat: jsonFmt,
 		},
 		llmclient.ChatOptions{CallerID: "classify", TaskType: "classify"},
 	)
+	if err != nil {
+		return "", err
+	}
+	return resp.Content, nil
 }
 
 func (s *ClassifyService) parseClassifyResponse(content string) (*ClassifyResponse, error) {

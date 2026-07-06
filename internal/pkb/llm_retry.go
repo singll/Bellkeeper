@@ -8,9 +8,9 @@ import (
 	"strings"
 	"time"
 
+	"github.com/singll/bellkeeper/internal/llmgateway"
 	"github.com/singll/bellkeeper/internal/llmclient"
 	"github.com/singll/bellkeeper/internal/model"
-	"github.com/singll/bellkeeper/internal/service"
 )
 
 func (c *Curator) chatCompletionWithRetry(model, systemPrompt, userPrompt string, temperature float64, taskType string) (string, error) {
@@ -54,7 +54,7 @@ func (c *Curator) chatCompletionViaQueue(modelName, systemPrompt, userPrompt str
 		messages = append(messages, llmclient.ChatMessage{Role: "system", Content: systemPrompt})
 	}
 	messages = append(messages, llmclient.ChatMessage{Role: "user", Content: userPrompt})
-	job, err := c.llmJobs.EnqueueChat(service.EnqueueLLMChatOptions{
+	job, err := c.llmJobs.EnqueueChat(llmgateway.EnqueueLLMChatOptions{
 		TaskType:       taskType,
 		CallerID:       "pkb-curate",
 		Model:          modelName,
@@ -74,7 +74,7 @@ func (c *Curator) chatCompletionViaQueue(modelName, systemPrompt, userPrompt str
 		return "", fmt.Errorf("wait llm job %d: %w", job.ID, err)
 	}
 	if done.Status != model.LLMJobSuccess {
-		return "", service.LLMJobTerminalError(done)
+		return "", llmgateway.LLMJobTerminalError(done)
 	}
 	return done.ResponseText, nil
 }
