@@ -1,8 +1,7 @@
 package service
 
 import (
-	"fmt"
-
+	"github.com/singll/bellkeeper/internal/llmgateway"
 	"github.com/singll/bellkeeper/internal/config"
 	"github.com/singll/bellkeeper/internal/repository"
 )
@@ -17,8 +16,9 @@ type Services struct {
 	Setting       *SettingService
 	Health        *HealthService
 	Workflow      *WorkflowService
-	LLMProxy      *LLMProxyService
-	LLMJobQueue   *LLMJobQueueService
+	LLMProxy      *llmgateway.LLMProxyService
+	LLMJobQueue   *llmgateway.LLMJobQueueService
+	LLMAdmin      *llmgateway.LLMAdminService
 	Classify      *ClassifyService
 	ActivityLog   *ActivityLogService
 	LogCenter     *LogCenterService
@@ -53,10 +53,23 @@ func NewServices(repos *repository.Repositories, cfg *config.Config, version str
 	// Create dataset service
 	datasetSvc := NewDatasetService(repos.DatasetMapping, repos.Tag)
 
-	llmJobQueueSvc := NewLLMJobQueueService(cfg.LLMJobQueue, repos.LLMJob, cfg.Classify.LLMProxyURL, cfg.Server.APIKey)
+	// LLM Gateway: 构造在所有 LLM 调用方之前（classify/daily_report/rule_optimizer/
+	// llm_job_queue 经进程内直调 Gateway 接口，替代原 localhost HTTP 自回环）。
+	pricer := llmgateway.NewPricer(repos.LLMModelPricing)
+	_ = pricer.SeedDefaultPricing()
+	llmGateway := llmgateway.NewLLMProxyService(cfg.LLMProxy, repos.LLMProxy, repos.LLMChannel, repos.LLMModelGroup, pricer, repos.LLMTokenUsage, repos.LLMRateLimit, repos.LLMConversationBinding, repos.LLMToken, repos.LLMChannelCredential, repos.LLMChannelBalanceSnapshot)
+	// LLMAdminService 收拢 token/pricing 管理 CRUD + 计费试算（消化分层例外②），
+	// 复用 pricer；handler 经此 service 访问，不再直接持有 repository。
+	llmAdminSvc := llmgateway.NewLLMAdminService(repos.LLMToken, repos.LLMTokenUsage, repos.LLMModelPricing, pricer)
+
+	llmJobQueueSvc := llmgateway.NewLLMJobQueueService(cfg.LLMJobQueue, repos.LLMJob, llmGateway, nil)
 
 	// Create classify service with activity log
-	classifySvc := NewClassifyService(cfg.Classify, cfg.Server.APIKey, activityLogSvc)
+	classifySvc := NewClassifyService(cfg.Classify, llmGateway, activityLogSvc)
+	// 1.0 §2.1.3：注入知识库提示词加载器（config/prompts/ + registry.yaml）。
+	// 加载失败时 classify 回退到内置默认提示词，不影响启动。
+	kbPromptLoader := NewKBPromptLoader("config")
+	classifySvc.SetPromptLoader(kbPromptLoader)
 	if cfg.LLMJobQueue.Enabled {
 		classifySvc.SetLLMJobQueue(llmJobQueueSvc)
 	}
@@ -104,16 +117,15 @@ func NewServices(repos *repository.Repositories, cfg *config.Config, version str
 		rssFetcherSvc.SetDomainRepo(repos.CrawlDomainProfile)
 		crawlFailureSvc = NewCrawlFailureService(repos.CrawlFailure, repos.CrawlJob)
 		if cfg.CrawlQueue.RuleOptimizerEnabled {
-			ruleOptimizerSvc = NewRuleOptimizerService(cfg.CrawlQueue, repos.CrawlExtractionRule, repos.CrawlDomainProfile, repos.CrawlFailure, cfg.Classify.LLMProxyURL, cfg.Server.APIKey, extractorSvc, activityLogSvc)
+			ruleOptimizerSvc = NewRuleOptimizerService(cfg.CrawlQueue, repos.CrawlExtractionRule, repos.CrawlDomainProfile, repos.CrawlFailure, llmGateway, extractorSvc, activityLogSvc)
+			ruleOptimizerSvc.SetPromptLoader(kbPromptLoader)
 			// The optimizer discovers cooling domains via its own periodic loop
 			// (RuleOptimizer.Start); no per-cooling synchronous trigger is wired.
 		}
 	}
 
-	// Create pricing service
-	pricer := NewPricer(repos.LLMModelPricing)
-	// Seed default pricing on first run
-	_ = pricer.SeedDefaultPricing()
+	// Create pricing service — pricing 与 LLM Gateway 已在前文构造（llmGateway 复用），
+// 此处仅保留 reportSvc/pkbReportSvc/dashboardSvc/healthSvc 的构造顺序。
 
 	reportSvc := NewReportService(cfg.FileIngestion.BasePath)
 	reportSvc.SetDailyReportPath(cfg.DailyReport.Path)
@@ -122,10 +134,9 @@ func NewServices(repos *repository.Repositories, cfg *config.Config, version str
 	dashboardSvc := NewDashboardService(repos.CrawlJob, repos.RSS, repos.LLMProxy, pkbReportSvc, cfg.DailyReport)
 	healthSvc := NewHealthService(cfg, version, repos.Tag, repos.RSS, repos.DatasetMapping)
 
-	// LLM call rule: batch processing → llm_jobs queue, interactive → llmclient direct call.
-	// Determined at compile time (constructor), not runtime conditionals.
-	llmProxyURL := fmt.Sprintf("http://localhost:%d/api/llm/v1", cfg.Server.Port)
-	var dailyReportLLMJobs *LLMJobQueueService
+	// LLM call rule: batch processing → llm_jobs queue, interactive → Gateway direct call.
+	// 进程内直调 Gateway 接口（llmGateway），替代原 localhost HTTP 自回环。
+	var dailyReportLLMJobs *llmgateway.LLMJobQueueService
 	if cfg.LLMJobQueue.Enabled {
 		dailyReportLLMJobs = llmJobQueueSvc
 	}
@@ -138,8 +149,7 @@ func NewServices(repos *repository.Repositories, cfg *config.Config, version str
 		nil,
 		reportSvc,
 		cfg.DailyReport,
-		llmProxyURL,
-		cfg.Server.APIKey,
+		llmGateway,
 		dailyReportLLMJobs,
 	)
 
@@ -152,8 +162,9 @@ func NewServices(repos *repository.Repositories, cfg *config.Config, version str
 		Setting:       NewSettingService(repos.Setting),
 		Health:        healthSvc,
 		Workflow:      NewWorkflowService(cfg.N8N, repos.Setting),
-		LLMProxy:      NewLLMProxyService(cfg.LLMProxy, repos.LLMProxy, repos.LLMChannel, repos.LLMModelGroup, pricer, repos.LLMTokenUsage, repos.LLMRateLimit, repos.LLMConversationBinding, repos.LLMToken, repos.LLMChannelCredential, repos.LLMChannelBalanceSnapshot),
+		LLMProxy:      llmGateway,
 		LLMJobQueue:   llmJobQueueSvc,
+		LLMAdmin:      llmAdminSvc,
 		Classify:      classifySvc,
 		ActivityLog:   activityLogSvc,
 		LogCenter:     logCenterSvc,

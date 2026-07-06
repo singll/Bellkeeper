@@ -11,7 +11,9 @@ import (
 	"time"
 
 	"github.com/gin-gonic/gin"
+	"github.com/singll/bellkeeper/internal/llmgateway"
 	"github.com/singll/bellkeeper/internal/config"
+	"github.com/singll/bellkeeper/internal/eventbus"
 	"github.com/singll/bellkeeper/internal/handler"
 	"github.com/singll/bellkeeper/internal/matrix/agent"
 	"github.com/singll/bellkeeper/internal/matrix/command"
@@ -49,13 +51,16 @@ type App struct {
 
 	// Infrastructure
 	redisClient    *infra.RedisClient
-	natsClient     *infra.NATSClient
+	eventBus       *eventbus.Client
 	matrixClient   *gateway.Client
 	matrixSyncLoop *gateway.SyncLoop
 	notifyWorker   *worker.NotificationWorker
 
 	// Knowledge services
 	knowledgeIndexSvc   *service.KnowledgeIndexService
+	kbExtractWorker     *service.KBExtractWorker
+	kbIndexWorker       *service.KBIndexWorker
+	kbHealthWorker      *service.KBHealthWorker
 	pkbScheduler        *pkb.Scheduler
 	dailyReportWatchdog *service.DailyReportWatchdog
 
@@ -122,7 +127,7 @@ func (a *App) Setup() error {
 	// Initialize layers: Repository -> Service -> Handler
 	a.repos = repository.NewRepositories(a.db)
 	a.services = service.NewServices(a.repos, a.cfg, version)
-	a.handlers = handler.NewHandlers(a.services, a.repos, a.shutdownChan, a.cfg.Server.APIKey, a.cfg.Memos.BaseURL, a.cfg.Memos.APIToken)
+	a.handlers = handler.NewHandlers(a.services, a.shutdownChan, a.cfg.Server.APIKey, a.cfg.Memos.BaseURL, a.cfg.Memos.APIToken)
 
 	if err := a.setupKnowledge(); err != nil {
 		return fmt.Errorf("knowledge setup: %w", err)
@@ -161,9 +166,8 @@ func (a *App) setupKnowledge() error {
 
 	knowledgeIndexSvc := service.NewKnowledgeIndexService(a.cfg.Knowledge, meiliClient)
 	knowledgeSearchSvc := service.NewFileSearchService(meiliClient)
-	askSvc := service.NewAskService(knowledgeSearchSvc,
-		fmt.Sprintf("http://localhost:%d/api/llm/v1", a.cfg.Server.Port),
-		a.cfg.Server.APIKey)
+	askSvc := service.NewAskService(knowledgeSearchSvc, a.services.LLMProxy)
+	askSvc.SetPromptLoader(service.NewKBPromptLoader("config"))
 	askLayers := make([]string, 0, len(a.cfg.Knowledge.ScanDirs))
 	for _, dir := range a.cfg.Knowledge.ScanDirs {
 		askLayers = append(askLayers, dir.Layer)
@@ -212,13 +216,18 @@ func (a *App) setupMatrixInfra() error {
 		return fmt.Errorf("init Redis: %w", err)
 	}
 
-	a.natsClient, err = infra.NewNATSClient(a.cfg.NATS)
+	a.eventBus, err = eventbus.NewClient(a.cfg.NATS)
 	if err != nil {
 		return fmt.Errorf("init NATS: %w", err)
 	}
 
+	// 1.0 事件化：注入 eventBus 给 LLM 任务队列（Start 前注入，启用 llm.job.submit 事件驱动）。
+	if a.services.LLMJobQueue != nil {
+		a.services.LLMJobQueue.SetEventBus(a.eventBus)
+	}
+
 	// Notification service
-	notifySvc := service.NewNotificationService(a.cfg.NATS, a.redisClient, a.natsClient, a.repos)
+	notifySvc := service.NewNotificationService(a.cfg.NATS, a.redisClient, a.eventBus, a.repos)
 	a.services.SetNotificationService(notifySvc)
 	notifySvc.Start()
 	a.handlers.MatrixNotify = handler.NewMatrixNotifyHandler(notifySvc)
@@ -226,6 +235,26 @@ func (a *App) setupMatrixInfra() error {
 	// Wire notification into crawl queue
 	if a.services.CrawlQueue != nil {
 		a.services.CrawlQueue.SetNotificationService(notifySvc)
+	}
+
+	// KB 事件链路（1.0 §2.1.2）：crawl.done → extract-worker → extract.done → index-worker。
+	// 注入 KBEventPublisher 给 CrawlQueueService；启动 extract/index worker 消费事件。
+	// eventBus 未配置时 publisher 为 nil，crawl worker 走 fallback 同步入库（行为不变）。
+	kbEventPublisher := service.NewKBEventPublisher(a.eventBus)
+	if a.services.CrawlQueue != nil {
+		a.services.CrawlQueue.SetEventPublisher(kbEventPublisher)
+	}
+	a.kbExtractWorker = service.NewKBExtractWorker(a.eventBus, a.services.FileIngestion, a.repos.CrawlJob, kbEventPublisher, a.cfg.Matrix.MaxRetry)
+	a.kbIndexWorker = service.NewKBIndexWorker(a.eventBus, a.knowledgeIndexSvc, a.cfg.Matrix.MaxRetry)
+	a.kbHealthWorker = service.NewKBHealthWorker(a.eventBus, a.repos.CrawlDomainProfile, notifySvc, a.cfg.CrawlQueue)
+	if err := a.kbExtractWorker.Start(context.Background()); err != nil {
+		return fmt.Errorf("start kb extract worker: %w", err)
+	}
+	if err := a.kbIndexWorker.Start(context.Background()); err != nil {
+		return fmt.Errorf("start kb index worker: %w", err)
+	}
+	if err := a.kbHealthWorker.Start(context.Background()); err != nil {
+		return fmt.Errorf("start kb health worker: %w", err)
 	}
 
 	// Wire alert delivery into the LLM proxy's alert aggregator (until now it has
@@ -236,7 +265,7 @@ func (a *App) setupMatrixInfra() error {
 
 	// Notification worker
 	notifySender := service.NewNotificationSender(nil, a.repos)
-	a.notifyWorker = worker.NewNotificationWorker(a.cfg.NATS, a.natsClient, notifySender, a.cfg.Matrix.MaxRetry)
+	a.notifyWorker = worker.NewNotificationWorker(a.cfg.NATS, a.eventBus, notifySender, a.cfg.Matrix.MaxRetry)
 	if err := a.notifyWorker.Start(context.Background()); err != nil {
 		return fmt.Errorf("start notification worker: %w", err)
 	}
@@ -337,11 +366,9 @@ func (a *App) setupMatrixGateway() error {
 		}
 		agentPolicy := policy.NewChecker(a.repos, adminUsers)
 
-		llmProxyURL := fmt.Sprintf("http://localhost:%d/api/llm/v1", a.cfg.Server.Port)
 		agentSvc := agent.NewAgentService(
 			a.cfg.Matrix.Agent,
-			llmProxyURL,
-			a.cfg.Server.APIKey,
+			a.services.LLMProxy,
 			a.redisClient.GetClient(),
 			a.matrixClient,
 			a.repos,
@@ -400,7 +427,7 @@ func (a *App) startBackgroundTasks() {
 	}
 
 	if a.cfg.Knowledge.Enabled {
-		var pkbQueue *service.LLMJobQueueService
+		var pkbQueue *llmgateway.LLMJobQueueService
 		if a.cfg.LLMJobQueue.Enabled {
 			pkbQueue = a.services.LLMJobQueue
 		}
@@ -459,6 +486,47 @@ func (a *App) startBackgroundTasks() {
 		a.logger.Info("[RuleOptimizer] rule optimizer started")
 	}
 
+	// 1.0 §2.4.2：日志中心每日清理旧 entries（CleanOldEntries 之前有方法无调度）。
+	if a.services.LogCenter != nil {
+		go a.logCleanupLoop(context.Background())
+		a.logger.Info("[LogCenter] daily cleanup loop started")
+	}
+
+}
+
+// logCleanupLoop 每日清理超过保留期的 log_entries。
+func (a *App) logCleanupLoop(ctx context.Context) {
+	intervalHrs := a.cfg.LogCenter.CleanupIntervalHrs
+	if intervalHrs <= 0 {
+		intervalHrs = 24
+	}
+	ticker := time.NewTicker(time.Duration(intervalHrs) * time.Hour)
+	defer ticker.Stop()
+	// 启动后先执行一次（不阻塞启动），之后按周期执行。
+	a.runLogCleanup()
+	for {
+		select {
+		case <-ctx.Done():
+			return
+		case <-ticker.C:
+			a.runLogCleanup()
+		}
+	}
+}
+
+func (a *App) runLogCleanup() {
+	days := a.cfg.LogCenter.RetentionDays
+	if days <= 0 {
+		days = 30
+	}
+	deleted, err := a.services.LogCenter.CleanOldEntries(days)
+	if err != nil {
+		a.logger.Warn("[LogCenter] cleanup old entries failed", zap.Error(err))
+		return
+	}
+	if deleted > 0 {
+		a.logger.Info("[LogCenter] cleaned old entries", zap.Int64("deleted", deleted), zap.Int("older_than_days", days))
+	}
 }
 
 // SetupHTTP configures the Gin router and HTTP server.
@@ -473,7 +541,7 @@ func (a *App) SetupHTTP() {
 	r.Use(middleware.CORS())
 	r.Use(middleware.Logger())
 
-	router.Setup(r, a.handlers, a.cfg.Server.Mode, a.cfg.Server.APIKey, a.repos.LLMToken)
+	router.Setup(r, a.handlers, a.cfg.Server.Mode, a.cfg.Server.APIKey, a.services.LLMAdmin)
 
 	// Serve frontend static files
 	if _, err := os.Stat("web/dist"); err == nil {
@@ -564,6 +632,15 @@ func (a *App) Shutdown() error {
 	if a.knowledgeIndexSvc != nil {
 		a.knowledgeIndexSvc.Stop()
 	}
+	if a.kbIndexWorker != nil {
+		a.kbIndexWorker.Stop()
+	}
+	if a.kbExtractWorker != nil {
+		a.kbExtractWorker.Stop()
+	}
+	if a.kbHealthWorker != nil {
+		a.kbHealthWorker.Stop()
+	}
 
 	// Matrix infrastructure (reverse order of initialization)
 	if a.matrixSyncLoop != nil {
@@ -572,8 +649,8 @@ func (a *App) Shutdown() error {
 	if a.notifyWorker != nil {
 		a.notifyWorker.Stop()
 	}
-	if a.natsClient != nil {
-		a.natsClient.Close()
+	if a.eventBus != nil {
+		a.eventBus.Close()
 	}
 	if a.redisClient != nil {
 		_ = a.redisClient.Close()
