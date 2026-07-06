@@ -1,0 +1,15 @@
+{
+  "title": "SQL Injection in Login Forms: A Practical Exploit Guide",
+  "content": "This article demonstrates a SQL injection attack against a login form. We show how an attacker can bypass authentication using the classic ' OR '1'='1 payload, extract user credentials via UNION-based queries, and escalate to database administrator access. Included is a working proof-of-concept script in Python that automates the exploitation pipeline against a vulnerable test application. We also discuss mitigations: parameterized queries, input validation, and WAF rules.",
+  "expected": {
+    "relevance": 8,
+    "depth": 7,
+    "actionability": 8,
+    "durability": 7,
+    "novelty": 4,
+    "atomic_potential": 6,
+    "content_type": "poc",
+    "matched_domains": ["security"]
+  },
+  "expected_decision": "vault"
+}

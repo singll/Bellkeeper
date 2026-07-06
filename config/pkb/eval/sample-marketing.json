@@ -1,0 +1,15 @@
+{
+  "title": "Our SaaS Product v2.0 Now Available — Press Release",
+  "content": "We are excited to announce the general availability of our SaaS platform v2.0! This release includes an updated dashboard UI, new collaboration features, and improved performance. Customers can upgrade today at no additional cost. Contact our sales team to learn how v2.0 can transform your workflow.",
+  "expected": {
+    "relevance": 2,
+    "depth": 1,
+    "actionability": 2,
+    "durability": 1,
+    "novelty": 1,
+    "atomic_potential": 1,
+    "content_type": "marketing",
+    "matched_domains": []
+  },
+  "expected_decision": "discard"
+}

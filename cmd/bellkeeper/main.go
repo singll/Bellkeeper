@@ -1,16 +1,19 @@
 package main
 
 import (
+	"encoding/json"
 	"fmt"
 	"os"
+	"time"
 
+	"github.com/singll/bellkeeper/internal/llmclient"
+	"github.com/singll/bellkeeper/internal/llmgateway"
 	"github.com/singll/bellkeeper/internal/app"
 	"github.com/singll/bellkeeper/internal/config"
 	"github.com/singll/bellkeeper/internal/middleware"
 	"github.com/singll/bellkeeper/internal/model"
 	"github.com/singll/bellkeeper/internal/pkb"
 	"github.com/singll/bellkeeper/internal/repository"
-	"github.com/singll/bellkeeper/internal/service"
 	"github.com/spf13/cobra"
 )
 
@@ -32,6 +35,10 @@ var (
 
 	// pkb-curate audit flags
 	pkbAuditJSON bool
+
+	// pkb-curate eval flags
+	pkbEvalJSON      bool
+	pkbEvalTolerance int
 
 	// pkb-curate skeleton flags
 	pkbSkeletonTOCFile string
@@ -213,6 +220,21 @@ These are the CLI mirror of the Matrix !pkb approve/reject commands.`,
 	}
 	pkbCurateCmd.AddCommand(pkbProposalsCmd)
 
+	pkbEvalCmd := &cobra.Command{
+		Use:   "eval",
+		Short: "Run golden-set scoring regression against the PKB score model",
+		Long: `eval loads config/pkb/eval/*.json golden samples, scores each via the PKB
+score model, and reports per-case diffs + overall accuracy + per-dimension MAE.
+It is read-only: no files are moved, written, or deleted.
+Use --json for machine-readable output. --tolerance sets per-dimension score
+diff tolerance (default 2).`,
+		Run: runPkbEval,
+	}
+	pkbEvalCmd.Flags().BoolVar(&pkbEvalJSON, "json", false, "output JSON for machine parsing")
+	pkbEvalCmd.Flags().IntVar(&pkbEvalTolerance, "tolerance", 2, "per-dimension score diff tolerance")
+	pkbEvalCmd.Flags().StringVar(&pkbCfgDir, "pkb-config", "config/pkb", "directory holding domains.yaml + prompts/ + eval/")
+	pkbCurateCmd.AddCommand(pkbEvalCmd)
+
 	rootCmd.AddCommand(serveCmd, versionCmd, migrateCmd, pkbCurateCmd)
 
 	if err := rootCmd.Execute(); err != nil {
@@ -239,10 +261,10 @@ func runPkbDigest(cmd *cobra.Command, args []string) {
 		os.Exit(1)
 	}
 	articleRepo := repository.NewArticleTagRepository(db)
-	var llmJobs *service.LLMJobQueueService
+	var llmJobs *llmgateway.LLMJobQueueService
 	if cfg.LLMJobQueue.Enabled {
 		llmJobRepo := repository.NewLLMJobRepository(db)
-		llmJobs = service.NewLLMJobQueueService(cfg.LLMJobQueue, llmJobRepo, cfg.Classify.LLMProxyURL, cfg.Server.APIKey)
+		llmJobs = llmgateway.NewLLMJobQueueService(cfg.LLMJobQueue, llmJobRepo, llmclient.New(llmclient.Options{BaseURL: cfg.Classify.LLMProxyURL, APIKey: cfg.Server.APIKey, Timeout: 10 * time.Minute}), nil)
 	}
 
 	curator, err := pkb.NewCurator(cfg, pkb.Options{
@@ -329,10 +351,10 @@ func runPkbCurate(cmd *cobra.Command, args []string) {
 		os.Exit(1)
 	}
 	articleRepo := repository.NewArticleTagRepository(db)
-	var llmJobs *service.LLMJobQueueService
+	var llmJobs *llmgateway.LLMJobQueueService
 	if cfg.LLMJobQueue.Enabled {
 		llmJobRepo := repository.NewLLMJobRepository(db)
-		llmJobs = service.NewLLMJobQueueService(cfg.LLMJobQueue, llmJobRepo, cfg.Classify.LLMProxyURL, cfg.Server.APIKey)
+		llmJobs = llmgateway.NewLLMJobQueueService(cfg.LLMJobQueue, llmJobRepo, llmclient.New(llmclient.Options{BaseURL: cfg.Classify.LLMProxyURL, APIKey: cfg.Server.APIKey, Timeout: 10 * time.Minute}), nil)
 	}
 
 	curator, err := pkb.NewCurator(cfg, pkb.Options{
@@ -379,6 +401,60 @@ func runPkbAudit(cmd *cobra.Command, args []string) {
 	}
 }
 
+func runPkbEval(cmd *cobra.Command, args []string) {
+	cfg, err := config.Load(cfgFile)
+	if err != nil {
+		fmt.Fprintf(os.Stderr, "Failed to load config: %v\n", err)
+		os.Exit(1)
+	}
+
+	if err := middleware.InitLogger(cfg.Logging.Level); err != nil {
+		fmt.Fprintf(os.Stderr, "Failed to initialize logger: %v\n", err)
+		os.Exit(1)
+	}
+
+	report, err := pkb.RunEval(cfg, pkb.EvalOptions{
+		ConfigDir: pkbCfgDir,
+		Tolerance: pkbEvalTolerance,
+	})
+	if err != nil {
+		fmt.Fprintf(os.Stderr, "pkb-curate eval failed: %v\n", err)
+		os.Exit(1)
+	}
+
+	if pkbEvalJSON {
+		out, _ := json.MarshalIndent(report, "", "  ")
+		fmt.Println(string(out))
+		return
+	}
+
+	printEvalReport(report)
+}
+
+func printEvalReport(r *pkb.EvalReport) {
+	fmt.Printf("=== PKB Eval Report ===\n")
+	fmt.Printf("Total: %d  Passed: %d  Accuracy: %.1f%%\n\n", r.Total, r.Passed, r.Accuracy*100)
+	for _, c := range r.Cases {
+		mark := "✓"
+		if !c.Passed {
+			mark = "✗"
+		}
+		fmt.Printf("%s [%s] %s\n", mark, c.ActualDecision, c.Title)
+		fmt.Printf("    final=%.1f decision=%s(exp %s) match=%v\n",
+			c.FinalScore, c.ActualDecision, c.ExpectedDecision, c.DecisionMatch)
+		fmt.Printf("    diff rel=%d depth=%d action=%d durable=%d novelty=%d atomic=%d\n",
+			c.ScoreDiff.Relevance, c.ScoreDiff.Depth, c.ScoreDiff.Actionability,
+			c.ScoreDiff.Durability, c.ScoreDiff.Novelty, c.ScoreDiff.AtomicPotential)
+		fmt.Printf("    domain_match=%v content_type_match=%v\n", c.DomainMatch, c.ContentTypeMatch)
+		if c.Errors != "" {
+			fmt.Printf("    errors: %s\n", c.Errors)
+		}
+	}
+	fmt.Printf("\nMAE: rel=%.2f depth=%.2f action=%.2f durable=%.2f novelty=%.2f atomic=%.2f\n",
+		r.MAE["relevance"], r.MAE["depth"], r.MAE["actionability"],
+		r.MAE["durability"], r.MAE["novelty"], r.MAE["atomic_potential"])
+}
+
 func runPkbSkeleton(cmd *cobra.Command, args []string) {
 	cfg, err := config.Load(cfgFile)
 	if err != nil {
@@ -397,10 +473,10 @@ func runPkbSkeleton(cmd *cobra.Command, args []string) {
 		os.Exit(1)
 	}
 	articleRepo := repository.NewArticleTagRepository(db)
-	var llmJobs *service.LLMJobQueueService
+	var llmJobs *llmgateway.LLMJobQueueService
 	if cfg.LLMJobQueue.Enabled {
 		llmJobRepo := repository.NewLLMJobRepository(db)
-		llmJobs = service.NewLLMJobQueueService(cfg.LLMJobQueue, llmJobRepo, cfg.Classify.LLMProxyURL, cfg.Server.APIKey)
+		llmJobs = llmgateway.NewLLMJobQueueService(cfg.LLMJobQueue, llmJobRepo, llmclient.New(llmclient.Options{BaseURL: cfg.Classify.LLMProxyURL, APIKey: cfg.Server.APIKey, Timeout: 10 * time.Minute}), nil)
 	}
 
 	curator, err := pkb.NewCurator(cfg, pkb.Options{
@@ -451,10 +527,10 @@ func runPkbMatch(cmd *cobra.Command, args []string) {
 		os.Exit(1)
 	}
 	articleRepo := repository.NewArticleTagRepository(db)
-	var llmJobs *service.LLMJobQueueService
+	var llmJobs *llmgateway.LLMJobQueueService
 	if cfg.LLMJobQueue.Enabled {
 		llmJobRepo := repository.NewLLMJobRepository(db)
-		llmJobs = service.NewLLMJobQueueService(cfg.LLMJobQueue, llmJobRepo, cfg.Classify.LLMProxyURL, cfg.Server.APIKey)
+		llmJobs = llmgateway.NewLLMJobQueueService(cfg.LLMJobQueue, llmJobRepo, llmclient.New(llmclient.Options{BaseURL: cfg.Classify.LLMProxyURL, APIKey: cfg.Server.APIKey, Timeout: 10 * time.Minute}), nil)
 	}
 
 	curator, err := pkb.NewCurator(cfg, pkb.Options{
@@ -492,10 +568,10 @@ func runPkbPropose(cmd *cobra.Command, args []string) {
 		os.Exit(1)
 	}
 	articleRepo := repository.NewArticleTagRepository(db)
-	var llmJobs *service.LLMJobQueueService
+	var llmJobs *llmgateway.LLMJobQueueService
 	if cfg.LLMJobQueue.Enabled {
 		llmJobRepo := repository.NewLLMJobRepository(db)
-		llmJobs = service.NewLLMJobQueueService(cfg.LLMJobQueue, llmJobRepo, cfg.Classify.LLMProxyURL, cfg.Server.APIKey)
+		llmJobs = llmgateway.NewLLMJobQueueService(cfg.LLMJobQueue, llmJobRepo, llmclient.New(llmclient.Options{BaseURL: cfg.Classify.LLMProxyURL, APIKey: cfg.Server.APIKey, Timeout: 10 * time.Minute}), nil)
 	}
 	curator, err := pkb.NewCurator(cfg, pkb.Options{
 		ConfigDir: pkbCfgDir,
@@ -532,10 +608,10 @@ func runPkbFill(cmd *cobra.Command, args []string) {
 	}
 	articleRepo := repository.NewArticleTagRepository(db)
 	domainRepo := repository.NewCrawlDomainProfileRepository(db) // G3 冷却让路查 next_allowed_at
-	var llmJobs *service.LLMJobQueueService
+	var llmJobs *llmgateway.LLMJobQueueService
 	if cfg.LLMJobQueue.Enabled {
 		llmJobRepo := repository.NewLLMJobRepository(db)
-		llmJobs = service.NewLLMJobQueueService(cfg.LLMJobQueue, llmJobRepo, cfg.Classify.LLMProxyURL, cfg.Server.APIKey)
+		llmJobs = llmgateway.NewLLMJobQueueService(cfg.LLMJobQueue, llmJobRepo, llmclient.New(llmclient.Options{BaseURL: cfg.Classify.LLMProxyURL, APIKey: cfg.Server.APIKey, Timeout: 10 * time.Minute}), nil)
 	}
 	curator, err := pkb.NewCurator(cfg, pkb.Options{
 		ConfigDir:  pkbCfgDir,
@@ -574,10 +650,10 @@ func runPkbFeed(cmd *cobra.Command, args []string) {
 	}
 	articleRepo := repository.NewArticleTagRepository(db)
 	domainRepo := repository.NewCrawlDomainProfileRepository(db) // 晋升复用 fillOneGap，V2 核实查 next_allowed_at 冷却让路
-	var llmJobs *service.LLMJobQueueService
+	var llmJobs *llmgateway.LLMJobQueueService
 	if cfg.LLMJobQueue.Enabled {
 		llmJobRepo := repository.NewLLMJobRepository(db)
-		llmJobs = service.NewLLMJobQueueService(cfg.LLMJobQueue, llmJobRepo, cfg.Classify.LLMProxyURL, cfg.Server.APIKey)
+		llmJobs = llmgateway.NewLLMJobQueueService(cfg.LLMJobQueue, llmJobRepo, llmclient.New(llmclient.Options{BaseURL: cfg.Classify.LLMProxyURL, APIKey: cfg.Server.APIKey, Timeout: 10 * time.Minute}), nil)
 	}
 	curator, err := pkb.NewCurator(cfg, pkb.Options{
 		ConfigDir:  pkbCfgDir,
