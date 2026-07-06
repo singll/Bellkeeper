@@ -578,3 +578,24 @@ export const logCenterApi = {
   deleteAlert: (id: number) =>
     request<{ message: string }>(`/logs/alerts/${id}`, { method: 'DELETE' }),
 }
+
+// Crawl Queue API（1.0 §4 [fe] 爬取队列可视化页）
+export const crawlQueueApi = {
+  getStats: () =>
+    request<{ data: any }>('/crawl/queue/stats'),
+
+  listJobs: (params: { page?: number; page_size?: number; status?: string; domain?: string } = {}) => {
+    const p = new URLSearchParams()
+    if (params.page) p.set('page', String(params.page))
+    if (params.page_size) p.set('page_size', String(params.page_size))
+    if (params.status) p.set('status', params.status)
+    if (params.domain) p.set('domain', params.domain)
+    return request<{ data: { items: any[]; total: number; page: number; page_size: number } }>(`/crawl/queue/jobs?${p}`)
+  },
+
+  listDomains: () =>
+    request<{ data: any[] }>('/crawl/queue/domains'),
+
+  retryJob: (id: number) =>
+    request<{ message: string }>(`/crawl/queue/jobs/${id}/retry`, { method: 'POST' }),
+}

@@ -231,6 +231,7 @@ const navGroups: NavGroup[] = [
       { path: '/knowledge/ask', label: '知识问答', icon: <LLMProxyIcon /> },
       { path: '/knowledge/search', label: '知识搜索', icon: <SearchIcon /> },
       { path: '/rss', label: '订阅源', icon: <RSSIcon />, sectionStart: '采集' },
+      { path: '/crawl-queue', label: '爬取队列', icon: <DashboardIcon /> },
       { path: '/tags', label: '标签', icon: <TagIcon /> },
     ],
   },
@@ -269,12 +270,7 @@ const navGroups: NavGroup[] = [
     accentColor: 'violet',
     items: [
       { path: '/matrix', label: '总览', icon: <MatrixIcon /> },
-      { path: '/matrix/rooms', label: '房间管理', icon: <MatrixRoomIcon /> },
-      { path: '/matrix/channels', label: '频道管理', icon: <MatrixChannelIcon /> },
-      { path: '/matrix/commands', label: '命令管理', icon: <MatrixCommandIcon /> },
-      { path: '/matrix/notifications', label: '通知管理', icon: <MatrixNotificationIcon /> },
-      { path: '/matrix/events', label: '事件日志', icon: <MatrixEventIcon /> },
-      { path: '/matrix/command-logs', label: '命令日志', icon: <MatrixCommandLogIcon /> },
+      { path: '/matrix/console', label: '控制台', icon: <MatrixRoomIcon /> },
     ],
   },
   {

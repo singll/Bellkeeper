@@ -45,22 +45,70 @@ const KnowledgeAsk: Component = () => {
     setQuestion('')
     setAsking(true)
 
-    try {
-      const result = await knowledgeAskApi.ask({
-        question: userMsg.content,
-        top_k: 5,
-        history: priorTurns,
-      })
+    // 1.0 §4：SSE 流式问答（打字机体验）。用 fetch + ReadableStream 消费 SSE。
+    const assistantId = `assistant-${Date.now()}`
+    setHistory([...history(), {
+      id: assistantId,
+      role: 'assistant',
+      content: '',
+      references: [],
+      timestamp: new Date(),
+    }])
 
-      const assistantMsg: ChatMessage = {
-        id: `assistant-${Date.now()}`,
-        role: 'assistant',
-        content: result.data.answer,
-        references: result.data.references,
-        timestamp: new Date(),
+    try {
+      const resp = await fetch('/api/files/ask/stream', {
+        method: 'POST',
+        credentials: 'include',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          question: userMsg.content,
+          top_k: 5,
+          history: priorTurns,
+        }),
+      })
+      if (!resp.ok || !resp.body) throw new Error(`HTTP ${resp.status}`)
+
+      const reader = resp.body.getReader()
+      const decoder = new TextDecoder()
+      let buffer = ''
+      let accContent = ''
+      const updateAssistant = (patch: Partial<ChatMessage>) => {
+        setHistory((prev) => prev.map((m) => (m.id === assistantId ? { ...m, ...patch } : m)))
       }
 
-      setHistory([...history(), assistantMsg])
+      while (true) {
+        const { done, value } = await reader.read()
+        if (done) break
+        buffer += decoder.decode(value, { stream: true })
+        // SSE 帧以 \n\n 分隔
+        const frames = buffer.split('\n\n')
+        buffer = frames.pop() || ''
+        for (const frame of frames) {
+          const lines = frame.split('\n')
+          let eventType = ''
+          let dataStr = ''
+          for (const line of lines) {
+            if (line.startsWith('event: ')) eventType = line.slice(7)
+            else if (line.startsWith('data: ')) dataStr = line.slice(6)
+          }
+          if (!eventType) continue
+          try {
+            const data = dataStr ? JSON.parse(dataStr) : null
+            if (eventType === 'references') {
+              updateAssistant({ references: data })
+            } else if (eventType === 'delta') {
+              accContent += data
+              updateAssistant({ content: accContent })
+            } else if (eventType === 'done') {
+              // 流式结束
+            } else if (eventType === 'error') {
+              throw new Error(data)
+            }
+          } catch (parseErr) {
+            // 忽略单帧解析错误
+          }
+        }
+      }
     } catch (err) {
       toast.error('问答失败: ' + (err as Error).message)
 

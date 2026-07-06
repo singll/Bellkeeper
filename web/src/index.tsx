@@ -9,15 +9,11 @@ import Tags from './pages/Tags'
 import RSSFeeds from './pages/RSSFeeds'
 import Workflows from './pages/Workflows'
 import Settings from './pages/Settings'
+import CrawlQueue from './pages/CrawlQueue'
 import MatrixDashboard from './pages/MatrixDashboard'
-import MatrixRooms from './pages/MatrixRooms'
-import MatrixChannels from './pages/MatrixChannels'
-import MatrixCommands from './pages/MatrixCommands'
-import MatrixNotifications from './pages/MatrixNotifications'
-import MatrixEvents from './pages/MatrixEvents'
-import MatrixCommandLogs from './pages/MatrixCommandLogs'
+import MatrixConsole from './pages/MatrixConsole'
 // Knowledge pages
-import { KnowledgeSearch, KnowledgeAsk, KnowledgeSkeleton, KnowledgeOverview } from './pages/knowledge'
+import { KnowledgeFiles, KnowledgeSearch, KnowledgeAsk, KnowledgeSkeleton, KnowledgeOverview } from './pages/knowledge'
 // LLM pages (split from old LLMProxy)
 import { LLMOverview, LLMChannels, LLMGroupsAndRouting, LLMUsageAndBilling, LLMLogsAndAlerts } from './pages/llm'
 // Log pages (split from old LogCenter)
@@ -41,7 +37,9 @@ render(() => (
         <Route path="/knowledge/search" component={KnowledgeSearch} />
         <Route path="/knowledge/ask" component={KnowledgeAsk} />
         <Route path="/knowledge/skeleton" component={KnowledgeSkeleton} />
+        <Route path="/knowledge/files" component={KnowledgeFiles} />
         <Route path="/rss" component={RSSFeeds} />
+        <Route path="/crawl-queue" component={CrawlQueue} />
         <Route path="/tags" component={Tags} />
         {/* LLM (core system, split from old /llm-proxy) */}
         <Route path="/llm" component={LLMOverview} />
@@ -55,14 +53,9 @@ render(() => (
         <Route path="/logs/dashboard" component={LogDashboard} />
         <Route path="/logs/sources" component={LogSources} />
         <Route path="/logs/alerts" component={LogAlerts} />
-        {/* Matrix (core system) */}
+        {/* Matrix (1.0: 7→2 页重构，§2.3.3 T9；配置归全局 Settings) */}
         <Route path="/matrix" component={MatrixDashboard} />
-        <Route path="/matrix/rooms" component={MatrixRooms} />
-        <Route path="/matrix/channels" component={MatrixChannels} />
-        <Route path="/matrix/commands" component={MatrixCommands} />
-        <Route path="/matrix/notifications" component={MatrixNotifications} />
-        <Route path="/matrix/events" component={MatrixEvents} />
-        <Route path="/matrix/command-logs" component={MatrixCommandLogs} />
+        <Route path="/matrix/console" component={MatrixConsole} />
         {/* More */}
         <Route path="/workflows" component={Workflows} />
         <Route path="/settings" component={Settings} />
