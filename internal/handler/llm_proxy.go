@@ -2,8 +2,6 @@ package handler
 
 import (
 	"bufio"
-	"crypto/rand"
-	"encoding/hex"
 	"fmt"
 	"io"
 	"net/http"
@@ -13,33 +11,24 @@ import (
 
 	"github.com/gin-gonic/gin"
 	"github.com/singll/bellkeeper/internal/auth"
+	"github.com/singll/bellkeeper/internal/llmgateway"
 	"github.com/singll/bellkeeper/internal/model"
 	"github.com/singll/bellkeeper/internal/pkg/response"
-	"github.com/singll/bellkeeper/internal/repository"
-	"github.com/singll/bellkeeper/internal/service"
+	"github.com/singll/bellkeeper/internal/llmgateway/converter"
 )
 
 type LLMProxyHandler struct {
-	svc            *service.LLMProxyService
-	pricer         *service.Pricer
-	tokenRepo      *repository.LLMTokenRepository
-	tokenUsageRepo *repository.LLMTokenUsageRepository
-	pricingRepo    *repository.LLMModelPricingRepository
+	svc  *llmgateway.LLMProxyService
+	admin *llmgateway.LLMAdminService
 }
 
 func NewLLMProxyHandler(
-	svc *service.LLMProxyService,
-	pricer *service.Pricer,
-	tokenRepo *repository.LLMTokenRepository,
-	tokenUsageRepo *repository.LLMTokenUsageRepository,
-	pricingRepo *repository.LLMModelPricingRepository,
+	svc *llmgateway.LLMProxyService,
+	admin *llmgateway.LLMAdminService,
 ) *LLMProxyHandler {
 	return &LLMProxyHandler{
-		svc:            svc,
-		pricer:         pricer,
-		tokenRepo:      tokenRepo,
-		tokenUsageRepo: tokenUsageRepo,
-		pricingRepo:    pricingRepo,
+		svc:   svc,
+		admin: admin,
 	}
 }
 
@@ -152,7 +141,7 @@ func (h *LLMProxyHandler) streamAnthropicToOpenAI(c *gin.Context, bodyReader io.
 		return
 	}
 
-	converter := service.NewAnthropicSSEConverter()
+	conv := converter.NewAnthropicSSEConverter()
 	scanner := bufio.NewScanner(bodyReader)
 	scanner.Buffer(make([]byte, 0, 64*1024), 1024*1024)
 
@@ -167,7 +156,7 @@ func (h *LLMProxyHandler) streamAnthropicToOpenAI(c *gin.Context, bodyReader io.
 
 		if strings.HasPrefix(line, "data: ") {
 			data := strings.TrimPrefix(line, "data: ")
-			output := converter.ConvertEvent(eventType, data)
+			output := conv.ConvertEvent(eventType, data)
 			if output != "" {
 				c.Writer.Write([]byte(output)) //nolint:errcheck
 				flusher.Flush()
@@ -525,14 +514,10 @@ func (h *LLMProxyHandler) RefreshBalances(c *gin.Context) {
 // --- Token CRUD ---
 
 func (h *LLMProxyHandler) ListTokens(c *gin.Context) {
-	tokens, err := h.tokenRepo.List()
+	tokens, err := h.admin.ListTokens()
 	if err != nil {
 		response.InternalError(c, err.Error())
 		return
-	}
-	// Don't expose key_hash
-	for i := range tokens {
-		tokens[i].KeyHash = ""
 	}
 	response.Success(c, tokens)
 }
@@ -552,45 +537,36 @@ func (h *LLMProxyHandler) CreateToken(c *gin.Context) {
 		response.BadRequest(c, err.Error())
 		return
 	}
-	if req.Name == "" || req.CallerID == "" {
-		response.BadRequest(c, "name and caller_id are required")
-		return
+
+	var expiresAt *time.Time
+	if req.ExpiresAt != nil {
+		t, err := time.Parse(time.RFC3339, *req.ExpiresAt)
+		if err != nil {
+			response.BadRequest(c, "invalid expires_at: "+err.Error())
+			return
+		}
+		expiresAt = &t
 	}
 
-	// Generate key: sk-bk-<random 32 hex chars>
-	b := make([]byte, 16)
-	if _, err := rand.Read(b); err != nil {
-		response.InternalError(c, "failed to generate key")
-		return
-	}
-	rawKey := "sk-bk-" + hex.EncodeToString(b)
-
-	token := model.LLMToken{
+	result, err := h.admin.CreateToken(llmgateway.CreateTokenRequest{
 		Name:                  req.Name,
-		KeyHash:               model.HashKey(rawKey),
-		KeyPrefix:             rawKey[:min(8, len(rawKey))],
 		CallerID:              req.CallerID,
+		AllowedModels:         req.AllowedModels,
+		AllowedGroups:         req.AllowedGroups,
 		QuotaRequestsDaily:    req.QuotaRequestsDaily,
 		QuotaTokensDaily:      req.QuotaTokensDaily,
 		QuotaCostMonthlyCents: req.QuotaCostMonthlyCents,
-	}
-	token.SetAllowedModels(req.AllowedModels)
-	token.SetAllowedGroups(req.AllowedGroups)
-	if req.ExpiresAt != nil {
-		if t, err := time.Parse(time.RFC3339, *req.ExpiresAt); err == nil {
-			token.ExpiresAt = &t
-		}
-	}
-
-	if err := h.tokenRepo.Create(&token); err != nil {
+		ExpiresAt:             expiresAt,
+	})
+	if err != nil {
 		response.InternalError(c, err.Error())
 		return
 	}
 
 	// Return the raw key ONLY on creation
 	response.Success(c, gin.H{
-		"token": token,
-		"key":   rawKey,
+		"token": result.Token,
+		"key":   result.Key,
 	})
 }
 
@@ -615,36 +591,30 @@ func (h *LLMProxyHandler) UpdateToken(c *gin.Context) {
 		return
 	}
 
-	token, err := h.tokenRepo.Get(uint(id))
-	if err != nil {
-		response.NotFound(c, "token not found")
-		return
-	}
-
-	if req.Name != "" {
-		token.Name = req.Name
-	}
-	token.SetAllowedModels(req.AllowedModels)
-	token.SetAllowedGroups(req.AllowedGroups)
-	token.QuotaRequestsDaily = req.QuotaRequestsDaily
-	token.QuotaTokensDaily = req.QuotaTokensDaily
-	token.QuotaCostMonthlyCents = req.QuotaCostMonthlyCents
-	if req.Enabled != nil {
-		token.Enabled = *req.Enabled
-	}
+	var expiresAt *time.Time
 	if req.ExpiresAt != nil {
-		if t, err := time.Parse(time.RFC3339, *req.ExpiresAt); err == nil {
-			token.ExpiresAt = &t
-		} else {
-			token.ExpiresAt = nil
+		t, err := time.Parse(time.RFC3339, *req.ExpiresAt)
+		if err != nil {
+			response.BadRequest(c, "invalid expires_at: "+err.Error())
+			return
 		}
+		expiresAt = &t
 	}
 
-	if err := h.tokenRepo.Update(token); err != nil {
-		response.InternalError(c, err.Error())
+	token, err := h.admin.UpdateToken(uint(id), llmgateway.UpdateTokenRequest{
+		Name:                  req.Name,
+		AllowedModels:         req.AllowedModels,
+		AllowedGroups:         req.AllowedGroups,
+		QuotaRequestsDaily:    req.QuotaRequestsDaily,
+		QuotaTokensDaily:      req.QuotaTokensDaily,
+		QuotaCostMonthlyCents: req.QuotaCostMonthlyCents,
+		Enabled:               req.Enabled,
+		ExpiresAt:             expiresAt,
+	})
+	if err != nil {
+		response.NotFound(c, err.Error())
 		return
 	}
-	token.KeyHash = ""
 	response.Success(c, token)
 }
 
@@ -654,7 +624,7 @@ func (h *LLMProxyHandler) DeleteToken(c *gin.Context) {
 		response.BadRequest(c, "invalid id")
 		return
 	}
-	if err := h.tokenRepo.Delete(uint(id)); err != nil {
+	if err := h.admin.DeleteToken(uint(id)); err != nil {
 		response.InternalError(c, err.Error())
 		return
 	}
@@ -667,23 +637,9 @@ func (h *LLMProxyHandler) RegenerateTokenKey(c *gin.Context) {
 		response.BadRequest(c, "invalid id")
 		return
 	}
-	token, err := h.tokenRepo.Get(uint(id))
+	rawKey, err := h.admin.RegenerateTokenKey(uint(id))
 	if err != nil {
-		response.NotFound(c, "token not found")
-		return
-	}
-
-	b := make([]byte, 16)
-	if _, err := rand.Read(b); err != nil {
-		response.InternalError(c, "failed to generate key")
-		return
-	}
-	rawKey := "sk-bk-" + hex.EncodeToString(b)
-	token.KeyHash = model.HashKey(rawKey)
-	token.KeyPrefix = rawKey[:min(8, len(rawKey))]
-
-	if err := h.tokenRepo.Update(token); err != nil {
-		response.InternalError(c, err.Error())
+		response.NotFound(c, err.Error())
 		return
 	}
 	response.Success(c, gin.H{"key": rawKey})
@@ -697,16 +653,8 @@ func (h *LLMProxyHandler) GetTokenUsage(c *gin.Context) {
 	}
 	daysStr := c.DefaultQuery("days", "7")
 	days, _ := strconv.Atoi(daysStr)
-	if days <= 0 {
-		days = 7
-	}
-	if days > 90 {
-		days = 90
-	}
 
-	to := time.Now()
-	from := to.AddDate(0, 0, -days)
-	usages, err := h.tokenUsageRepo.ListByToken(uint(id), from, to)
+	usages, err := h.admin.GetTokenUsage(uint(id), days)
 	if err != nil {
 		response.InternalError(c, err.Error())
 		return
@@ -717,7 +665,7 @@ func (h *LLMProxyHandler) GetTokenUsage(c *gin.Context) {
 // --- Pricing CRUD ---
 
 func (h *LLMProxyHandler) ListPricing(c *gin.Context) {
-	pricing, err := h.pricingRepo.List()
+	pricing, err := h.admin.ListPricing()
 	if err != nil {
 		response.InternalError(c, err.Error())
 		return
@@ -731,12 +679,8 @@ func (h *LLMProxyHandler) CreatePricing(c *gin.Context) {
 		response.BadRequest(c, err.Error())
 		return
 	}
-	if p.ChannelName == "" || p.Model == "" {
-		response.BadRequest(c, "channel_name and model are required")
-		return
-	}
-	if err := h.pricingRepo.Create(&p); err != nil {
-		response.InternalError(c, err.Error())
+	if err := h.admin.CreatePricing(&p); err != nil {
+		response.BadRequest(c, err.Error())
 		return
 	}
 	response.Success(c, p)
@@ -754,7 +698,7 @@ func (h *LLMProxyHandler) UpdatePricing(c *gin.Context) {
 		return
 	}
 	p.ID = uint(id)
-	if err := h.pricingRepo.Update(&p); err != nil {
+	if err := h.admin.UpdatePricing(&p); err != nil {
 		response.InternalError(c, err.Error())
 		return
 	}
@@ -767,7 +711,7 @@ func (h *LLMProxyHandler) DeletePricing(c *gin.Context) {
 		response.BadRequest(c, "invalid id")
 		return
 	}
-	if err := h.pricingRepo.Delete(uint(id)); err != nil {
+	if err := h.admin.DeletePricing(uint(id)); err != nil {
 		response.InternalError(c, err.Error())
 		return
 	}
@@ -786,7 +730,7 @@ func (h *LLMProxyHandler) TestPricingCalc(c *gin.Context) {
 		response.BadRequest(c, err.Error())
 		return
 	}
-	cost, err := h.pricer.Calc(req.ChannelName, req.Model, service.Usage{
+	cost, err := h.admin.CalcCost(req.ChannelName, req.Model, llmgateway.Usage{
 		PromptTokens:     req.PromptTokens,
 		CompletionTokens: req.CompletionTokens,
 		CachedTokens:     req.CachedTokens,

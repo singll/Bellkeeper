@@ -5,11 +5,17 @@ import (
 	"github.com/singll/bellkeeper/internal/auth"
 	"github.com/singll/bellkeeper/internal/handler"
 	"github.com/singll/bellkeeper/internal/middleware"
-	"github.com/singll/bellkeeper/internal/repository"
 )
 
 // Setup configures all routes on the Gin engine.
-func Setup(r *gin.Engine, handlers *handler.Handlers, mode string, apiKey string, tokenRepo *repository.LLMTokenRepository) {
+//
+// tokenStore 由调用方注入 auth.LLMTokenStore 接口实现（消化分层例外①）：
+// router 不再持有/传递具体 *repository.LLMTokenRepository，中间件依赖接口。
+// 生产路径传入 *llmgateway.LLMAdminService（实现该接口）。
+func Setup(r *gin.Engine, handlers *handler.Handlers, mode string, apiKey string, tokenStore auth.LLMTokenStore) {
+	// 1.0 §4.4：全局 trace_id 中间件（最前，所有路由含 health/proxy 均注入）。
+	r.Use(middleware.TraceID())
+
 	// Health check (no auth required)
 	r.GET("/api/health", handlers.Health.Check)
 	r.GET("/api/health/detailed", handlers.Health.Detailed)
@@ -29,7 +35,7 @@ func Setup(r *gin.Engine, handlers *handler.Handlers, mode string, apiKey string
 	registerSettingRoutes(api, handlers.Setting)
 	registerWorkflowRoutes(api, handlers.Workflow)
 	registerSystemRoutes(api, handlers.System)
-	registerLLMProxyRoutes(r, api, handlers.LLMProxy, tokenRepo, apiKey)
+	registerLLMProxyRoutes(r, api, handlers.LLMProxy, tokenStore, apiKey)
 	registerClassifyRoutes(api, handlers.Classify)
 	registerActivityLogRoutes(api, handlers.ActivityLog)
 	registerLogCenterRoutes(api, handlers.LogCenter)
@@ -162,12 +168,12 @@ func registerSystemRoutes(api *gin.RouterGroup, h *handler.SystemHandler) {
 	api.POST("/system/backup", h.BackupRun)
 }
 
-func registerLLMProxyRoutes(r *gin.Engine, api *gin.RouterGroup, h *handler.LLMProxyHandler, tokenRepo *repository.LLMTokenRepository, serverAPIKey string) {
+func registerLLMProxyRoutes(r *gin.Engine, api *gin.RouterGroup, h *handler.LLMProxyHandler, tokenStore auth.LLMTokenStore, serverAPIKey string) {
 	// Proxy endpoint: registered on the engine (NOT the api group) so it bypasses the
 	// global Authelia middleware. External Bearer tokens (sk-bk-*) authenticate via
 	// LLMTokenAuth only; the server.api_key bypass is handled inside that middleware.
 	proxy := r.Group("/api/llm")
-	proxy.Use(auth.LLMTokenAuth(tokenRepo, serverAPIKey))
+	proxy.Use(auth.LLMTokenAuth(tokenStore, serverAPIKey))
 	proxy.Any("/v1/*path", h.Proxy)
 
 	// Management endpoints: inherit Authelia auth from the parent api group (web UI +
@@ -363,6 +369,7 @@ func registerKnowledgeRoutes(api *gin.RouterGroup, h *handler.KnowledgeHandler) 
 	files := api.Group("/files")
 	files.POST("/search", h.Search)
 	files.POST("/ask", h.Ask)
+	files.POST("/ask/stream", h.AskStream) // 1.0 §4 SSE 流式问答
 	files.GET("/stats", h.Stats)
 	files.POST("/rebuild", h.Rebuild)
 	files.GET("/health", h.Health)

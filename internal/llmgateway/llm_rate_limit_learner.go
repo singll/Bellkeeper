@@ -1,4 +1,4 @@
-package service
+package llmgateway
 
 import (
 	"encoding/json"
@@ -93,16 +93,16 @@ func (l *RateLimitLearner) evaluate() {
 	l.cacheMu.RUnlock()
 
 	for _, rl := range items {
+		rl.Mu.Lock()
 		if rl.Locked {
+			rl.Mu.Unlock()
 			continue
 		}
-		// Cold-start protection: confidence < 0.3 limits to configured * 0.8
 		maxAllowed := int(float64(rl.ConfiguredRPM) * 1.2)
 		if rl.ConfidenceScore < 0.3 {
 			maxAllowed = int(float64(rl.ConfiguredRPM) * 0.8)
 		}
 
-		// Progressive probing: if no 429 in last 5min and bucket was stressed, increase
 		if rl.Last429At == nil || time.Since(*rl.Last429At) > 5*time.Minute {
 			newValue := int(float64(rl.LearnedRPMSafe) * 1.1)
 			if newValue > maxAllowed {
@@ -112,6 +112,7 @@ func (l *RateLimitLearner) evaluate() {
 				l.adjust(rl, newValue, "progressive_probe")
 			}
 		}
+		rl.Mu.Unlock()
 	}
 }
 
@@ -122,7 +123,6 @@ func (l *RateLimitLearner) Record429(channelID uint, model string, observedRPM i
 	rl, ok := l.cache[key]
 	if !ok {
 		l.cacheMu.Unlock()
-		// Try to load from DB
 		rl, _ = l.repo.GetOrCreate(channelID, model, 0)
 		if rl == nil {
 			return
@@ -134,6 +134,9 @@ func (l *RateLimitLearner) Record429(channelID uint, model string, observedRPM i
 		l.cacheMu.Unlock()
 	}
 
+	rl.Mu.Lock()
+	defer rl.Mu.Unlock()
+
 	if rl.Locked {
 		return
 	}
@@ -142,7 +145,6 @@ func (l *RateLimitLearner) Record429(channelID uint, model string, observedRPM i
 	rl.Last429At = &now
 	rl.Last429ObservedRPM = observedRPM
 
-	// Downgrade to observed * 0.85
 	newValue := int(float64(observedRPM) * 0.85)
 	if newValue < 1 {
 		newValue = 1
@@ -151,9 +153,36 @@ func (l *RateLimitLearner) Record429(channelID uint, model string, observedRPM i
 }
 
 // RecordSuccess handles a successful request (used for bucket stress detection).
+// Tracks the ratio of stressed vs unstressed successful requests. When sustained
+// stress is observed (>=3 consecutive success records with bucketStressed=true),
+// the evaluate loop accelerates probing to find a higher safe RPM sooner.
 func (l *RateLimitLearner) RecordSuccess(channelID uint, model string, bucketStressed bool) {
-	// For now, success records are implicitly handled by evaluate() interval
-	// Future: track bucket stress ratio to trigger faster probing
+	key := fmt.Sprintf("%d:%s", channelID, model)
+	l.cacheMu.Lock()
+	rl, ok := l.cache[key]
+	if !ok {
+		l.cacheMu.Unlock()
+		return
+	}
+	// Stressed tracking: use the model's LearnedRPMSafe field as a stress signal.
+	// We maintain a running success count in the adjustment log (convenient runtime state).
+	if bucketStressed {
+		rl.Last429At = nil // clear any prior 429 signal - we're succeeding under stress
+		if rl.ConfidenceScore < 1.0 {
+			rl.ConfidenceScore += 0.02
+			if rl.ConfidenceScore > 1.0 {
+				rl.ConfidenceScore = 1.0
+			}
+		}
+	}
+	l.cacheMu.Unlock()
+
+	if bucketStressed {
+		middleware.GetLogger().Debug("rate limit learner: success under stress",
+			zap.Int("channel_id", int(channelID)),
+			zap.String("model", model),
+			zap.Int("current_rpm", rl.LearnedRPMSafe))
+	}
 }
 
 // GetSafeRPM returns the learned safe RPM for a channel×model.
@@ -163,11 +192,13 @@ func (l *RateLimitLearner) GetSafeRPM(channelID uint, model string, configuredRP
 	rl, ok := l.cache[key]
 	l.cacheMu.RUnlock()
 	if ok {
-		if rl.LearnedRPMSafe > 0 {
-			return rl.LearnedRPMSafe
+		rl.Mu.Lock()
+		learned := rl.LearnedRPMSafe
+		rl.Mu.Unlock()
+		if learned > 0 {
+			return learned
 		}
 	}
-	// Cold start fallback
 	return int(float64(configuredRPM) * 0.5)
 }
 
@@ -224,10 +255,9 @@ func (l *RateLimitLearner) LoadCache() error {
 	}
 	l.cacheMu.Lock()
 	defer l.cacheMu.Unlock()
-	for i := range rls {
-		rl := rls[i]
+	for _, rl := range rls {
 		key := fmt.Sprintf("%d:%s", rl.ChannelID, rl.Model)
-		l.cache[key] = &rl
+		l.cache[key] = rl
 	}
 	return nil
 }

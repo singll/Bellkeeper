@@ -34,7 +34,7 @@ func TestLLMModelGroupRepository_List(t *testing.T) {
 	repo := NewLLMModelGroupRepository(db)
 
 	assertNoError(t, repo.Create(&model.LLMModelGroup{Name: "g1", Strategy: "priority-health"}), "Create 1")
-	assertNoError(t, repo.Create(&model.LLMModelGroup{Name: "g2", Strategy: "round-robin"}), "Create 2")
+	assertNoError(t, repo.Create(&model.LLMModelGroup{Name: "g2", Strategy: "best-weight"}), "Create 2")
 
 	groups, err := repo.List()
 	assertNoError(t, err, "List")

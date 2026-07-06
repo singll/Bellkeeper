@@ -3,6 +3,8 @@ package service
 import (
 	"context"
 	"fmt"
+
+	"github.com/singll/bellkeeper/internal/llmgateway"
 )
 
 // matrixAlertNotifier adapts the Matrix NotificationService to the AlertNotifier
@@ -14,9 +16,9 @@ type matrixAlertNotifier struct {
 	channel string
 }
 
-// NewMatrixAlertNotifier wraps a NotificationService as an AlertNotifier targeting
+// NewMatrixAlertNotifier wraps a NotificationService as an llmgateway.AlertNotifier targeting
 // the given channel (e.g. "alerts").
-func NewMatrixAlertNotifier(svc *NotificationService, channel string) AlertNotifier {
+func NewMatrixAlertNotifier(svc *NotificationService, channel string) llmgateway.AlertNotifier {
 	return &matrixAlertNotifier{svc: svc, channel: channel}
 }
 

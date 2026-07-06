@@ -2,10 +2,15 @@ package balance
 
 import (
 	"context"
+	"crypto/hmac"
+	"crypto/sha1"
+	"encoding/base64"
 	"encoding/json"
 	"fmt"
 	"net/http"
 	"net/url"
+	"sort"
+	"strings"
 	"time"
 
 	"github.com/singll/bellkeeper/internal/middleware"
@@ -44,23 +49,11 @@ func (p *aliyunProvider) Name() string {
 }
 
 func (p *aliyunProvider) Fetch(ctx context.Context) (*Info, error) {
-	// Aliyun BSS QueryAccountBalance endpoint
-	// For simplicity, we use the basic OpenAPI pattern.
-	// In production, this should use proper Aliyun SDK signature (HMAC-SHA1).
-	// Here we assume the user configures a "security token" style access.
-
 	apiURL := "https://bssopenapi.aliyuncs.com"
-	params := url.Values{}
-	params.Set("Action", "QueryAccountBalance")
-	params.Set("Format", "JSON")
-	params.Set("Version", "2017-12-14")
-	params.Set("AccessKeyId", p.accessKey)
-	params.Set("Timestamp", time.Now().UTC().Format("2006-01-02T15:04:05Z"))
-	params.Set("SignatureMethod", "HMAC-SHA1")
-	params.Set("SignatureVersion", "1.0")
-	params.Set("SignatureNonce", fmt.Sprintf("%d", time.Now().UnixNano()))
+	params := p.buildSignedParams()
 
-	req, err := http.NewRequestWithContext(ctx, "GET", apiURL+"/?"+params.Encode(), nil)
+	fullURL := apiURL + "/?" + params.Encode()
+	req, err := http.NewRequestWithContext(ctx, "GET", fullURL, nil)
 	if err != nil {
 		return nil, fmt.Errorf("create request: %w", err)
 	}
@@ -77,14 +70,13 @@ func (p *aliyunProvider) Fetch(ctx context.Context) (*Info, error) {
 
 	var result struct {
 		Data struct {
-			AvailableAmount    float64 `json:"AvailableAmount"`
+			AvailableAmount     float64 `json:"AvailableAmount"`
 			AvailableCashAmount float64 `json:"AvailableCashAmount"`
-			CreditLimit        float64 `json:"CreditLimit"`
-			Currency           string  `json:"Currency"`
+			CreditLimit         float64 `json:"CreditLimit"`
+			Currency            string  `json:"Currency"`
 		} `json:"Data"`
 	}
 	if err := json.NewDecoder(resp.Body).Decode(&result); err != nil {
-		// Aliyun may return XML or error format; log and return simplified info
 		middleware.GetLogger().Warn("aliyun balance parse failed", zap.Error(err))
 		return &Info{
 			ProviderType: "aliyun",
@@ -105,4 +97,53 @@ func (p *aliyunProvider) Fetch(ctx context.Context) (*Info, error) {
 		TotalUsed:    result.Data.CreditLimit,
 		FetchedAt:    time.Now(),
 	}, nil
+}
+
+// buildSignedParams constructs query parameters with HMAC-SHA1 signature
+// as required by Alibaba Cloud OpenAPI specification.
+func (p *aliyunProvider) buildSignedParams() url.Values {
+	params := url.Values{}
+	params.Set("Action", "QueryAccountBalance")
+	params.Set("Format", "JSON")
+	params.Set("Version", "2017-12-14")
+	params.Set("AccessKeyId", p.accessKey)
+	params.Set("Timestamp", time.Now().UTC().Format("2006-01-02T15:04:05Z"))
+	params.Set("SignatureMethod", "HMAC-SHA1")
+	params.Set("SignatureVersion", "1.0")
+	params.Set("SignatureNonce", fmt.Sprintf("%d", time.Now().UnixNano()))
+
+	// Build canonicalized query string (sorted alphabetically)
+	keys := make([]string, 0, len(params))
+	for k := range params {
+		keys = append(keys, k)
+	}
+	sort.Strings(keys)
+
+	var canonicalParts []string
+	for _, k := range keys {
+		canonicalParts = append(canonicalParts,
+			percentEncode(k)+"="+percentEncode(params.Get(k)))
+	}
+	canonicalQuery := strings.Join(canonicalParts, "&")
+
+	// String to sign: HTTPMethod + "&" + percentEncode("/") + "&" + percentEncode(canonicalQuery)
+	stringToSign := "GET&" + percentEncode("/") + "&" + percentEncode(canonicalQuery)
+
+	// HMAC-SHA1 with key = AccessSecret + "&"
+	mac := hmac.New(sha1.New, []byte(p.secret+"&"))
+	mac.Write([]byte(stringToSign))
+	signature := base64.StdEncoding.EncodeToString(mac.Sum(nil))
+
+	params.Set("Signature", signature)
+	return params
+}
+
+// percentEncode performs the special URL encoding required by Alibaba Cloud signature.
+// It differs from url.QueryEscape: spaces encode as %20 (not +), and ~ is kept unencoded.
+func percentEncode(s string) string {
+	encoded := url.QueryEscape(s)
+	encoded = strings.ReplaceAll(encoded, "+", "%20")
+	encoded = strings.ReplaceAll(encoded, "*", "%2A")
+	encoded = strings.ReplaceAll(encoded, "%7E", "~")
+	return encoded
 }

@@ -13,11 +13,10 @@ import (
 
 type ExtractionRuleHandler struct {
 	ruleSvc *service.RuleOptimizerService
-	ruleRepo *repository.CrawlExtractionRuleRepository
 }
 
-func NewExtractionRuleHandler(ruleSvc *service.RuleOptimizerService, ruleRepo *repository.CrawlExtractionRuleRepository) *ExtractionRuleHandler {
-	return &ExtractionRuleHandler{ruleSvc: ruleSvc, ruleRepo: ruleRepo}
+func NewExtractionRuleHandler(ruleSvc *service.RuleOptimizerService) *ExtractionRuleHandler {
+	return &ExtractionRuleHandler{ruleSvc: ruleSvc}
 }
 
 func (h *ExtractionRuleHandler) ListRules(c *gin.Context) {
@@ -38,7 +37,7 @@ func (h *ExtractionRuleHandler) ListRules(c *gin.Context) {
 		Page:   page,
 		Limit:  limit,
 	}
-	rules, total, err := h.ruleRepo.List(opts)
+	rules, total, err := h.ruleSvc.ListExtractionRules(opts)
 	if err != nil {
 		response.InternalError(c, err.Error())
 		return
@@ -53,7 +52,7 @@ func (h *ExtractionRuleHandler) GetRule(c *gin.Context) {
 		return
 	}
 
-	rule, err := h.ruleRepo.FindActiveByDomain(domain)
+	rule, err := h.ruleSvc.GetExtractionRule(domain)
 	if err != nil {
 		response.NotFound(c, "rule not found")
 		return
@@ -103,7 +102,7 @@ func (h *ExtractionRuleHandler) CreateRule(c *gin.Context) {
 		Status:             model.ExtractionRuleCandidate,
 		CreatedBy:          model.RuleCreatedByHuman,
 	}
-	if err := h.ruleRepo.Create(rule); err != nil {
+	if err := h.ruleSvc.CreateExtractionRule(rule); err != nil {
 		response.InternalError(c, err.Error())
 		return
 	}
@@ -134,7 +133,7 @@ func (h *ExtractionRuleHandler) UpdateRuleStatus(c *gin.Context) {
 		return
 	}
 
-	if err := h.ruleRepo.UpdateStatus(uint(id), status); err != nil {
+	if err := h.ruleSvc.UpdateExtractionRuleStatus(uint(id), status); err != nil {
 		response.InternalError(c, err.Error())
 		return
 	}
@@ -149,7 +148,7 @@ func (h *ExtractionRuleHandler) ListTrials(c *gin.Context) {
 		return
 	}
 
-	trials, err := h.ruleRepo.ListTrialsByRule(uint(id))
+	trials, err := h.ruleSvc.ListExtractionTrials(uint(id))
 	if err != nil {
 		response.InternalError(c, err.Error())
 		return

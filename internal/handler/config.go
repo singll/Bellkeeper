@@ -2,17 +2,17 @@ package handler
 
 import (
 	"github.com/gin-gonic/gin"
+	"github.com/singll/bellkeeper/internal/llmgateway"
 	"github.com/singll/bellkeeper/internal/pkg/response"
-	"github.com/singll/bellkeeper/internal/service"
 )
 
 // ConfigHandler handles configuration hot-reload requests
 type ConfigHandler struct {
-	llmProxy *service.LLMProxyService
+	llmProxy *llmgateway.LLMProxyService
 }
 
 // NewConfigHandler creates a new ConfigHandler
-func NewConfigHandler(llmProxy *service.LLMProxyService) *ConfigHandler {
+func NewConfigHandler(llmProxy *llmgateway.LLMProxyService) *ConfigHandler {
 	return &ConfigHandler{llmProxy: llmProxy}
 }
 

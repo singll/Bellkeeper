@@ -1,4 +1,4 @@
-package service
+package converter
 
 import (
 	"encoding/json"
@@ -7,7 +7,7 @@ import (
 	"time"
 )
 
-const anthropicVersion = "2023-06-01"
+const AnthropicVersion = "2023-06-01"
 
 // ConvertOpenAIToAnthropic converts an OpenAI chat.completions request body
 // to an Anthropic /v1/messages request body.

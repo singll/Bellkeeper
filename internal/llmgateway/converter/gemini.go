@@ -1,9 +1,12 @@
 package converter
 
 import (
+	"crypto/rand"
+	"encoding/hex"
 	"encoding/json"
 	"fmt"
 	"strings"
+	"time"
 )
 
 // GeminiRequest converts an OpenAI chat/completions request to Gemini generateContent format.
@@ -17,8 +20,13 @@ type GeminiContent struct {
 	Parts []GeminiPart `json:"parts"`
 }
 
+type GeminiInlineData struct {
+	Source string `json:"source,omitempty"`
+}
+
 type GeminiPart struct {
-	Text string `json:"text,omitempty"`
+	Text       string            `json:"text,omitempty"`
+	InlineData *GeminiInlineData `json:"inlineData,omitempty"`
 }
 
 type GeminiGenerationConfig struct {
@@ -40,14 +48,27 @@ type GeminiResponse struct {
 	} `json:"usageMetadata"`
 }
 
+// openAIMessage represents a message from an OpenAI-compatible request,
+// supporting both string content and content part arrays (multi-modal).
+type openAIMessage struct {
+	Role    string          `json:"role"`
+	Content json.RawMessage `json:"content"`
+}
+
+// contentPart is a single element of an OpenAI content array.
+type contentPart struct {
+	Type     string `json:"type"`
+	Text     string `json:"text,omitempty"`
+	ImageURL *struct {
+		URL string `json:"url"`
+	} `json:"image_url,omitempty"`
+}
+
 // OpenAIToGemini converts an OpenAI chat/completions request body to Gemini format.
 func OpenAIToGemini(openAIBody []byte) ([]byte, error) {
 	var openaiReq struct {
-		Model    string `json:"model"`
-		Messages []struct {
-			Role    string `json:"role"`
-			Content string `json:"content"`
-		} `json:"messages"`
+		Model    string          `json:"model"`
+		Messages []openAIMessage `json:"messages"`
 		Temperature     *float64 `json:"temperature,omitempty"`
 		MaxTokens       int      `json:"max_tokens,omitempty"`
 		TopP            *float64 `json:"top_p,omitempty"`
@@ -64,11 +85,12 @@ func OpenAIToGemini(openAIBody []byte) ([]byte, error) {
 	for _, msg := range openaiReq.Messages {
 		role := msg.Role
 		if role == "system" {
-			role = "user" // Gemini doesn't have system role
+			role = "user"
 		}
+		parts := parseOpenAIContent(msg.Content)
 		geminiReq.Contents = append(geminiReq.Contents, GeminiContent{
 			Role:  role,
-			Parts: []GeminiPart{{Text: msg.Content}},
+			Parts: parts,
 		})
 	}
 
@@ -144,7 +166,46 @@ func mapFinishReason(reason string) string {
 	}
 }
 
+// parseOpenAIContent parses an OpenAI content field that may be a plain string or
+// an array of ContentPart (for multi-modal messages). Returns Gemini parts.
+func parseOpenAIContent(raw json.RawMessage) []GeminiPart {
+	if len(raw) == 0 {
+		return []GeminiPart{{Text: ""}}
+	}
+	// Try array first (multi-modal: [{"type":"text","text":"..."},{"type":"image_url","image_url":{"url":"..."}}])
+	var parts []contentPart
+	if err := json.Unmarshal(raw, &parts); err == nil && len(parts) > 0 {
+		geminiParts := make([]GeminiPart, 0, len(parts))
+		for _, p := range parts {
+			switch p.Type {
+			case "text":
+				geminiParts = append(geminiParts, GeminiPart{Text: p.Text})
+			case "image_url":
+				if p.ImageURL != nil {
+					geminiParts = append(geminiParts, GeminiPart{InlineData: &GeminiInlineData{Source: p.ImageURL.URL}})
+				}
+			}
+		}
+		if len(geminiParts) > 0 {
+			return geminiParts
+		}
+	}
+	// Fall back to plain string
+	var text string
+	if err := json.Unmarshal(raw, &text); err == nil {
+		return []GeminiPart{{Text: text}}
+	}
+	return []GeminiPart{{Text: string(raw)}}
+}
+
 func generateID() string {
-	// Simple ID generation; in production use crypto/rand
-	return fmt.Sprintf("%d", 0)
+	b := make([]byte, 16)
+	if _, err := rand.Read(b); err != nil {
+		return fmt.Sprintf("%d", time.Now().UnixNano())
+	}
+	b[6] = (b[6] & 0x0f) | 0x40 // version 4
+	b[8] = (b[8] & 0x3f) | 0x80 // variant 10
+	return hex.EncodeToString(b[:4]) + "-" + hex.EncodeToString(b[4:6]) + "-" +
+		hex.EncodeToString(b[6:8]) + "-" + hex.EncodeToString(b[8:10]) + "-" +
+		hex.EncodeToString(b[10:])
 }

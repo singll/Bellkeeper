@@ -1,4 +1,4 @@
-package service
+package llmgateway
 
 import (
 	"bytes"
@@ -19,9 +19,9 @@ import (
 	"time"
 
 	"github.com/singll/bellkeeper/internal/config"
-	"github.com/singll/bellkeeper/internal/llm/balance"
-	"github.com/singll/bellkeeper/internal/llm/converter"
-	llmerrors "github.com/singll/bellkeeper/internal/llm/errors"
+	"github.com/singll/bellkeeper/internal/llmgateway/balance"
+	"github.com/singll/bellkeeper/internal/llmgateway/converter"
+	llmerrors "github.com/singll/bellkeeper/internal/llmgateway/errors"
 	"github.com/singll/bellkeeper/internal/middleware"
 	"github.com/singll/bellkeeper/internal/model"
 	"github.com/singll/bellkeeper/internal/pkg/envutil"
@@ -235,7 +235,9 @@ func NewLLMProxyService(cfg config.LLMProxyConfig, repo *repository.LLMProxyRepo
 	// Initialize the rate-limit learner BEFORE loading channels so learned-safe RPM
 	// is available to size token buckets at first load (not just after a reload).
 	svc.rateLimitLearner = NewRateLimitLearner(rateLimitRepo)
-	_ = svc.rateLimitLearner.LoadCache()
+	if err := svc.rateLimitLearner.LoadCache(); err != nil {
+		middleware.GetLogger().Warn("llm proxy: load rate limit cache failed", zap.Error(err))
+	}
 
 	if err := svc.loadFromDB(false); err != nil {
 		middleware.GetLogger().Error("failed to load llm-proxy config from DB", zap.Error(err))
@@ -1103,6 +1105,9 @@ func (s *LLMProxyService) ProxyRequest(
 					statusCode, respBody, respHeaders, err := s.tryChannel(ch, method, path, headers, rewrittenBody, callerID, tokenID)
 					if err == nil && statusCode < 500 && statusCode != 429 {
 						ch.Health.RecordSuccess()
+						if s.rateLimitLearner != nil && ch.Config.ID != 0 {
+							s.rateLimitLearner.RecordSuccess(ch.Config.ID, modelName, false)
+						}
 						s.convMgr.Touch(convID, 0, 0)
 						return statusCode, respBody, respHeaders, nil
 					}
@@ -1147,6 +1152,9 @@ func (s *LLMProxyService) ProxyRequest(
 		statusCode, respBody, respHeaders, err = s.tryChannel(ch, method, path, headers, body, callerID, tokenID)
 		if err == nil && statusCode < 500 && statusCode != 429 {
 			ch.Health.RecordSuccess()
+			if s.rateLimitLearner != nil && ch.Config.ID != 0 {
+				s.rateLimitLearner.RecordSuccess(ch.Config.ID, modelName, false)
+			}
 			if convID != "" {
 				s.convMgr.Set(convID, ch.Config.ID, ch.Config.Name, modelName, string(taskType))
 			}
@@ -1218,6 +1226,9 @@ func (s *LLMProxyService) proxyRerank(
 		statusCode, respBody, respHeaders, err = s.tryChannel(ch, method, path, headers, body, callerID, tokenID)
 		if err == nil && statusCode < 500 && statusCode != 429 {
 			ch.Health.RecordSuccess()
+			if s.rateLimitLearner != nil && ch.Config.ID != 0 {
+				s.rateLimitLearner.RecordSuccess(ch.Config.ID, modelName, false)
+			}
 			return statusCode, respBody, respHeaders, nil
 		}
 		result := s.recordChannelFailure(ch, statusCode, respBody, err)
@@ -1302,6 +1313,9 @@ func (s *LLMProxyService) proxyViaGroup(
 
 		if err == nil && statusCode < 500 && statusCode != 429 {
 			ch.Health.RecordSuccess()
+			if s.rateLimitLearner != nil && ch.Config.ID != 0 {
+				s.rateLimitLearner.RecordSuccess(ch.Config.ID, realModel, false)
+			}
 			if taskKey != "" && group.Sticky != nil {
 				group.Sticky.Renew(taskKey, group.Config.StickyTTLSeconds)
 			}
@@ -1387,7 +1401,7 @@ func (s *LLMProxyService) tryChannel(
 		realModel := modelName
 
 		if isAnthropic {
-			converted, err := ConvertOpenAIToAnthropic(body)
+			converted, err := converter.ConvertOpenAIToAnthropic(body)
 			if err != nil {
 				return 400, []byte(`{"error":"anthropic request conversion failed"}`), nil, fmt.Errorf("anthropic conversion: %w", err)
 			}
@@ -1437,7 +1451,7 @@ func (s *LLMProxyService) tryChannel(
 		req.Header.Del("Accept-Encoding")
 		if isAnthropic {
 			req.Header.Set("x-api-key", ch.Config.APIKey)
-			req.Header.Set("anthropic-version", anthropicVersion)
+			req.Header.Set("anthropic-version", converter.AnthropicVersion)
 			req.Header.Del("Authorization")
 		} else if isGemini {
 			req.Header.Set("Authorization", "Bearer "+ch.Config.APIKey)
@@ -1446,6 +1460,9 @@ func (s *LLMProxyService) tryChannel(
 			req.Header.Set("Authorization", "Bearer "+ch.Config.APIKey)
 			req.Header.Set("Content-Type", "application/json")
 		}
+
+		// Track half-open inflight requests for circuit breaker concurrency control
+		ch.Health.TrackHalfOpenRequest()
 
 		resp, err := ch.Client.Do(req)
 		durationMs := int(time.Since(start).Milliseconds())
@@ -1469,7 +1486,7 @@ func (s *LLMProxyService) tryChannel(
 
 		// Convert provider response back to OpenAI format
 		if isAnthropic && resp.StatusCode < 500 {
-			converted, err := ConvertAnthropicToOpenAI(respBytes)
+			converted, err := converter.ConvertAnthropicToOpenAI(respBytes)
 			if err != nil {
 				middleware.GetLogger().Warn("anthropic response conversion failed",
 					zap.String("channel", ch.Config.Name), zap.Error(err))
@@ -1970,7 +1987,7 @@ func (s *LLMProxyService) tryChannelStream(
 	forwardBody := body
 	forwardPath := path
 	if isAnthropic {
-		converted, err := ConvertOpenAIToAnthropic(body)
+		converted, err := converter.ConvertOpenAIToAnthropic(body)
 		if err != nil {
 			return nil, fmt.Errorf("anthropic stream conversion: %w", err)
 		}
@@ -1996,7 +2013,7 @@ func (s *LLMProxyService) tryChannelStream(
 	req.Header.Del("Accept-Encoding")
 	if isAnthropic {
 		req.Header.Set("x-api-key", ch.Config.APIKey)
-		req.Header.Set("anthropic-version", anthropicVersion)
+		req.Header.Set("anthropic-version", converter.AnthropicVersion)
 		req.Header.Del("Authorization")
 	} else {
 		req.Header.Set("Authorization", "Bearer "+ch.Config.APIKey)
@@ -2014,6 +2031,8 @@ func (s *LLMProxyService) tryChannelStream(
 	}
 
 	startedAt := time.Now()
+	// Track half-open inflight requests for circuit breaker concurrency control
+	ch.Health.TrackHalfOpenRequest()
 	resp, err := noTimeoutClient.Do(req)
 	if err != nil {
 		return nil, fmt.Errorf("upstream stream request: %w", err)
@@ -2025,7 +2044,7 @@ func (s *LLMProxyService) tryChannelStream(
 
 		// Convert Anthropic error response
 		if isAnthropic {
-			converted, convErr := ConvertAnthropicErrorToOpenAI(respBytes)
+			converted, convErr := converter.ConvertAnthropicErrorToOpenAI(respBytes)
 			if convErr == nil {
 				respBytes = converted
 			}
@@ -2042,6 +2061,9 @@ func (s *LLMProxyService) tryChannelStream(
 	}
 
 	ch.Health.RecordSuccess()
+	if s.rateLimitLearner != nil && ch.Config.ID != 0 {
+		s.rateLimitLearner.RecordSuccess(ch.Config.ID, extractModelFromBody(body), false)
+	}
 	tracker := newStreamUsageTracker(resp.Body)
 
 	return &StreamResult{
@@ -2208,7 +2230,7 @@ func (s *LLMProxyService) DeleteConversation(convID string) error {
 // --- Rate Limits ---
 
 // GetRateLimits returns the adaptive rate-limit learning state for all channel×model pairs.
-func (s *LLMProxyService) GetRateLimits() ([]model.LLMModelRateLimit, error) {
+func (s *LLMProxyService) GetRateLimits() ([]*model.LLMModelRateLimit, error) {
 	if s.rateLimitLearner == nil || s.rateLimitLearner.repo == nil {
 		return nil, nil
 	}

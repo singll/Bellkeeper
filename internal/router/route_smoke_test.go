@@ -14,7 +14,7 @@ func TestLLMRouteRegistration(t *testing.T) {
 	gin.SetMode(gin.TestMode)
 	r := gin.New()
 	api := r.Group("/api")
-	h := handler.NewLLMProxyHandler(nil, nil, nil, nil, nil)
+	h := handler.NewLLMProxyHandler(nil, nil)
 
 	// Panics here on a route conflict (caught a real :id/:channel_id clash once).
 	registerLLMProxyRoutes(r, api, h, nil, "")

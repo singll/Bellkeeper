@@ -1,11 +1,11 @@
-package service
+package llmgateway
 
 import (
 	"crypto/sha256"
 	"encoding/hex"
 )
 
-func llmJobIdempotencyKey(parts ...string) string {
+func LLMJobIdempotencyKey(parts ...string) string {
 	h := sha256.New()
 	for _, part := range parts {
 		_, _ = h.Write([]byte(part))

@@ -1,9 +1,14 @@
 package handler
 
 import (
+	"encoding/json"
+	"net/http"
+
 	"github.com/gin-gonic/gin"
+	"github.com/singll/bellkeeper/internal/middleware"
 	"github.com/singll/bellkeeper/internal/pkg/response"
 	"github.com/singll/bellkeeper/internal/service"
+	"go.uber.org/zap"
 )
 
 // KnowledgeHandler 知识库 handler
@@ -58,6 +63,42 @@ func (h *KnowledgeHandler) Ask(c *gin.Context) {
 	}
 
 	response.Success(c, result)
+}
+
+// AskStream SSE 流式问答（1.0 §4 [fe] 知识问答 SSE 流式）。
+// 客户端用 EventSource 消费，事件类型：references / delta / done / error。
+func (h *KnowledgeHandler) AskStream(c *gin.Context) {
+	var req service.AskRequest
+	if err := c.ShouldBindJSON(&req); err != nil {
+		response.BadRequest(c, "invalid request: "+err.Error())
+		return
+	}
+
+	c.Header("Content-Type", "text/event-stream")
+	c.Header("Cache-Control", "no-cache")
+	c.Header("Connection", "keep-alive")
+	c.Header("X-Accel-Buffering", "no") // Nginx 透传，禁缓冲
+
+	flusher, ok := c.Writer.(http.Flusher)
+	if !ok {
+		response.InternalError(c, "streaming not supported")
+		return
+	}
+
+	ctx := c.Request.Context()
+	ch := h.askService.AskStream(ctx, req)
+	for chunk := range ch {
+		data, err := json.Marshal(chunk.Data)
+		if err != nil {
+			middleware.GetLogger().Error("knowledge handler: marshal SSE data failed",
+				zap.String("event", chunk.Type),
+				zap.Error(err))
+			continue
+		}
+		c.Writer.Write([]byte("event: " + chunk.Type + "\n"))
+		c.Writer.Write([]byte("data: " + string(data) + "\n\n"))
+		flusher.Flush()
+	}
 }
 
 // Stats 获取索引统计

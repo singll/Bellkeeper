@@ -1,4 +1,4 @@
-package service
+package llmgateway
 
 import (
 	"net/http"
@@ -6,7 +6,7 @@ import (
 	"time"
 
 	"github.com/singll/bellkeeper/internal/config"
-	llmerrors "github.com/singll/bellkeeper/internal/llm/errors"
+	llmerrors "github.com/singll/bellkeeper/internal/llmgateway/errors"
 	"github.com/singll/bellkeeper/internal/model"
 	"github.com/stretchr/testify/assert"
 )

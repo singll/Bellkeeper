@@ -2,7 +2,6 @@ package handler
 
 import (
 	"github.com/singll/bellkeeper/internal/pkg/defaults"
-	"github.com/singll/bellkeeper/internal/repository"
 	"github.com/singll/bellkeeper/internal/service"
 )
 
@@ -43,7 +42,7 @@ type Handlers struct {
 }
 
 // NewHandlers creates all handler instances
-func NewHandlers(services *service.Services, repos *repository.Repositories, shutdownChan chan struct{}, apiKey, memosBaseURL, memosAPIToken string) *Handlers {
+func NewHandlers(services *service.Services, shutdownChan chan struct{}, apiKey, memosBaseURL, memosAPIToken string) *Handlers {
 	h := &Handlers{
 		Tag:           NewTagHandler(services.Tag),
 		RSS:           NewRSSHandler(services.RSS, services.RSSFetcher),
@@ -52,7 +51,7 @@ func NewHandlers(services *service.Services, repos *repository.Repositories, shu
 		Health:        NewHealthHandler(services.Health),
 		Workflow:      NewWorkflowHandler(services.Workflow),
 		System:        NewSystemHandler(shutdownChan),
-		LLMProxy:      NewLLMProxyHandler(services.LLMProxy, service.NewPricer(repos.LLMModelPricing), repos.LLMToken, repos.LLMTokenUsage, repos.LLMModelPricing),
+		LLMProxy:      NewLLMProxyHandler(services.LLMProxy, services.LLMAdmin),
 		Classify:      NewClassifyHandler(services.Classify),
 		ActivityLog:   NewActivityLogHandler(services.ActivityLog),
 		LogCenter:     NewLogCenterHandler(services.LogCenter, apiKey),
@@ -80,9 +79,7 @@ func NewHandlers(services *service.Services, repos *repository.Repositories, shu
 
 	// Set extraction rule handler (if available)
 	if services.RuleOptimizer != nil {
-		h.ExtractionRule = NewExtractionRuleHandler(services.RuleOptimizer, repos.CrawlExtractionRule)
-	} else if repos.CrawlExtractionRule != nil {
-		h.ExtractionRule = NewExtractionRuleHandler(nil, repos.CrawlExtractionRule)
+		h.ExtractionRule = NewExtractionRuleHandler(services.RuleOptimizer)
 	}
 
 	// Set optional handlers

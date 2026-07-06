@@ -1,4 +1,4 @@
-package service
+package llmgateway
 
 import (
 	"encoding/json"
@@ -165,12 +165,3 @@ func (r *TaskRouter) SetCodingStrategy(strategy string) {
 	middleware.GetLogger().Info("coding routing strategy updated", zap.String("strategy", strategy))
 }
 
-// IsTaskRoutable returns true if the task type should bypass normal model-group routing.
-func IsTaskRoutable(tt TaskType) bool {
-	switch tt {
-	case TaskCoding, TaskClassify, TaskSummary, TaskQA, TaskLongContext, TaskRuleGeneration:
-		return true
-	default:
-		return false
-	}
-}

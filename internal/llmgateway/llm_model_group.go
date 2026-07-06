@@ -1,4 +1,4 @@
-package service
+package llmgateway
 
 import (
 	"encoding/json"
@@ -282,8 +282,8 @@ func (g *ModelGroup) eligibleMembers(taskType TaskType, exclude map[string]bool)
 // selectByStrategy applies the group's base load-balancing strategy.
 func (g *ModelGroup) selectByStrategy(candidates []*ModelGroupMemberRuntime, balances map[string]float64) *ModelGroupMemberRuntime {
 	switch g.Config.Strategy {
-	case "round-robin":
-		return weightedSelect(candidates)
+	case "best-weight":
+		return bestWeightSelect(candidates)
 	case "least_latency":
 		return leastLatencySelect(candidates)
 	case "balance_aware":
@@ -400,8 +400,10 @@ func priorityHealthSelect(candidates []*ModelGroupMemberRuntime) *ModelGroupMemb
 	return items[0].member
 }
 
-// weightedSelect does a simple weighted random selection among candidates.
-func weightedSelect(candidates []*ModelGroupMemberRuntime) *ModelGroupMemberRuntime {
+// bestWeightSelect picks the candidate with the highest weight.
+// Named best-weight to distinguish from round-robin (the actual behavior is
+// deterministic highest-weight selection, not round-robin rotation).
+func bestWeightSelect(candidates []*ModelGroupMemberRuntime) *ModelGroupMemberRuntime {
 	if len(candidates) == 0 {
 		return nil
 	}
