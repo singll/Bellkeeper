@@ -2,6 +2,13 @@
 
 This file records intentional deviations from the default layering rule:
 
+> **状态标注（1.0 重构）**：M2 已完成 LLM 代理池包重组 + 进程内直调 + 分层例外
+> 消化。原两条 LLM 例外（①token 鉴权 ②管理 handler 持 repo）**已清零**：
+> ① `router.Setup` 改传 `auth.LLMTokenStore` 接口，生产路径注入 `*llmgateway.LLMAdminService`；
+> ② `LLMProxyHandler` 只依赖 `*LLMProxyService` + `*LLMAdminService`，token/pricing
+> 管理 CRUD 下沉 `LLMAdminService`（`internal/llmgateway/admin.go`）。下方保留
+> 历史记录以示退出计划已执行。
+
 `Router -> Handler -> Service -> Repository -> Model`
 
 The default remains strict: handlers should call services, services should call
@@ -9,6 +16,10 @@ repositories, and repositories should own persistence details. Exceptions must b
 small, named, and have an exit plan.
 
 ## LLM Proxy Token Authentication
+
+> **状态：✅ 已清零**（1.0 重构消化）。`router.Setup` 与 `registerLLMProxyRoutes`
+> 形参改为 `auth.LLMTokenStore` 接口，`app.go` 注入 `*llmgateway.LLMAdminService`
+> （实现该接口）。中间件不再依赖具体 repository，退出计划落地。
 
 - Scope: `internal/router/router.go` passes `LLMTokenRepository` to `auth.LLMTokenAuth`.
 - Reason: `/api/llm/v1/*` intentionally bypasses the normal `/api` middleware so
@@ -21,6 +32,11 @@ small, named, and have an exit plan.
   and have middleware depend on that interface instead of repository methods.
 
 ## LLM Proxy Management Handler
+
+> **状态：✅ 已清零**（1.0 重构消化）。`LLMProxyHandler` 只依赖
+> `*llmgateway.LLMProxyService` + `*llmgateway.LLMAdminService`。token/pricing/usage
+> 管理 CRUD 与计费试算下沉 `LLMAdminService`（`internal/llmgateway/admin.go`），
+> handler 不再持有任何 repository。退出计划落地。
 
 - Scope: `internal/handler/handler.go` constructs `LLMProxyHandler` with token,
   usage, and pricing repositories for management endpoints.

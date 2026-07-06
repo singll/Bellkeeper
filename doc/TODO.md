@@ -14,7 +14,7 @@
 - [x] Tier 7: 重写 ADR-0003 记录被取代方案 + 全量 `go build`/`go vet`/`go test ./...`/`go test -race ./internal/repository ./internal/service` 全绿
 
 ### 待办
-- [ ] 部署验证：`spool bundle keeper service keeper bellkeeper up`
+- [ ] 部署验证：`spool bundle keeper service keeper bellkeeper up`（代码已推送至 git）
 - [ ] 部署后用 `POST /api/crawl/queue/cleanup` 分批清理 xz.aliyun.com 历史积压（注意 `MarkSkippedStalePending` 仍为一次性全量更新，超大批量需关注锁与耗时）
 - [ ] 运行时观测：取队域名分布是否均衡、冷却到期恢复、配额拒绝是否按预期触发
 
