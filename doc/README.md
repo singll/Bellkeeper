@@ -1,121 +1,66 @@
-# Bellkeeper 文档总览
+# Bellkeeper 1.0 文档总览
 
-> **Bellkeeper** 是 SilkSpool 的知识治理中台 + LLM 代理网关 + Matrix 控制平面。
-> 本目录被 `.gitignore` 忽略,仅本地维护。**进度状态的单一事实源是 [STATUS.md](STATUS.md),演进规划是 [ROADMAP.md](ROADMAP.md)**;已完成计划的原始文档归档在 [archive/](archive/),不要在归档文档上继续追加内容。
-
----
-
-## 目录结构与维护规则
-
-```
-doc/
-├── README.md                    # 本文件:导航
-├── STATUS.md                    # 现状(模块成熟度 + 最近动作)← 完成事项回写这里
-├── ROADMAP.md                   # 演进规划(活跃待办)← 新任务加这里
-├── ARCHITECTURE.md              # 架构事实(模块/分层/数据模型/链路)
-├── ARCHITECTURE-EXCEPTIONS.md   # 分层例外登记
-├── API.md                       # REST API 端点参考
-├── LLM_PROXY_GUIDE.md           # LLM Proxy 使用与配置指南
-├── DEVELOPMENT-GUIDE.md         # 编码规范(权威,较长)
-├── ASSISTANT-GUIDELINES.md      # AI 助手开发守则
-├── PKB-IMPLEMENTATION.md        # PKB MVP 实施文档(活跃)
-├── PKB-ATOMIC-KNOWLEDGE-PLAN.md # PKB 原子知识网改进计划(实施中 ⭐)
-├── LLM-PROMPT-AGENT-REVIEW.md   # LLM/PKB 提示词体系审查(2026-06-10)
-├── archive/                     # 已完成计划与历史评估(只读)
-└── architecture/ documents/ matrix/ modules/ rss/   # 模块级文档
-```
-
-**文档生命周期**:计划类文档(`*-PLAN` / `*-REVIEW` / 实施蓝图)完成后移入 `archive/`,残留待办转入 ROADMAP,完成事实回写 STATUS;事实类文档(ARCHITECTURE / API / GUIDE)随大改动同步更新,不留过时描述。
+> **Bellkeeper** 是 SilkSpool 的知识治理中台 + LLM 代理网关 + Matrix 控制平面 + 事件驱动平台。
+> **权威事件源**：[BELLKEEPER-1.0-REVAMP-PLAN.md](BELLKEEPER-1.0-REVAMP-PLAN.md) —— 1.0 重构终极统一收口（Single Source of Truth）。
+> **实施状态**：[STATUS.md](STATUS.md)；**演进规划**：[ROADMAP.md](ROADMAP.md)。
+> 已完成计划的原始文档归档在 [archive/](archive/)，仅只读，禁止追加。
 
 ---
 
-## 快速导航
+## 1.0 文档体系
 
-### 开发必读
-
-| 文档 | 用途 |
-|------|------|
-| [DEVELOPMENT-GUIDE.md](DEVELOPMENT-GUIDE.md) | **编码规范** — 架构说明、编码标准、禁止事项 |
-| [ASSISTANT-GUIDELINES.md](ASSISTANT-GUIDELINES.md) | **AI 助手行为标准** — 「完成」的定义、防死代码/假测试 |
-| [ARCHITECTURE-EXCEPTIONS.md](ARCHITECTURE-EXCEPTIONS.md) | 分层例外登记(新增例外必须登记) |
-
-### 参考文档
-
-| 文档 | 用途 |
-|------|------|
-| [ARCHITECTURE.md](ARCHITECTURE.md) | 系统定位、模块职责、数据模型、关键链路(2026-06-10 更新) |
-| [API.md](API.md) | REST API 端点参考(基于 router.go,2026-06-10 更新) |
-| [LLM_PROXY_GUIDE.md](LLM_PROXY_GUIDE.md) | LLM Proxy:DB 动态配置、Token、模型组、任务路由、计费(2026-06-10 重写) |
-
-### 演进规划
-
-| 文档 | 用途 |
-|------|------|
-| [ROADMAP.md](ROADMAP.md) | 活跃待办与优先级(2026-06-10 重新规划) |
-| [STATUS.md](STATUS.md) | 实施状态与最新动作 |
-
-### 知识库(PKB)
-
-| 文档 | 状态 | 用途 |
+| 文档 | 层级 | 用途 |
 |------|------|------|
-| [PKB-IMPLEMENTATION.md](PKB-IMPLEMENTATION.md) | MVP 已落地 | 三层漏斗 + pkb-curate CLI + 提示词外置的实施文档;运行残留项见 ROADMAP |
-| [PKB-ATOMIC-KNOWLEDGE-PLAN.md](PKB-ATOMIC-KNOWLEDGE-PLAN.md) | ⭐ 实施中 | 下一代「原子知识网」:原子卡 + 语义去重 + 分层 MOC + 网可观测(Tier 1–6 / Phase A–E) |
-| [LLM-PROMPT-AGENT-REVIEW.md](LLM-PROMPT-AGENT-REVIEW.md) | 审查结论 | LLM Proxy 与 PKB 的 agent/提示词架构分析与优化建议(P0 修复项已转 ROADMAP) |
+| [BELLKEEPER-1.0-REVAMP-PLAN.md](BELLKEEPER-1.0-REVAMP-PLAN.md) | 🏠 规划 | 1.0 重构终极统一收口（M1-M5 方案 + §4 待办 + 里程碑） |
+| [ARCHITECTURE.md](ARCHITECTURE.md) | 📐 架构 | 系统定位、模块职责、数据模型、关键链路（1.0 终态） |
+| [LLM-GATEWAY-API.md](LLM-GATEWAY-API.md) | 📡 API | LLM 代理池对外 OpenAI 兼容 API 契约（进程内直调 + HTTP 兼容） |
+| [API.md](API.md) | 📡 API | REST API 端点参考（后端 /api/* 路由 + Matrix Admin API） |
+| [STATUS.md](STATUS.md) | 📊 状态 | 模块成熟度评分 + 里程碑状态回写 |
+| [ROADMAP.md](ROADMAP.md) | 🗺️ 规划 | 演进待办（镜像 BELLKEEPER-1.0-REVAMP-PLAN §4） |
+
+### 编码规范
+
+| 文档 | 用途 |
+|------|------|
+| [DEVELOPMENT-GUIDE.md](DEVELOPMENT-GUIDE.md) | 编码规范、分层职责、禁止事项、验收标准 |
+| [ASSISTANT-GUIDELINES.md](ASSISTANT-GUIDELINES.md) | AI 助手守则（「完成」定义、防死代码/假测试） |
+| [ARCHITECTURE-EXCEPTIONS.md](ARCHITECTURE-EXCEPTIONS.md) | 分层例外登记（LLM 两条已清零 ✅） |
+
+### 审查与里程碑
+
+| 文档 | 用途 |
+|------|------|
+| [MILESTONES-1.0.md](MILESTONES-1.0.md) | M1-M5 里程碑详细实施记录 |
+| [CODE-REVIEW-1.0-FINAL.md](CODE-REVIEW-1.0-FINAL.md) | 1.0 GA 终审报告 |
 
 ---
 
-## 功能模块状态
+## 维护规则（强制）
 
-| 模块 | 状态 | 文档入口 |
-|------|------|---------|
-| **LLM 代理池** | ✅ 开发完成(运行时验收待做) | [LLM_PROXY_GUIDE.md](LLM_PROXY_GUIDE.md) |
-| **个人知识库 PKB** | ✅ MVP(原子知识网升级中) | [PKB-IMPLEMENTATION.md](PKB-IMPLEMENTATION.md) |
-| **文件入库 + 知识检索** | ✅ 稳定 | [documents/](documents/) |
-| **爬取队列 CrawlQueue** | ✅ 稳定(06-09 智能化增强) | [rss/EXTRACTION-PIPELINE.md](rss/EXTRACTION-PIPELINE.md) |
-| **RSS 与提取** | ✅ 稳定 | [rss/](rss/) |
-| **Matrix 控制平面** | ✅ 稳定 | [matrix/](matrix/) |
-| **标签 + 分类路由** | ✅ 稳定(06-09 管线增强) | — |
-| **日志中心 LogCenter** | 🚧 进行中 | — |
-| **RAGFlow 兼容层** | ⚠️ 待清理(~8 文件) | ROADMAP §RAGFlow |
+1. **唯一事实源**：架构看 `ARCHITECTURE.md`，API 看 `API.md`+`LLM-GATEWAY-API.md`，待办看 `BELLKEEPER-1.0-REVAMP-PLAN.md` §4，状态看 `STATUS.md`。
+2. **新任务**一律加到 `BELLKEEPER-1.0-REVAMP-PLAN.md` §4，不另开新 PLAN 文档。
+3. **完成一项**：§4 打勾 → STATUS.md 回写 → 大架构变化同步 ARCHITECTURE.md。
+4. **禁止在归档文档上追加内容**。
+5. **配置即数据**：`rss-sources.json`/`domains.yaml`/`prompts/` 归 `config/`，不进 `doc/`。
 
 ---
 
-## 模块文档索引
-
-### 文件入库与检索(documents/)
-- [documents/README.md](documents/README.md) — 模块总览
-- [documents/FILE-INGESTION.md](documents/FILE-INGESTION.md) — 入库流程与提取器编排
-- [documents/FILE-INDEXING.md](documents/FILE-INDEXING.md) — Meilisearch 索引模型
-- [documents/SEARCH-AND-QA.md](documents/SEARCH-AND-QA.md) — 搜索与问答 API
-- [documents/NFS-SETUP.md](documents/NFS-SETUP.md) — TrueNAS NFS 挂载
-
-### Matrix 控制平面(matrix/)
-- [matrix/README.md](matrix/README.md) — 平台总览(架构/数据模型/API 契约/命令模型等子文档见目录)
-- [matrix/notifications/](matrix/notifications/) — 通知平面
-
-### RSS 与提取(rss/)
-- [rss/README.md](rss/README.md) — RSS 模块总览
-- [rss/EXTRACTION-PIPELINE.md](rss/EXTRACTION-PIPELINE.md) — 提取链路设计
-
-### 架构与基础设施(architecture/)
-- [architecture/overview.md](architecture/overview.md) — 系统架构总览
-- [architecture/infrastructure.md](architecture/infrastructure.md) — 主机清单、网络拓扑
-- [architecture/offline-fallback.md](architecture/offline-fallback.md) — VPN 应急策略
-- [architecture/istoreos-headscale-subnet-route-baseline.md](architecture/istoreos-headscale-subnet-route-baseline.md) — 子网路由基线
-
-### 周边模块(modules/)
-- [modules/automation/](modules/automation/README.md) n8n 编排 · [modules/knowledge/](modules/knowledge/README.md) 知识工作层 · [modules/matrix/](modules/matrix/README.md) Matrix · [modules/notes/](modules/notes/README.md) Obsidian 笔记系统 · [modules/rss/](modules/rss/README.md) RSS 采集 · [modules/storage/](modules/storage/README.md) TrueNAS 存储
-
-### 数据资产
-- [rss-sources.json](rss-sources.json) — RSS 源种子文件
-
----
-
-## 归档(archive/,只读)
+## 归档（archive/，只读）
 
 | 文档 | 归档原因 |
 |------|---------|
-| [ARCHITECTURE-REVIEW-2026-06-08.md](archive/ARCHITECTURE-REVIEW-2026-06-08.md) | 架构审查报告;P0/P1 整改已于 06-09 落地,残留项转 ROADMAP |
-| [LLM-UI-REDESIGN.md](archive/LLM-UI-REDESIGN.md) | LLM 前端 10→5 页收敛 + 统一凭证模型,06-07 落地 |
-| [CRAWL-TAGGING-RSSHUB-OPTIMIZATION-PLAN-2026-06-09.md](archive/CRAWL-TAGGING-RSSHUB-OPTIMIZATION-PLAN-2026-06-09.md) | 爬取/标签/RSSHub 优化 P0–P4 代码侧 06-09 全部落地;运营验收转 ROADMAP |
-| [MEMOS-TODOTXT-FUSION.md](archive/MEMOS-TODOTXT-FUSION.md) / [SLEEK-VS-MEMOS.md](archive/SLEEK-VS-MEMOS.md) | 历史工具评估快照 |
+| PKB-IMPLEMENTATION.md | MVP 已落地，残留项转 1.0 规划 §4 |
+| PKB-ATOMIC-KNOWLEDGE-PLAN.md | Phase A-D 已完成 |
+| PKB-KNOWLEDGE-SKELETON-PLAN.md | Phase F-H 已完成 |
+| KNOWLEDGE-MODULE-REVAMP-PLAN.md | 阶段 1-2 已完成 |
+| LLM-PROMPT-AGENT-REVIEW.md | P0 已修 |
+| LLM_PROXY_GUIDE.md | 被 LLM-GATEWAY-API.md 取代 |
+| matrix-platform-overhaul-plan.md | T1-T8 已完成 |
+| notification-monitoring-overhaul-plan.md | 已落地 |
+| reliability-audit-plan.md | Tier 2-3 已完成 |
+| daily-report-fix-plan.md | 已落地 |
+| matrix/ 全部 | 合并进 ARCHITECTURE.md Matrix 章节 |
+| modules/ 全部 | 模块总览，合并进 ARCHITECTURE.md |
+| rss/ + documents/ | 合并进 ARCHITECTURE.md 知识库章节 |
+| architecture/ | 基础设施类，合并进 ARCHITECTURE.md |
+| 以上所有 + 历史评估 | 详见 [archive/](archive/) 目录 |

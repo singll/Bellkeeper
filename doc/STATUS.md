@@ -67,10 +67,11 @@
 | **M1 解耦地基** | ✅ 完成 | eventbus 一级共享基础设施 + Event 契约 + 删僵尸 commands stream + 通知链路迁移 + agent 死代码清理 |
 | **M2 LLM 独立化** | ✅ 完成 | llmgateway 包重组（converter/errors/balance + 13 个 llm_*.go）+ Gateway 进程内直调（Chat/Rerank）+ 6 处调用方迁移 + 分层例外清零（TokenScopeService+LLMAdminService）+ LLM-GATEWAY-API.md |
 | **M3 KB 链路事件化** | ✅ 完成 | crawl/extract/index 三 worker 事件链 + llm.job.submit 事件化 + 域名健康度（HealthScore/Pause）+ 提示词外置统一（config/prompts+ResponseFormat+system/user 分离+自修复重试）+ 问答 rerank + golden set 评估 |
-| **M4 日志补齐** | ✅ 代码完成 | pattern 告警 + CleanOldEntries 调度 + trace_id 全链路 + goroutine 护栏；🔶 Loki+Promtail 部署待运维（spool bundle） |
+| **M4 日志补齐** | ✅ 完成 | pattern 告警 + CleanOldEntries 调度 + trace_id 全链路 + goroutine 护栏 |
 | **M5 前端收敛** | ✅ 完成 | Matrix 7→2 页（Dashboard+Console）+ 爬取队列可视化页 + 知识问答 SSE 流式 |
+| **1.0 GA** | ✅ **发布** | M1-M5 全部完成；go build/vet + pnpm build 全绿；分层例外 LLM 两条清零；文档体系规整收口 |
 | **M6 可观测性** | 🔶 待运维 | Grafana + cAdvisor 部署（spool bundle 运维项） |
-| **1.0 GA** | 🔶 收口中 | M1-M5 代码完成；M4-5 Loki + M6 Grafana 为运维部署项；待 ARCHITECTURE/EXCEPTIONS 最终核对 + 全量回归 |
+| **Loki+Promtail** | 🔶 待运维 | 外挂日志采集部署（spool bundle 运维项） |
 
 ---
 
