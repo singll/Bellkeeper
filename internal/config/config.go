@@ -187,6 +187,11 @@ type FirecrawlConfig struct {
 	APIURL       string `mapstructure:"api_url"`
 	Timeout      int    `mapstructure:"timeout"`
 	FallbackOnly bool   `mapstructure:"fallback_only"`
+	// SupportsActions 标记该 Firecrawl 实例是否支持 scrape actions（点击/滚动等脚本化交互）。
+	// 自托管开源版不含 Fire Engine，任何 actions 都会被拒为 HTTP 400 SCRAPE_ACTIONS_NOT_SUPPORTED，
+	// 故默认 false：抓取器不下发 actions，规则优化器也不再持久化 LLM 幻觉出的 actions。
+	// 仅当接入 Firecrawl 云端 / Fire Engine 时才置 true。
+	SupportsActions bool `mapstructure:"supports_actions"`
 }
 
 type MatrixConfig struct {
@@ -529,6 +534,7 @@ func setDefaults(v *viper.Viper) {
 	v.SetDefault("file_ingestion.firecrawl.api_url", "")
 	v.SetDefault("file_ingestion.firecrawl.timeout", 60)
 	v.SetDefault("file_ingestion.firecrawl.fallback_only", true)
+	v.SetDefault("file_ingestion.firecrawl.supports_actions", false)
 
 	// Matrix
 	v.SetDefault("matrix.homeserver_url", "https://matrix.singll.net")

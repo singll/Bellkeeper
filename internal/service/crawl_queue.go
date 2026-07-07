@@ -742,6 +742,10 @@ func nextAllowedForDomainOutcome(profile *model.CrawlDomainProfile, status, errT
 	case "rate_limited", "forbidden":
 		next := now.Add(maxDuration(5*time.Minute, 2*delay))
 		return &next
+	case "extractor_unavailable":
+		// 我方 firecrawl 故障，非域名问题：短冷却快速重试，不惩罚目标域名。
+		next := now.Add(30 * time.Second)
+		return &next
 	case "timeout", "network", "server_error", "empty_content", "empty_content_repeated":
 		next := now.Add(maxDuration(time.Minute, 2*delay))
 		return &next
@@ -891,7 +895,8 @@ func (s *CrawlQueueService) GetBlockedJobs() ([]model.CrawlJob, error) {
 //   - empty_content  单页内容过短（多为 JS 渲染，规则优化器会调 firecrawl waitFor）
 //   - paywall        单页付费墙
 //   - client_error   多为 firecrawl 对该页的 400（如 SCRAPE_ACTIONS 不支持），抓取器行为
-//   - unknown        含 firecrawl 服务自身连接失败（我方基础设施），与目标域名无关
+//   - extractor_unavailable  我方 firecrawl 服务传输层故障（连不上/请求未发出），我方基础设施
+//   - unknown        其余无法归类者
 //
 // 线上实测（2026-07）：被误暂停的 123 个域名 100% 由上述非域名级失败驱动，
 // 无一条真正的 network/server_error/forbidden/rate_limited。详见修复记录。
@@ -900,7 +905,8 @@ func domainLevelFailure(errType string) bool {
 	case "network", "server_error", "forbidden", "rate_limited", "timeout":
 		return true
 	default:
-		// not_found / empty_content / paywall / client_error / unknown → 非域名级
+		// not_found / empty_content / paywall / client_error / extractor_unavailable /
+		// unknown → 非域名级
 		return false
 	}
 }
@@ -914,6 +920,11 @@ func classifyCrawlError(err error) (string, string) {
 	lower := strings.ToLower(msg)
 
 	switch {
+	// 我方抓取器（firecrawl 服务）传输层失败，与目标域名无关：连接不上、
+	// 请求未发出（Go 重试未 rewind body 的 "ContentLength=N with Body length 0"）等。
+	// 单列 extractor_unavailable，避免污染域名健康度与失败统计（线上实测归到 unknown 172 条）。
+	case strings.Contains(lower, "http request failed"):
+		return "extractor_unavailable", msg
 	case strings.Contains(lower, "timeout") || strings.Contains(lower, "deadline exceeded"):
 		return "timeout", msg
 	case strings.Contains(lower, "429"):

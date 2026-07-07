@@ -1,11 +1,16 @@
 package httpclient
 
 import (
+	"bytes"
+	"io"
 	"net/http"
+	"net/http/httptest"
+	"sync"
 	"testing"
 	"time"
 
 	"github.com/stretchr/testify/assert"
+	"github.com/stretchr/testify/require"
 )
 
 func TestDefaultConfig(t *testing.T) {
@@ -147,4 +152,90 @@ func TestClassifyError(t *testing.T) {
 			assert.Equal(t, tt.expected, result)
 		})
 	}
+}
+
+// TestDoWithRetry_RewindsBodyOnRetry 坐实修复：可重试响应（503）后再次发送时，
+// 请求体必须被 rewind，服务端在重试中应收到完整 body，而不是空 body（这正是线上
+// "ContentLength=N with Body length 0" → unknown 失败的根因）。
+func TestDoWithRetry_RewindsBodyOnRetry(t *testing.T) {
+	const payload = `{"url":"http://example.com/v1/scrape"}`
+
+	var mu sync.Mutex
+	var receivedBodies []string
+	var attempts int
+
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		body, _ := io.ReadAll(r.Body)
+		mu.Lock()
+		attempts++
+		n := attempts
+		receivedBodies = append(receivedBodies, string(body))
+		mu.Unlock()
+
+		if n == 1 {
+			// 首次返回可重试的 503，迫使客户端重试。
+			w.WriteHeader(http.StatusServiceUnavailable)
+			return
+		}
+		w.WriteHeader(http.StatusOK)
+		_, _ = w.Write([]byte(`ok`))
+	}))
+	defer srv.Close()
+
+	client := NewClient(&Config{
+		Timeout:              5 * time.Second,
+		ConnectTimeout:       2 * time.Second,
+		MaxRetries:           2,
+		RetryDelay:           1 * time.Millisecond,
+		RetryableStatusCodes: []int{http.StatusServiceUnavailable},
+		Logger:               &defaultLogger{},
+	})
+
+	req, err := http.NewRequest(http.MethodPost, srv.URL, bytes.NewReader([]byte(payload)))
+	require.NoError(t, err)
+	req.Header.Set("Content-Type", "application/json")
+
+	resp, err := client.Do(req)
+	require.NoError(t, err)
+	defer resp.Body.Close() //nolint:errcheck
+
+	mu.Lock()
+	defer mu.Unlock()
+	// 关键断言：发生了重试，且两次请求 body 都是完整 payload（第二次没有被耗空）。
+	require.GreaterOrEqual(t, attempts, 2, "expected the request to be retried")
+	assert.Equal(t, http.StatusOK, resp.StatusCode)
+	for i, got := range receivedBodies {
+		assert.Equal(t, payload, got, "attempt %d received truncated/empty body", i+1)
+	}
+}
+
+// TestDoWithRetry_NonRewindableBodyNotRetried 断言不可 rewind 的 body（GetBody==nil）
+// 不会被盲目重发成空 body —— 首个响应原样返回，不再触发注定失败的空体重试。
+func TestDoWithRetry_NonRewindableBodyNotRetried(t *testing.T) {
+	var attempts int
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		attempts++
+		w.WriteHeader(http.StatusServiceUnavailable)
+	}))
+	defer srv.Close()
+
+	client := NewClient(&Config{
+		Timeout:              5 * time.Second,
+		MaxRetries:           2,
+		RetryDelay:           1 * time.Millisecond,
+		RetryableStatusCodes: []int{http.StatusServiceUnavailable},
+		Logger:               &defaultLogger{},
+	})
+
+	// 用 io.NopCloser 包裹，使 http.NewRequest 无法自动填充 GetBody（body 不可重放）。
+	req, err := http.NewRequest(http.MethodPost, srv.URL, io.NopCloser(bytes.NewReader([]byte(`{}`))))
+	require.NoError(t, err)
+	require.Nil(t, req.GetBody, "precondition: GetBody must be nil for this case")
+
+	resp, err := client.Do(req)
+	require.NoError(t, err)
+	defer resp.Body.Close() //nolint:errcheck
+
+	assert.Equal(t, http.StatusServiceUnavailable, resp.StatusCode)
+	assert.Equal(t, 1, attempts, "non-rewindable body must not be re-sent as an empty body")
 }

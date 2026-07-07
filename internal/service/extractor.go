@@ -98,6 +98,12 @@ func NewExtractorService(cfg config.FileIngestionConfig, activityLog *ActivityLo
 	}
 }
 
+// FirecrawlSupportsActions 报告当前 Firecrawl 实例是否支持 scrape actions。
+// 供规则优化器在持久化 LLM 产出的 overrides 前净化不受支持的 actions。
+func (s *ExtractorService) FirecrawlSupportsActions() bool {
+	return s.cfg.Firecrawl.SupportsActions
+}
+
 // Extract extracts content from a URL using the configured extractors
 func (s *ExtractorService) Extract(req *ExtractionRequest) (*ExtractionResult, error) {
 	// Try Trafilatura first if enabled
@@ -215,8 +221,17 @@ func (s *ExtractorService) extractWithFirecrawl(req *ExtractionRequest) (*Extrac
 		if req.Overrides.FirecrawlWaitFor > 0 {
 			fcReq.WaitFor = req.Overrides.FirecrawlWaitFor
 		}
+		// actions 仅在 Firecrawl 实例确实支持时才下发。自托管开源版无 Fire Engine，
+		// 下发 actions 必被拒为 HTTP 400 SCRAPE_ACTIONS_NOT_SUPPORTED（线上实测 client_error
+		// 失败大头）。此处显式降级：🔶 丢弃 actions 而非透传注定 400 的请求。
 		if len(req.Overrides.FirecrawlActions) > 0 {
-			fcReq.Actions = req.Overrides.FirecrawlActions
+			if s.cfg.Firecrawl.SupportsActions {
+				fcReq.Actions = req.Overrides.FirecrawlActions
+			} else {
+				s.logExtraction("firecrawl", req.URL, false,
+					fmt.Sprintf("🔶 dropped %d firecrawl actions: instance has no Fire Engine (supports_actions=false)",
+						len(req.Overrides.FirecrawlActions)))
+			}
 		}
 		if len(req.Overrides.Headers) > 0 {
 			fcReq.Headers = req.Overrides.Headers

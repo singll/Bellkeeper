@@ -219,6 +219,26 @@ func (c *Client) doWithRetry(req *http.Request) (*http.Response, error) {
 			c.config.Logger.Printf("retrying request (attempt %d/%d) after %v: %s %s",
 				attempt, c.config.MaxRetries, delay, req.Method, req.URL.String())
 			time.Sleep(delay)
+
+			// Rewind the request body before re-sending. The first Do() consumed the
+			// body reader to EOF; without rebuilding it the transport sees a non-zero
+			// ContentLength but a 0-byte body and fails with
+			// "ContentLength=N with Body length 0" (never actually retrying).
+			// http.NewRequest populates GetBody for in-memory bodies (bytes.Reader,
+			// bytes.Buffer, strings.Reader), so this covers our JSON POSTs.
+			if req.Body != nil {
+				if req.GetBody == nil {
+					// Non-rewindable body (e.g. a raw stream) — cannot safely retry.
+					c.config.Logger.Printf("cannot retry request with non-rewindable body: %s %s",
+						req.Method, req.URL.String())
+					return resp, err
+				}
+				body, rewindErr := req.GetBody()
+				if rewindErr != nil {
+					return resp, fmt.Errorf("rewind request body for retry: %w", rewindErr)
+				}
+				req.Body = body
+			}
 		}
 
 		resp, err = c.client.Do(req)
@@ -229,6 +249,12 @@ func (c *Client) doWithRetry(req *http.Request) (*http.Response, error) {
 				c.metrics.RetriedRequests++
 				c.metrics.TotalRetries++
 				c.metrics.mu.Unlock()
+			}
+			// Drain and close the retryable response body so the connection can be
+			// reused and the next attempt starts clean.
+			if resp.Body != nil {
+				_, _ = io.Copy(io.Discard, resp.Body)
+				resp.Body.Close() //nolint:errcheck
 			}
 			continue
 		}

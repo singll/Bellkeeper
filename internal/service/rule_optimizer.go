@@ -345,6 +345,14 @@ func (s *RuleOptimizerService) generateRequestOverrides(ctx context.Context, dom
 		FirecrawlWaitFor: output.FirecrawlWaitFor,
 		FirecrawlActions: output.FirecrawlActions,
 	}
+	// 净化：Firecrawl 实例不支持 actions 时，丢弃 LLM 幻觉出的 actions，避免把注定
+	// HTTP 400（SCRAPE_ACTIONS_NOT_SUPPORTED）的参数写进 domain profile 反复刷失败。
+	// 与 extractor 下发处形成纵深防御：既不下发，也不持久化。
+	if len(overrides.FirecrawlActions) > 0 && s.extractor != nil && !s.extractor.FirecrawlSupportsActions() {
+		log.Printf("[RuleOptimizer] dropping %d LLM-suggested firecrawl actions for %s (instance has no Fire Engine)",
+			len(overrides.FirecrawlActions), domain)
+		overrides.FirecrawlActions = nil
+	}
 	return overrides, output.Analysis, nil
 }
 

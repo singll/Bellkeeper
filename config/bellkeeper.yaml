@@ -215,6 +215,7 @@ file_ingestion:
     api_url: "${FIRECRAWL_API_URL}"
     timeout: 120       # 增加到 120s，API 提取更可靠但更慢
     fallback_only: false  # 显式关闭 fallback-only，保留备用
+    supports_actions: false  # 自托管 firecrawl 无 Fire Engine，actions 会被拒 400；保持 false
 
 matrix:
   homeserver_url: ${MATRIX_HOMESERVER_URL}
