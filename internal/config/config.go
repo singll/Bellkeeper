@@ -190,24 +190,24 @@ type FirecrawlConfig struct {
 }
 
 type MatrixConfig struct {
-	HomeserverURL  string        `mapstructure:"homeserver_url"`
-	BotUserID      string        `mapstructure:"bot_user_id"`
-	BotAccessToken string        `mapstructure:"bot_access_token"`
-	DeviceID       string        `mapstructure:"device_id"`
-	SyncTimeout    int           `mapstructure:"sync_timeout"`   // milliseconds
-	CommandPrefix  string        `mapstructure:"command_prefix"` // comma-separated prefixes
-	MaxRetry       int           `mapstructure:"max_retry"`
-	AdminUsers     []string      `mapstructure:"admin_users"` // list of admin user IDs
+	HomeserverURL  string            `mapstructure:"homeserver_url"`
+	BotUserID      string            `mapstructure:"bot_user_id"`
+	BotAccessToken string            `mapstructure:"bot_access_token"`
+	DeviceID       string            `mapstructure:"device_id"`
+	SyncTimeout    int               `mapstructure:"sync_timeout"`   // milliseconds
+	CommandPrefix  string            `mapstructure:"command_prefix"` // comma-separated prefixes
+	MaxRetry       int               `mapstructure:"max_retry"`
+	AdminUsers     []string          `mapstructure:"admin_users"` // list of admin user IDs
 	Agent          MatrixAgentConfig `mapstructure:"agent"`
 }
 
 type MatrixAgentConfig struct {
-	Enabled             bool   `mapstructure:"enabled"`
-	Model               string `mapstructure:"model"`
-	MaxTurnsPerHour     int    `mapstructure:"max_turns_per_hour"`
-	SessionTTL          string `mapstructure:"session_ttl"`
-	MaxToolIterations   int    `mapstructure:"max_tool_iterations"`
-	SystemPrompt        string `mapstructure:"system_prompt"`
+	Enabled           bool   `mapstructure:"enabled"`
+	Model             string `mapstructure:"model"`
+	MaxTurnsPerHour   int    `mapstructure:"max_turns_per_hour"`
+	SessionTTL        string `mapstructure:"session_ttl"`
+	MaxToolIterations int    `mapstructure:"max_tool_iterations"`
+	SystemPrompt      string `mapstructure:"system_prompt"`
 }
 
 type RedisConfig struct {
@@ -249,13 +249,13 @@ type MeilisearchConfig struct {
 
 // KnowledgeConfig 知识库索引配置
 type KnowledgeConfig struct {
-	Enabled        bool            `mapstructure:"enabled"`
-	BasePath       string          `mapstructure:"base_path"`
-	ScanDirs       []ScanDirConfig `mapstructure:"scan_dirs"`
-	ScanInterval   int             `mapstructure:"scan_interval"`
-	ChunkMinSize   int             `mapstructure:"chunk_min_size"`
-	ChunkMaxSize   int             `mapstructure:"chunk_max_size"`
-	MaxContextRunes int            `mapstructure:"max_context_runes"`
+	Enabled         bool            `mapstructure:"enabled"`
+	BasePath        string          `mapstructure:"base_path"`
+	ScanDirs        []ScanDirConfig `mapstructure:"scan_dirs"`
+	ScanInterval    int             `mapstructure:"scan_interval"`
+	ChunkMinSize    int             `mapstructure:"chunk_min_size"`
+	ChunkMaxSize    int             `mapstructure:"chunk_max_size"`
+	MaxContextRunes int             `mapstructure:"max_context_runes"`
 	// 总览「需要关注」阈值：领域待归位/低置信卡数达此值即标记需关注（≤0 关闭该项标记）。
 	OverviewWaitlistHigh int `mapstructure:"overview_waitlist_high"`
 	OverviewLowConfHigh  int `mapstructure:"overview_low_conf_high"`
@@ -273,33 +273,37 @@ type RSSFetcherConfig struct {
 
 // CrawlQueueConfig 爬取队列配置
 type CrawlQueueConfig struct {
-	Enabled                  bool     `mapstructure:"enabled"`
-	FirecrawlWorkers         int      `mapstructure:"firecrawl_workers"`
-	TrafilaturaWorkers       int      `mapstructure:"trafilatura_workers"`
-	AutoWorkers              int      `mapstructure:"auto_workers"`
-	PollInterval             int      `mapstructure:"poll_interval"` // 秒
-	MaxRetries               int      `mapstructure:"max_retries"`
-	RetryBackoffBase         int      `mapstructure:"retry_backoff_base"` // 秒
-	RetryBackoffMax          int      `mapstructure:"retry_backoff_max"`  // 秒
-	DeadLetterThreshold      int      `mapstructure:"dead_letter_threshold"`
-	PaywallThreshold         int      `mapstructure:"paywall_threshold"`         // 连续空内容次数
-	DomainPendingCap         int      `mapstructure:"domain_pending_cap"`        // 每域名 pending+retrying 上限，0=不限
-	StaleTimeoutMinutes      int      `mapstructure:"stale_timeout_minutes"`     // 运行超过此分钟数视为卡死
-	RecoveryIntervalMinutes  int      `mapstructure:"recovery_interval_minutes"` // 卡死回收检查间隔（分钟）
-	DomainThrottleEnabled    bool     `mapstructure:"domain_throttle_enabled"`
-	DomainDefaultDelay       int      `mapstructure:"domain_default_delay_seconds"`
-	DomainDefaultConcurrency int      `mapstructure:"domain_default_max_concurrency"`
-	RuleOptimizerEnabled     bool     `mapstructure:"rule_optimizer_enabled"`
-	RuleOptimizerInterval    int      `mapstructure:"rule_optimizer_interval_minutes"`
-	RuleMaxTrials            int      `mapstructure:"rule_max_trials"`
-	RuleSampleSize           int      `mapstructure:"rule_sample_size"`
-	RuleQualityMinChars      int      `mapstructure:"rule_quality_min_chars"`
-	RuleOptimizerModel       string   `mapstructure:"rule_optimizer_model"`
-	RuleOptimizerTemperature float64  `mapstructure:"rule_optimizer_temperature"`
+	Enabled                  bool    `mapstructure:"enabled"`
+	FirecrawlWorkers         int     `mapstructure:"firecrawl_workers"`
+	TrafilaturaWorkers       int     `mapstructure:"trafilatura_workers"`
+	AutoWorkers              int     `mapstructure:"auto_workers"`
+	PollInterval             int     `mapstructure:"poll_interval"` // 秒
+	MaxRetries               int     `mapstructure:"max_retries"`
+	RetryBackoffBase         int     `mapstructure:"retry_backoff_base"` // 秒
+	RetryBackoffMax          int     `mapstructure:"retry_backoff_max"`  // 秒
+	DeadLetterThreshold      int     `mapstructure:"dead_letter_threshold"`
+	PaywallThreshold         int     `mapstructure:"paywall_threshold"`         // 连续空内容次数
+	DomainPendingCap         int     `mapstructure:"domain_pending_cap"`        // 每域名 pending+retrying 上限，0=不限
+	StaleTimeoutMinutes      int     `mapstructure:"stale_timeout_minutes"`     // 运行超过此分钟数视为卡死
+	RecoveryIntervalMinutes  int     `mapstructure:"recovery_interval_minutes"` // 卡死回收检查间隔（分钟）
+	DomainThrottleEnabled    bool    `mapstructure:"domain_throttle_enabled"`
+	DomainDefaultDelay       int     `mapstructure:"domain_default_delay_seconds"`
+	DomainDefaultConcurrency int     `mapstructure:"domain_default_max_concurrency"`
+	RuleOptimizerEnabled     bool    `mapstructure:"rule_optimizer_enabled"`
+	RuleOptimizerInterval    int     `mapstructure:"rule_optimizer_interval_minutes"`
+	RuleMaxTrials            int     `mapstructure:"rule_max_trials"`
+	RuleSampleSize           int     `mapstructure:"rule_sample_size"`
+	RuleQualityMinChars      int     `mapstructure:"rule_quality_min_chars"`
+	RuleOptimizerModel       string  `mapstructure:"rule_optimizer_model"`
+	RuleOptimizerTemperature float64 `mapstructure:"rule_optimizer_temperature"`
 	// 1.0 域名健康度（§2.1.1）：ConsecutiveFailures≥PauseThreshold 自动暂停，
 	// HealthScore≥ResumeThreshold 自动恢复。阈值 0 时用默认值。
-	DomainPauseThreshold    int `mapstructure:"domain_pause_threshold"`     // 默认 5
-	DomainResumeThreshold   int `mapstructure:"domain_resume_threshold"`   // 默认 30（HealthScore）
+	DomainPauseThreshold  int `mapstructure:"domain_pause_threshold"`  // 默认 5
+	DomainResumeThreshold int `mapstructure:"domain_resume_threshold"` // 默认 30（HealthScore）
+	// half-open 探测冷静期（分钟）：域名暂停超过此时长后自动解除暂停、给一次重试
+	// 窗口（断路器 half-open）。默认 30。暂停域名不再出队 → HealthScore 冻结，故
+	// 恢复必须时间驱动而非等健康度回升。
+	DomainPauseCooldownMinutes int `mapstructure:"domain_pause_cooldown_minutes"`
 }
 
 // DailyReportConfig controls the n8n-backed daily report handoff and watchdog.
@@ -617,6 +621,7 @@ func setDefaults(v *viper.Viper) {
 	v.SetDefault("crawl_queue.rule_optimizer_temperature", 0.3)
 	v.SetDefault("crawl_queue.domain_pause_threshold", 5)
 	v.SetDefault("crawl_queue.domain_resume_threshold", 30)
+	v.SetDefault("crawl_queue.domain_pause_cooldown_minutes", 30)
 
 	// Daily report
 	v.SetDefault("daily_report.enabled", true)

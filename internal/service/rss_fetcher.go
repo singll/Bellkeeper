@@ -581,7 +581,8 @@ func (s *RSSFetcherService) recordFailure(feed *model.RSSFeed, reason string) {
 	if s.domainRepo != nil {
 		feedDomain := extractRSSDomain(feed.URL)
 		if feedDomain != "" {
-			if err := s.domainRepo.EnterCooling(feedDomain, FeedCoolingBase, FeedCoolingMax); err != nil {
+			// RSS feed 整体抓取失败属域名级故障，计入健康度。
+			if err := s.domainRepo.EnterCooling(feedDomain, FeedCoolingBase, FeedCoolingMax, true); err != nil {
 				log.Printf("[RSSFetcher] enter cooling for %s failed: %v", feedDomain, err)
 			}
 		}
@@ -854,13 +855,13 @@ func (s *RSSFetcherService) appendRSSHubParams(baseURL string, paramsJSON []byte
 }
 
 type FeedValidationResult struct {
-	Parsable    bool              `json:"parsable"`
-	ItemCount   int               `json:"item_count"`
-	Title       string            `json:"title,omitempty"`
-	Description string            `json:"description,omitempty"`
-	SampleItems []FeedSampleItem  `json:"sample_items,omitempty"`
-	Error       string            `json:"error,omitempty"`
-	IsRSSHub    bool              `json:"is_rsshub"`
+	Parsable    bool             `json:"parsable"`
+	ItemCount   int              `json:"item_count"`
+	Title       string           `json:"title,omitempty"`
+	Description string           `json:"description,omitempty"`
+	SampleItems []FeedSampleItem `json:"sample_items,omitempty"`
+	Error       string           `json:"error,omitempty"`
+	IsRSSHub    bool             `json:"is_rsshub"`
 }
 
 type FeedSampleItem struct {

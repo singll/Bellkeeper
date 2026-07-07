@@ -23,14 +23,14 @@ import (
 
 // CrawlQueueService manages the persistent crawl queue with worker pools.
 type CrawlQueueService struct {
-	cfg           config.CrawlQueueConfig
-	repo          *repository.CrawlJobRepository
-	domainRepo    *repository.CrawlDomainProfileRepository
-	failureRepo   *repository.CrawlFailureRepository
-	extractor     *ExtractorService
-	ingestion     *FileIngestionService
-	activityLog   *ActivityLogService
-	notification  *NotificationService
+	cfg            config.CrawlQueueConfig
+	repo           *repository.CrawlJobRepository
+	domainRepo     *repository.CrawlDomainProfileRepository
+	failureRepo    *repository.CrawlFailureRepository
+	extractor      *ExtractorService
+	ingestion      *FileIngestionService
+	activityLog    *ActivityLogService
+	notification   *NotificationService
 	eventPublisher *KBEventPublisher
 
 	// Worker management
@@ -170,11 +170,13 @@ func (s *CrawlQueueService) enterCooling(domain, errType, errMsg string) {
 	if domain == "" || s.domainRepo == nil {
 		return
 	}
-	if err := s.domainRepo.EnterCooling(domain, crawlCoolingBase, crawlCoolingMax); err != nil {
+	// 仅域名级故障计入健康度；单 URL / 抓取器失败只做调度冷却，不扣健康度、不暂停。
+	countsTowardHealth := domainLevelFailure(errType)
+	if err := s.domainRepo.EnterCooling(domain, crawlCoolingBase, crawlCoolingMax, countsTowardHealth); err != nil {
 		log.Printf("[CrawlQueue] enter cooling for %s failed: %v", domain, err)
 		return
 	}
-	log.Printf("[CrawlQueue] domain %s cooling: errType=%s err=%s", domain, errType, errMsg)
+	log.Printf("[CrawlQueue] domain %s cooling: errType=%s health=%t err=%s", domain, errType, countsTowardHealth, errMsg)
 }
 
 // clearCooling resets a domain's cooling state after a successful crawl.
@@ -877,6 +879,30 @@ func (s *CrawlQueueService) WorkerStatuses() []WorkerStatus {
 // GetBlockedJobs returns all blocked jobs.
 func (s *CrawlQueueService) GetBlockedJobs() ([]model.CrawlJob, error) {
 	return s.repo.GetBlockedSince(time.Time{}) // all time
+}
+
+// domainLevelFailure 判定某失败类型是否属「域名级不可用」，即目标站点整体
+// 出问题（DNS/拒连、5xx、封禁、限流、连接超时），才应计入域名健康度、可触发
+// 自动暂停并告警。
+//
+// 反例（返回 false）——这些是「单 URL / 抓取器」层面的失败，不代表域名不健康，
+// 不得累加 ConsecutiveFailures、不得扣 HealthScore、不得暂停整域：
+//   - not_found      单页 404/410
+//   - empty_content  单页内容过短（多为 JS 渲染，规则优化器会调 firecrawl waitFor）
+//   - paywall        单页付费墙
+//   - client_error   多为 firecrawl 对该页的 400（如 SCRAPE_ACTIONS 不支持），抓取器行为
+//   - unknown        含 firecrawl 服务自身连接失败（我方基础设施），与目标域名无关
+//
+// 线上实测（2026-07）：被误暂停的 123 个域名 100% 由上述非域名级失败驱动，
+// 无一条真正的 network/server_error/forbidden/rate_limited。详见修复记录。
+func domainLevelFailure(errType string) bool {
+	switch errType {
+	case "network", "server_error", "forbidden", "rate_limited", "timeout":
+		return true
+	default:
+		// not_found / empty_content / paywall / client_error / unknown → 非域名级
+		return false
+	}
 }
 
 // classifyCrawlError maps an extraction error to an error type.

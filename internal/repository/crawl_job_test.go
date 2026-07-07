@@ -344,7 +344,7 @@ func TestCrawlJobRepository_DequeueFair_SkipsCoolingDomain(t *testing.T) {
 	// cool.com is cooling (next_allowed_at in the future); ready.com is not.
 	assertNoError(t, repo.Enqueue(&model.CrawlJob{SourceID: 1, URL: "https://cool.com/1", Status: model.CrawlJobPending, SourceDomain: "cool.com"}), "Enqueue cool")
 	assertNoError(t, repo.Enqueue(&model.CrawlJob{SourceID: 1, URL: "https://ready.com/1", Status: model.CrawlJobPending, SourceDomain: "ready.com"}), "Enqueue ready")
-	assertNoError(t, profiles.EnterCooling("cool.com", 1*time.Minute, 1*time.Hour), "EnterCooling")
+	assertNoError(t, profiles.EnterCooling("cool.com", 1*time.Minute, 1*time.Hour, true), "EnterCooling")
 
 	// First claim must be ready.com — cool.com is filtered out at the SQL level.
 	job, err := repo.DequeueFair("")
@@ -384,7 +384,7 @@ func TestCrawlJobRepository_DequeueFair_FairRotation(t *testing.T) {
 	assertEqual(t, first.SourceDomain, "big.com")
 
 	// Simulate the politeness/cooling delay applied after processing big.com.
-	assertNoError(t, profiles.EnterCooling("big.com", 1*time.Minute, 1*time.Hour), "EnterCooling big")
+	assertNoError(t, profiles.EnterCooling("big.com", 1*time.Minute, 1*time.Hour, true), "EnterCooling big")
 
 	// Next claim must reach small.com — it is not starved behind big.com's backlog.
 	second, err := repo.DequeueFair("")
