@@ -92,8 +92,13 @@ type FirecrawlResponse struct {
 // NewExtractorService creates a new ExtractorService
 func NewExtractorService(cfg config.FileIngestionConfig, activityLog *ActivityLogService) *ExtractorService {
 	return &ExtractorService{
-		cfg:         cfg,
-		httpClient:  httpclient.NewClientWithTimeout(time.Duration(cfg.Firecrawl.Timeout) * time.Second),
+		cfg: cfg,
+		// 本地 HTTP 全程超时（http.Client.Timeout 覆盖含读 body 的整个请求）必须 >
+		// 发给 firecrawl 的抓取超时（fcReq.Timeout，见 extractWithFirecrawl），
+		// 否则慢响应逼近抓取超时时，本地 deadline 与服务端几乎同时到点掐断连接，
+		// 正在执行的 io.ReadAll 得到 "http: read on closed response body"（线上实测散发 unknown）。
+		// 预留 30s 传输 headroom：客户端必须比它要求服务端的时间等得更久。
+		httpClient:  httpclient.NewClientWithTimeout(time.Duration(cfg.Firecrawl.Timeout+30) * time.Second),
 		activityLog: activityLog,
 	}
 }

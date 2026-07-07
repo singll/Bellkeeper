@@ -22,6 +22,8 @@ func TestClassifyCrawlErrorExtractorUnavailable(t *testing.T) {
 	cases := []string{
 		`firecrawl extraction failed: HTTP request failed: Post "http://192.168.7.220:3002/v1/scrape": http: ContentLength=124 with Body length 0`,
 		`firecrawl extraction failed: HTTP request failed: dial tcp 192.168.7.220:3002: connect: connection refused`,
+		// 响应读取被本地全程超时掐断的竞态（客户端 deadline 逼近抓取超时）。线上实测散发 unknown。
+		`firecrawl extraction failed: failed to read response: http: read on closed response body`,
 	}
 	for _, msg := range cases {
 		errType, _ := classifyCrawlError(fmt.Errorf("%s", msg))

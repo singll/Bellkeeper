@@ -921,9 +921,12 @@ func classifyCrawlError(err error) (string, string) {
 
 	switch {
 	// 我方抓取器（firecrawl 服务）传输层失败，与目标域名无关：连接不上、
-	// 请求未发出（Go 重试未 rewind body 的 "ContentLength=N with Body length 0"）等。
+	// 请求未发出（Go 重试未 rewind body 的 "ContentLength=N with Body length 0"）、
+	// 或响应读取被本地 deadline 掐断（"read on closed response body"，客户端全程
+	// 超时逼近抓取超时时的竞态；已在 extractor 侧加 30s headroom 缓解，此处兜底归类）。
 	// 单列 extractor_unavailable，避免污染域名健康度与失败统计（线上实测归到 unknown 172 条）。
-	case strings.Contains(lower, "http request failed"):
+	case strings.Contains(lower, "http request failed") ||
+		strings.Contains(lower, "read on closed response body"):
 		return "extractor_unavailable", msg
 	case strings.Contains(lower, "timeout") || strings.Contains(lower, "deadline exceeded"):
 		return "timeout", msg
