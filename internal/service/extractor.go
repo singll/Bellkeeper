@@ -73,6 +73,14 @@ type FirecrawlRequest struct {
 	WaitFor int               `json:"waitFor,omitempty"`
 	Actions []FirecrawlAction `json:"actions,omitempty"`
 	Headers map[string]string `json:"headers,omitempty"`
+	// 显式声明只要正文，减少无谓下载与噪声。onlyMainContent 服务端默认已 true，
+	// 这里显式下发使意图可见、不随上游默认变化；blockAds 屏蔽广告/追踪；
+	// removeBase64Images 剔除内联大图 base64，避免灌进 markdown 撑大产物。
+	// 真正砍机场流量的是 playwright 端按 resourceType 拦图片/媒体/字体（见 knowledge 主机），
+	// 本请求参数是同向补强、对正文抽取质量无损。
+	OnlyMainContent    bool `json:"onlyMainContent"`
+	BlockAds           bool `json:"blockAds"`
+	RemoveBase64Images bool `json:"removeBase64Images"`
 }
 
 // FirecrawlResponse represents the response from Firecrawl API
@@ -218,9 +226,12 @@ func (s *ExtractorService) extractWithFirecrawl(req *ExtractionRequest) (*Extrac
 	}
 
 	fcReq := FirecrawlRequest{
-		URL:     req.URL,
-		Formats: []string{"markdown"},
-		Timeout: timeout * 1000,
+		URL:                req.URL,
+		Formats:            []string{"markdown"},
+		Timeout:            timeout * 1000,
+		OnlyMainContent:    true,
+		BlockAds:           true,
+		RemoveBase64Images: true,
 	}
 	if req.Overrides != nil {
 		if req.Overrides.FirecrawlWaitFor > 0 {
