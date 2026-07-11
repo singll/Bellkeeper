@@ -259,6 +259,7 @@ rss_fetcher:
 crawl_queue:
   enabled: true
   domain_throttle_enabled: true
+  recrawl_cooldown_hours: 168     # 同 URL 成功抓取后 7 天内不重复入队，堵住重复抓取风暴（0=禁用）
   domain_default_delay_seconds: 60
   domain_default_max_concurrency: 1
   rule_optimizer_enabled: true

@@ -394,3 +394,43 @@ func TestCrawlJobRepository_DequeueFair_FairRotation(t *testing.T) {
 	}
 	assertEqual(t, second.SourceDomain, "small.com")
 }
+
+func TestCrawlJobRepository_RecentlyCrawled(t *testing.T) {
+	db := setupTestDB(t)
+	repo := NewCrawlJobRepository(db)
+
+	// success job for u1；pending job for u2（pending 不算已抓）；crawled 中间态算已抓
+	assertNoError(t, repo.Enqueue(&model.CrawlJob{SourceID: 1, URL: "https://u.com/1", Status: model.CrawlJobSuccess, SourceDomain: "u.com"}), "s1")
+	assertNoError(t, repo.Enqueue(&model.CrawlJob{SourceID: 1, URL: "https://u.com/2", Status: model.CrawlJobPending, SourceDomain: "u.com"}), "p2")
+	assertNoError(t, repo.Enqueue(&model.CrawlJob{SourceID: 1, URL: "https://u.com/3", Status: model.CrawlJobCrawled, SourceDomain: "u.com"}), "c3")
+
+	since := time.Now().Add(-24 * time.Hour)
+
+	// u1 成功抓过 → true
+	hit, err := repo.RecentlyCrawled("https://u.com/1", since)
+	assertNoError(t, err, "RecentlyCrawled u1")
+	assertEqual(t, hit, true)
+
+	// u3 crawled 中间态 → true
+	hit3, err := repo.RecentlyCrawled("https://u.com/3", since)
+	assertNoError(t, err, "RecentlyCrawled u3")
+	assertEqual(t, hit3, true)
+
+	// u2 仅 pending → false（未抓成功不该被去重掉）
+	hit2, err := repo.RecentlyCrawled("https://u.com/2", since)
+	assertNoError(t, err, "RecentlyCrawled u2")
+	assertEqual(t, hit2, false)
+
+	// 从未见过的 URL → false
+	hitNone, err := repo.RecentlyCrawled("https://u.com/none", since)
+	assertNoError(t, err, "RecentlyCrawled none")
+	assertEqual(t, hitNone, false)
+
+	// 把 u1 的 created_at 推到窗口之外 → false（允许过期后重抓）
+	assertNoError(t, db.Model(&model.CrawlJob{}).
+		Where("url = ?", "https://u.com/1").
+		Update("created_at", time.Now().Add(-48*time.Hour)).Error, "age u1")
+	hitOld, err := repo.RecentlyCrawled("https://u.com/1", since)
+	assertNoError(t, err, "RecentlyCrawled u1 aged")
+	assertEqual(t, hitOld, false)
+}

@@ -289,6 +289,7 @@ type CrawlQueueConfig struct {
 	DeadLetterThreshold      int     `mapstructure:"dead_letter_threshold"`
 	PaywallThreshold         int     `mapstructure:"paywall_threshold"`         // 连续空内容次数
 	DomainPendingCap         int     `mapstructure:"domain_pending_cap"`        // 每域名 pending+retrying 上限，0=不限
+	RecrawlCooldownHours     int     `mapstructure:"recrawl_cooldown_hours"`    // 同 URL 已成功抓取后的重抓冷却窗口（小时），0=禁用去重
 	StaleTimeoutMinutes      int     `mapstructure:"stale_timeout_minutes"`     // 运行超过此分钟数视为卡死
 	RecoveryIntervalMinutes  int     `mapstructure:"recovery_interval_minutes"` // 卡死回收检查间隔（分钟）
 	DomainThrottleEnabled    bool    `mapstructure:"domain_throttle_enabled"`
@@ -613,6 +614,7 @@ func setDefaults(v *viper.Viper) {
 	v.SetDefault("crawl_queue.dead_letter_threshold", 6)
 	v.SetDefault("crawl_queue.paywall_threshold", 2)
 	v.SetDefault("crawl_queue.domain_pending_cap", 5000)
+	v.SetDefault("crawl_queue.recrawl_cooldown_hours", 168) // 同 URL 成功后 7 天内不重抓，堵住重复入队风暴
 	v.SetDefault("crawl_queue.stale_timeout_minutes", 10)
 	v.SetDefault("crawl_queue.recovery_interval_minutes", 5)
 	v.SetDefault("crawl_queue.domain_throttle_enabled", true)

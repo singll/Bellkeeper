@@ -210,7 +210,7 @@ func (h *CrawlQueueHandler) Enqueue(c *gin.Context) {
 		return
 	}
 
-	response.Success(c, gin.H{"queued": true, "job_id": jobID})
+	response.Success(c, gin.H{"queued": jobID != 0, "job_id": jobID})
 }
 
 // Cleanup handles POST /api/crawl/queue/cleanup

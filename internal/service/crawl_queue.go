@@ -235,6 +235,22 @@ func (s *CrawlQueueService) Enqueue(sourceID uint, rawURL, title, channelType st
 		}
 	}
 
+	// Recrawl-cooldown dedup: if this URL was already successfully crawled within
+	// the cooldown window, skip re-queuing it. This is the fix for the repeat-scrape
+	// storm (same URL re-enqueued dozens of times/day burning proxy bandwidth).
+	// Explicit skip (⏭️), never a silent drop; disabled when cooldown <= 0.
+	if s.cfg.RecrawlCooldownHours > 0 {
+		since := time.Now().Add(-time.Duration(s.cfg.RecrawlCooldownHours) * time.Hour)
+		recent, err := s.repo.RecentlyCrawled(rawURL, since)
+		if err != nil {
+			log.Printf("[CrawlQueue] recrawl-cooldown check for %s failed: %v", rawURL, err)
+		} else if recent {
+			s.logActivity("enqueue_skipped", "skipped",
+				fmt.Sprintf("⏭️ Enqueue skipped: %s crawled within %dh cooldown", rawURL, s.cfg.RecrawlCooldownHours), sourceID)
+			return 0, nil
+		}
+	}
+
 	job := &model.CrawlJob{
 		SourceID:     sourceID,
 		URL:          rawURL,

@@ -505,6 +505,20 @@ func (r *CrawlJobRepository) CountPendingByDomain(domain string) (int64, error) 
 	return count, err
 }
 
+// RecentlyCrawled reports whether the given URL already has a success/crawled
+// job created at or after `since`. Used by the enqueue-side recrawl-cooldown
+// dedup to stop the same URL being re-queued and re-scraped repeatedly.
+func (r *CrawlJobRepository) RecentlyCrawled(url string, since time.Time) (bool, error) {
+	var count int64
+	err := r.db.Model(&model.CrawlJob{}).
+		Where("url = ? AND status IN ? AND created_at >= ?", url, []string{
+			string(model.CrawlJobSuccess),
+			string(model.CrawlJobCrawled),
+		}, since).
+		Count(&count).Error
+	return count > 0, err
+}
+
 // CountByDomainAndStatus counts jobs for a domain with a given status since a time.
 func (r *CrawlJobRepository) CountByDomainAndStatus(domain string, status model.CrawlJobStatus, since time.Time) (int64, error) {
 	var count int64
