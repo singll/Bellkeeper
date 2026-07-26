@@ -103,27 +103,27 @@ llm_proxy:
           weight: 1
 
     - name: "pool-summary"
-      description: "AI 总结池（DeepSeek 主力 + Qwen 备用）"
+      description: "AI 总结池（DeepSeek V4 Flash 主力 + Qwen 备用）"
       strategy: "priority-health"
       sticky_ttl_seconds: 900
       members:
         - channel: "deepseek-direct"
-          model: "deepseek-chat"
+          model: "deepseek-v4-flash"
           weight: 5
         - channel: "qwen-plus-direct"
           model: "qwen3.5-plus"
           weight: 2
 
     - name: "pool-pkb"
-      description: "PKB 知识卡片池（Kimi K2.6 主力，长上下文 + 高质量中文输出）"
+      description: "PKB 知识卡片池（DeepSeek V4 Flash 主力，成本约 Kimi 的 1/10；Kimi K2.6 高质量兜底）"
       strategy: "priority-health"
       sticky_ttl_seconds: 900
       members:
+        - channel: "deepseek-direct"
+          model: "deepseek-v4-flash"
+          weight: 5
         - channel: "kimi-direct"
           model: "kimi-k2.6"
-          weight: 5
-        - channel: "deepseek-direct"
-          model: "deepseek-chat"
           weight: 2
 
   channels:
@@ -174,7 +174,8 @@ llm_proxy:
       rpd: 500
       priority: 1
       models:
-        - deepseek-chat
+        - deepseek-v4-flash
+        - deepseek-v4-pro
       is_enabled: true
     - name: glm-flash-via-newapi
       base_url: ${LLM_NEWAPI_BASE_URL}

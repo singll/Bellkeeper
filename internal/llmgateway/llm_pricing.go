@@ -95,12 +95,22 @@ func (p *Pricer) SeedDefaultPricing() error {
 		return nil
 	}
 
+	// ChannelName MUST match the runtime channel name (llm_channels.name) exactly —
+	// billing looks up pricing by (channel_name, model) with an exact match, so a
+	// mismatch here silently zeroes all cost accounting (regression fixed 2026-07-26).
+	// Prices are USD cents per 1M tokens. Values marked EST are estimates pending
+	// confirmation against current official pricing.
 	defaults := []model.LLMModelPricing{
-		{ChannelName: "deepseek", Model: "deepseek-chat", InputPricePer1MCents: 14, OutputPricePer1MCents: 28, CachedInputPricePer1MCents: 1, Notes: "DeepSeek V3"},
-		{ChannelName: "qwen", Model: "qwen3.5-plus", InputPricePer1MCents: 40, OutputPricePer1MCents: 120, Notes: "Qwen3.5 Plus"},
+		{ChannelName: "deepseek-direct", Model: "deepseek-v4-flash", InputPricePer1MCents: 28, OutputPricePer1MCents: 110, CachedInputPricePer1MCents: 7, Notes: "DeepSeek V4 Flash ⚠️EST"},
+		{ChannelName: "deepseek-direct", Model: "deepseek-v4-pro", InputPricePer1MCents: 55, OutputPricePer1MCents: 219, CachedInputPricePer1MCents: 14, Notes: "DeepSeek V4 Pro ⚠️EST"},
+		{ChannelName: "kimi-direct", Model: "kimi-k2.6", InputPricePer1MCents: 60, OutputPricePer1MCents: 250, CachedInputPricePer1MCents: 15, Notes: "Kimi K2.6 ⚠️EST"},
+		{ChannelName: "kimi-code", Model: "kimi-for-coding", InputPricePer1MCents: 60, OutputPricePer1MCents: 250, CachedInputPricePer1MCents: 15, Notes: "Kimi coding ⚠️EST"},
+		{ChannelName: "qwen-plus-direct", Model: "qwen3.5-plus", InputPricePer1MCents: 40, OutputPricePer1MCents: 120, Notes: "Qwen3.5 Plus"},
+		{ChannelName: "qwen-flash-direct", Model: "qwen3.5-flash", InputPricePer1MCents: 5, OutputPricePer1MCents: 40, Notes: "Qwen3.5 Flash ⚠️EST"},
+		{ChannelName: "glm-flash-via-newapi", Model: "GLM-4.7-Flash", InputPricePer1MCents: 0, OutputPricePer1MCents: 0, Notes: "GLM Flash free"},
+		{ChannelName: "siliconflow-qwen3-8b", Model: "Qwen/Qwen3-8B", InputPricePer1MCents: 0, OutputPricePer1MCents: 0, Notes: "SiliconFlow Free"},
+		{ChannelName: "siliconflow-qwen25-7b", Model: "Qwen/Qwen2.5-7B-Instruct", InputPricePer1MCents: 0, OutputPricePer1MCents: 0, Notes: "SiliconFlow Free"},
 		{ChannelName: "claude", Model: "claude-sonnet-4-6", InputPricePer1MCents: 300, OutputPricePer1MCents: 1500, CachedInputPricePer1MCents: 30, Notes: "Claude Sonnet 4.6"},
-		{ChannelName: "siliconflow", Model: "Qwen3-8B", InputPricePer1MCents: 0, OutputPricePer1MCents: 0, Notes: "SiliconFlow Free"},
-		{ChannelName: "siliconflow", Model: "Qwen2.5-7B-Instruct", InputPricePer1MCents: 0, OutputPricePer1MCents: 0, Notes: "SiliconFlow Free"},
 	}
 
 	for _, pr := range defaults {
