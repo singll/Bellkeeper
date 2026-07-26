@@ -175,7 +175,7 @@ D:\SilkSpoolImport\
 - **Raw / Working 进入 Vault**：统一 PowerShell 脚本
 - **工具与环境**：TrueNAS `data/sync`
 
-详细目录与实施顺序见 [../storage/README.md](../storage/README.md)。
+知识附件与 raw/working 文件资产落在 TrueNAS `data/knowledge`，NFS 挂载配置见 [../ops/NFS-SETUP.md](../ops/NFS-SETUP.md)。
 
 ---
 
@@ -202,7 +202,7 @@ D:\SilkSpoolImport\
 ## 文件树
 
 ```text
-doc/modules/notes/
+doc/knowledge-base/
 ├── README.md                              # 本文件
 ├── setup/
 │   ├── windows-vault-bootstrap.md         # Windows 从零落地指南（基于 SilkFiles）
@@ -258,6 +258,5 @@ doc/modules/notes/
 
 ## 与其他模块的边界
 
-- [../knowledge/README.md](../knowledge/README.md) — AI 工作层、检索、问答、RAG / Search 支撑
-- [../automation/README.md](../automation/README.md) — K07 等自动化流程如何与笔记系统联动
-- [../storage/README.md](../storage/README.md) — TrueNAS 负责附件、资料与同步承载，但不定义笔记结构
+- [../ARCHITECTURE.md](../ARCHITECTURE.md) — 知识入库 / 检索 / 问答 / PKB 在 Bellkeeper 中的实现与数据流
+- [../ops/NFS-SETUP.md](../ops/NFS-SETUP.md) — TrueNAS 经 NFS 承载附件 / raw 资产（不定义笔记结构）

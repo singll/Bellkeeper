@@ -34,7 +34,7 @@ Set-ExecutionPolicy -Scope Process -ExecutionPolicy Bypass
 .\files.ps1 knowledge <plan|dry-run|pull|import|run|status|clean|publish> [args...]
 ```
 
-`SilkSpool/doc/modules/notes/setup/` 这里现在只保留规则文档；旧脚本副本不再作为当前入口。
+`doc/knowledge-base/setup/` 这里现在只保留规则文档；旧脚本副本不再作为当前入口。
 
 ---
 
@@ -391,7 +391,7 @@ Set-ExecutionPolicy -Scope Process -ExecutionPolicy Bypass
 - [windows-vault-bootstrap.md](windows-vault-bootstrap.md)
 - [../vaults/single-vault.md](../vaults/single-vault.md)
 - [../standards/sync-and-ignore-rules.md](../standards/sync-and-ignore-rules.md)
-- [../../storage/README.md](../../storage/README.md)
+- [../../ops/NFS-SETUP.md](../../ops/NFS-SETUP.md) — TrueNAS 经 NFS 承载 raw/working 文件资产
 
 ---
 

@@ -1,8 +1,8 @@
 # Bellkeeper 架构文档（1.0 终态）
 
-> 更新日期: 2026-07-06
+> 更新日期: 2026-07-26
 > 状态标注: ✅ 已实施 | 🔶 运维待建 | 📋 规划中
-> 权威事件源: [BELLKEEPER-1.0-REVAMP-PLAN.md](BELLKEEPER-1.0-REVAMP-PLAN.md)
+> 当前状态见 [STATUS.md](STATUS.md)；历史演进见 [TIMELINE.md](TIMELINE.md)
 
 ---
 
@@ -57,7 +57,7 @@ Bellkeeper 是 SilkSpool 的**知识治理中台 + LLM 代理网关 + Matrix 控
 | 前端 | SolidJS 1.8 + TailwindCSS 3.4 + Vite 5 |
 | Matrix SDK | mautrix-go |
 | 认证 | noauth(纯内网);LLM Token 鉴权独立保留 |
-| 监控/日志 | Prometheus `/metrics` + Zap（JSON 结构化 stdout）；Loki+Promtail 外挂采集；TraceID 全链路 |
+| 监控/日志 | Prometheus `/metrics` + Zap（JSON 结构化 stdout）；**M6 观测栈：Prometheus+Loki+Grafana@silkdata + 三机 cAdvisor/Promtail**；TraceID 全链路 |
 | 部署 | Docker 多阶段构建,SilkSpool `spool` 编排 |
 | 迁移 | golang-migrate(显式迁移 005-007) + GORM AutoMigrate |
 
@@ -202,12 +202,21 @@ n8n 定时触发 → POST /api/reports/daily/generate
 
 ## 部署
 
-通过 SilkSpool 管理(规则见仓库根 CLAUDE.md §4):
+**拓扑（2026-07-25 应用/数据分离）**：应用层与数据层分处两台 guest，通过 SilkSpool `spool` 编排。
+
+| 层 | 主机 | 服务 |
+|----|------|------|
+| 应用层 | keeper (192.168.7.230) | `sp-bellkeeper`（内部 8080 → 宿主 8090，经 Caddy 反代）、n8n、rsshub、memos |
+| 数据层 | silkdata (192.168.7.231) | PostgreSQL / Meilisearch / Redis / NATS / CouchDB + 观测中心栈（Prometheus/Loki/Grafana） |
+| 抓取 | knowledge (192.168.7.220) | firecrawl（api/playwright/db/rabbitmq，端点 3002） |
+| 存储 | TrueNAS (192.168.7.121) | 经 NFS4 向 keeper 提供 `/mnt/NAS/data/knowledge`（知识 raw/archive/vault 落盘真源） |
+
+应用靠 `extra_hosts` 别名（`sp-*` + 裸名 → 192.168.7.231）连数据层，连接串零硬编码；发版重建 keeper 镜像不影响数据层。完整主机拓扑见 [STATUS.md](STATUS.md)。
 
 ```bash
-spool bundle keeper service keeper bellkeeper up   # 单服务代码部署
+spool bundle keeper service keeper bellkeeper up   # 单服务代码部署（须重建镜像，见下）
 spool restart keeper bellkeeper                    # 仅重启
 spool logs keeper bellkeeper 100                   # 日志
 ```
 
-容器 `sp-bellkeeper`,内部端口 8080,经 Caddy 反代暴露。
+> ⚠️ 代码变更部署须**重建镜像**：`spool bundle keeper up keeper` 若见 `bellkeeper:latest` 已存在会复用旧镜像。可靠路径见根 CLAUDE.md §3 与运维记忆。运维一律走 `spool` CLI，禁止裸 ssh/docker。

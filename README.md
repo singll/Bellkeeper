@@ -1,36 +1,11 @@
-# Infrastructure Operations Guide
-
-> **CRITICAL DIRECTIVE FOR AI ASSISTANTS (Claude Code):** > This project uses **SilkSpool V2** as the exclusive Infrastructure-as-Code (IaC) tool. The `spool` command is globally available in the `$PATH`.
-
-## Mandatory AI Execution Rules
-
-1. **NEVER** use raw `ssh`, `docker`, `docker-compose`, or `rsync` commands.
-2. **ALL** remote operations MUST be executed via the `spool` CLI tool using the `bash` environment.
-
-## Standard Operating Procedures
-
-### 1. Configuration Changes
-If you modify ANY configuration file (e.g., `hosts/<host>/.env`, Caddyfile, or YAML):
-- You MUST immediately push changes to the remote node: 
-  `spool sync push <host>`
-
-### 2. Service Management
-To restart, check status, or view logs:
-- ALWAYS check the `services` block in `silkspool.yaml` to find the correct `<service_alias>`.
-- Restart: `spool service <host> restart <service_alias>`
-- Status: `spool service <host> status`
-- Logs: `spool service <host> logs <service_alias>`
-
-### 3. Deployments
-- Init bundle: `spool bundle <bundle_name> init <host>`
-- Deploy/Update: `spool bundle <bundle_name> up <host>`
-- Teardown: `spool bundle <bundle_name> down <host>`
-
 # Bellkeeper
 
-**Bellkeeper (钟守者)** 是 SilkSpool 的知识治理中台 + LLM 代理网关 + Matrix 控制平面。它承担 n8n 工作流做不了的有状态工作：长连接（Matrix sync、LLM 代理）、持久化队列（爬取、解析）、分类与去重、Meilisearch 检索、文件治理。
+> **Bellkeeper（钟守者）** 是 SilkSpool 的知识治理中台 + LLM 代理网关 + Matrix 控制平面 + 事件驱动平台。**1.0 已 GA、稳定运行**。
+> 运维一律走 SilkSpool `spool` CLI（禁止裸 ssh/docker/rsync），规则见 [CLAUDE.md](CLAUDE.md) §3。
 
-知识真相源是 **Obsidian Vault + Markdown 文件**（落地在 TrueNAS `data/knowledge/`），Bellkeeper 从中派生索引、搜索与问答能力，不再以 RAGFlow 为中心。
+它承担 n8n 工作流做不了的有状态工作：长连接（Matrix sync、LLM 代理）、持久化队列（爬取、解析）、分类与去重、Meilisearch 检索、文件治理。知识真相源是 **Obsidian Vault + Markdown 文件**（`/mnt/knowledge/`），Bellkeeper 从中派生索引、搜索与问答；检索由 Meilisearch 承担，RAGFlow 已完全退役。
+
+> **部署形态（2026-07-25 应用/数据分离）**：keeper(192.168.7.230) 只跑应用（bellkeeper/n8n/rsshub/memos）；PostgreSQL/Meilisearch/Redis/NATS/CouchDB 迁至数据层 silkdata(192.168.7.231)；firecrawl 在 knowledge(192.168.7.220)；观测栈（Prometheus+Loki+Grafana）在 silkdata。完整拓扑见 [doc/STATUS.md](doc/STATUS.md)。
 
 ## 功能概览
 
@@ -40,9 +15,9 @@ To restart, check status, or view logs:
 - **爬取队列 (CrawlQueue)** — 持久化任务队列 + Worker 池 + 熔断 + 反爬，承接 K01/K02 工作流的入库请求
 - **URL 去重** — DB 内三级匹配（精确/归一化/模糊），不再依赖 RAGFlow
 - **分类与标签** — LLM 驱动分类，标签置信度/规范化/来源记录，frontmatter + Meilisearch + DB 三处持久化
-- **个人知识库 PKB** — `bellkeeper pkb-curate` CLI：raw 层 AI 打分分流（vault/archive/discard）→ 高分原子化重构成 Obsidian 卡片 → 领域 digest 综述；提示词外置 `config/pkb/`（详见 `doc/PKB-IMPLEMENTATION.md`）
+- **个人知识库 PKB** — `bellkeeper pkb-curate` CLI：raw 层 AI 打分分流（vault/archive/discard）→ 高分原子化重构成 Obsidian 卡片 → 知识骨架归位 + 缺口填充 + 资讯库 → 领域 digest 综述；提示词外置 `config/pkb/`
 - **Meilisearch 检索** — archive/vault 层索引 → `/api/files/search|ask` 提供搜索与 RAG 问答（raw 层不进索引）
-- **文件浏览** — `/api/knowledge/files/tree|list|read` 为前端提供 Obsidian Vault 只读视图
+- **文件浏览 API** — `/api/knowledge/files/tree|list|read` 保留（K01 等调用）；前端不做文件浏览，Vault 浏览归 Obsidian（见 ADR-0006 前端边界）
 
 ### LLM 代理池
 
@@ -72,7 +47,7 @@ To restart, check status, or view logs:
 - **Prometheus Metrics** — `/metrics` 端点
 - **n8n 工作流集成** — 列表/激活/触发/执行历史的统一 API
 
-> **遗留 RAGFlow 兼容层**：约 8 个文件仍含 RAGFlow 引用（handler/service/前端），主链已不调用，待清理。详见 `doc/ROADMAP.md` §RAGFlow 退役。
+> **RAGFlow 已完全退役**：Go / 前端代码层零引用，仅个别 n8n 工作流 JSON 残留历史字段。
 
 ## 技术栈
 
@@ -88,10 +63,10 @@ To restart, check status, or view logs:
 | 前端框架 | SolidJS + TypeScript | SolidJS 1.8 |
 | UI 样式 | TailwindCSS | 3.4 |
 | 构建工具 | Vite | 5.x |
-| 认证 | Authelia (Forward Auth) + API Key | - |
+| 认证 | noauth（纯内网）+ API Key + LLM Token | - |
 | 配置 | Viper + Cobra | - |
 | 日志 | Zap (结构化) | 1.26 |
-| 监控 | Prometheus | - |
+| 监控 | Prometheus + Loki + Grafana（M6，@silkdata）| - |
 | 容器 | Docker (多阶段构建) | Alpine |
 
 ## 项目结构
@@ -105,10 +80,11 @@ bellkeeper/
 │   ├── app/                        # 应用装配 (DB → repo → service → handler → matrix → 后台任务)
 │   ├── auth/                       # 认证相关（Authelia Forward Auth 解析、API Key、LLM Token 校验）
 │   ├── config/                     # Viper 配置加载与结构定义
+│   ├── eventbus/                   # NATS JetStream 一级共享事件总线（6 stream + Event 契约）
 │   ├── handler/                    # HTTP 处理器（按业务域拆分）
-│   ├── llm/                        # LLM Proxy 子系统（余额 provider、协议转换、错误分类）
-│   ├── llmclient/                  # 内部统一 LLM 调用 SDK（CallerID/TaskType/重试）
-│   ├── pkb/                        # PKB 编排（curator / score / reconstruct / digest / scheduler）
+│   ├── llmgateway/                 # LLM 代理池独立包（Gateway 进程内直调、协议转换、余额、错误分类）
+│   ├── llmclient/                  # 内部统一 LLM 调用 SDK（进程外 CLI/n8n）
+│   ├── pkb/                        # PKB 编排（curator / score / reconstruct / digest / skeleton / scheduler）
 │   ├── n8n_workflows/              # n8n 工作流 JSON 事实源
 │   ├── matrix/                     # Matrix 集成模块
 │   │   ├── command/                #   命令 parser / router / handlers
@@ -156,7 +132,7 @@ bellkeeper/
 │   ├── Dockerfile                  #   多阶段构建（生产用）
 │   └── docker-compose.yml          #   本地开发依赖（Postgres 等）
 │
-├── migrations/                     # 数据库迁移脚本（备用，主链使用 GORM AutoMigrate）
+├── migrations/                     # golang-migrate 显式迁移（删除类）+ GORM AutoMigrate（建新表）
 │   ├── 001_init.up.sql
 │   └── 001_init.down.sql
 │
@@ -175,35 +151,28 @@ bellkeeper/
 
 ## 前端导航 (web/)
 
-四大核心系统域（LLM 域 2026-06 重设计后收敛为 5 页）:
+四大核心系统域:
 
-- **Knowledge**: `/knowledge/files` (Vault 浏览) / `/knowledge/search` / `/knowledge/ask` (RAG 问答) + `/rss` `/tags` `/datasets`
-- **LLM**: `/llm` 总览 + `/llm/channels` 渠道管理 + `/llm/groups-routing` 模型组与路由 + `/llm/usage-billing` 用量与计费 + `/llm/logs-alerts` 日志与告警
+- **Knowledge**: `/knowledge/overview`（总览）/ `/knowledge/skeleton`（知识骨架）/ `/knowledge/search` / `/knowledge/ask`（问答）+ 采集子分区 `/rss` `/tags`（数据集前端已退役）
+- **LLM**: `/llm` 总览 + `/llm/channels` + `/llm/groups-routing` + `/llm/usage-billing` + `/llm/logs-alerts`
 - **Logs**: `/logs` + `/logs/dashboard|sources|alerts`
-- **Matrix**: `/matrix` + `rooms|channels|commands|notifications|events|command-logs`
+- **Matrix**: `/matrix`（总览）+ `/matrix/console`（控制台，7→2 页收敛）
 
 ## 外部依赖
 
 ```
-Caddy (反向代理) + Authelia (Forward Auth)
-        │
-        ▼
-┌──────────────────────────────────────────┐
-│         Bellkeeper Backend                │
-│  Middleware → Handler → Service → Repo    │
-│       │           │                       │
-│       ▼           ▼                       │
-│  SolidJS 前端（嵌入）                      │
-└──┬─────┬─────┬─────┬──────┬──────┬───────┘
-   │     │     │     │      │      │
-┌──▼─┐ ┌─▼──┐ ┌▼──┐ ┌▼────┐ ┌▼───┐ ┌▼────┐
-│PgSQL│ │Meili│ │NATS│ │Redis│ │ n8n│ │Matrix│
-└─────┘ └─────┘ └────┘ └─────┘ └────┘ └─────┘
-                                  │
-                          ┌───────▼─────────┐
-                          │ /mnt/knowledge  │
-                          │ (TrueNAS NFS)   │
-                          └─────────────────┘
+        Caddy (反向代理, TLS) — 内网 noauth
+                    │
+   keeper (.230) 应用层                          silkdata (.231) 数据层
+┌───────────────────────────┐   extra_hosts  ┌───────────────────────────────┐
+│  Bellkeeper Backend        │   别名连数据层  │  PgSQL · Meili · NATS · Redis  │
+│  Handler→Service→Repo      │──────────────▶│  CouchDB                       │
+│  + SolidJS 前端（嵌入）     │               │  ──────────────────────────── │
+│  n8n · rsshub · memos      │               │  Prometheus · Loki · Grafana  │
+└─────────────┬─────────────┘               └───────────────────────────────┘
+              │ firecrawl 端点(3002)
+              ▼
+   knowledge (.220) firecrawl          /mnt/knowledge（Markdown 知识真相源）
 ```
 
 ## API 端点速览
@@ -261,19 +230,15 @@ Caddy (反向代理) + Authelia (Forward Auth)
 ### 生产 (SilkSpool 集成)
 
 ```bash
-# 首次部署
-spool bundle keeper setup keeper
-
-# 单独更新 Bellkeeper
+# 单服务代码部署（须重建镜像，见 CLAUDE.md §3）
 spool bundle keeper service keeper bellkeeper up
-
-# 状态 / 日志
-spool status keeper
-spool service keeper status
-spool service keeper logs bellkeeper 100
+# 仅重启 / 状态 / 日志
+spool restart keeper bellkeeper
+spool service keeper status bellkeeper
+spool logs keeper bellkeeper 100
 ```
 
-线上 Bellkeeper 通过 Caddy + Authelia 暴露：`https://bellkeeper.singll.net`。
+线上 Bellkeeper 经 Caddy 暴露：`https://bellkeeper.singll.net`（纯内网解析，noauth 模式）。数据层在 silkdata、观测栈见 [doc/STATUS.md](doc/STATUS.md)。
 
 ### 本地开发
 
@@ -375,16 +340,15 @@ make swagger         # 生成 Swagger 文档（输出到 api/docs/）
 
 ## 认证
 
-Bellkeeper 使用 **Authelia Forward Auth**。Caddy 反向代理把认证用户信息通过 HTTP Header 传给后端：
+生产为**纯内网部署、无公网暴露**，运行在 `noauth` 模式（`BELLKEEPER_SERVER_MODE=noauth`），无需登录。三种机制：
 
-| Header | 说明 |
-|--------|------|
-| `Remote-User` | 用户名（必须）|
-| `Remote-Email` | 邮箱 |
-| `Remote-Name` | 显示名 |
-| `Remote-Groups` | 用户组（逗号分隔）|
+| 机制 | 用途 |
+|------|------|
+| noauth | 纯内网默认，无需认证（预期最终状态） |
+| API Key（`X-API-Key`） | 内部服务调用 |
+| LLM Token（`Authorization: Bearer sk-bk-*`） | `/api/llm/v1/*` 专用，带模型白名单与配额 |
 
-`debug` 模式下未提供认证 Header 时自动使用 `dev-user`。
+> 历史：早期经 Caddy + Authelia Forward Auth（`Remote-User` 等 header）注入身份；纯内网化后移除，改 noauth。
 
 ## License
 

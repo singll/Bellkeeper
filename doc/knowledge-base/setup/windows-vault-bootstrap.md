@@ -33,7 +33,7 @@ D:\SilkSpoolImport\
 
 ## Step 1：运行目录创建脚本
 
-Windows 侧文件编排现在已独立为 `SilkFiles` 项目。创建 Vault 目录时，应从 `SilkFiles/files.ps1` 进入，而不是继续使用 `SilkSpool/doc/modules/notes/setup/` 下的脚本副本。
+Windows 侧文件编排现在已独立为 `SilkFiles` 项目。创建 Vault 目录时，应从 `SilkFiles/files.ps1` 进入，而不是继续使用 `doc/knowledge-base/setup/` 下的脚本副本。
 
 在 `SilkFiles` 项目根目录执行：
 
@@ -109,7 +109,7 @@ D:\Scripts\SilkFiles\
 
 ## Step 6：准备“一键同步并导入”脚本
 
-推荐给自己只暴露一个动作：打开 Obsidian 后，在独立 `SilkFiles` 项目根目录运行统一 PowerShell 入口 / 快捷方式。`SilkSpool/doc/modules/notes/setup/` 这里只保留说明文档，不再承载当前脚本副本。
+推荐给自己只暴露一个动作：打开 Obsidian 后，在独立 `SilkFiles` 项目根目录运行统一 PowerShell 入口 / 快捷方式。`doc/knowledge-base/setup/` 这里只保留说明文档，不再承载当前脚本副本。
 
 当前口径：
 

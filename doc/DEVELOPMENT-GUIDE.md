@@ -1,8 +1,8 @@
 # Bellkeeper 开发指南
 
 > **面向对象**: 初级开发者
-> **最后更新**: 2026-04-09
-> **适用版本**: v0.3.0+
+> **最后更新**: 2026-07-26
+> **适用版本**: 1.0 GA（稳定运行）
 >
 > 本文档是 Bellkeeper 项目的完整开发指南，包含架构说明、开发规范、禁止事项和验收标准。
 > 在进行任何开发工作前，请**完整阅读**本文档。
@@ -21,141 +21,14 @@
 8. [禁止事项](#禁止事项)
 9. [常见问题](#常见问题)
 10. [验收标准](#验收标准)
-11. [继续开发计划](#继续开发计划)
 
 ---
 
 ## 项目概述
 
-### 定位
+Bellkeeper 是 SilkSpool 的**知识治理中台 + LLM 代理网关 + Matrix 控制平面 + 事件驱动平台**。核心价值：做 n8n 做不好的有状态工作 —— 限速、去重、爬取队列、路由、日志、治理。**1.0 已 GA、稳定运行。**
 
-Bellkeeper 是 SilkSpool 生态的**知识管理中台 + LLM 代理网关**。
-
-核心价值: **做 n8n 做不好的事** — 有状态的限速、去重、路由、日志、治理。
-
-### 技术栈
-
-| 层 | 技术 | 版本 |
-|----|------|------|
-| 后端 | Go + Gin | Go 1.22+, Gin 1.9 |
-| 数据库 | PostgreSQL + GORM | PG 16, GORM 1.25 |
-| 前端 | SolidJS + TailwindCSS + Vite | SolidJS 1.8, Vite 5.x |
-| 消息队列 | NATS JetStream | 2.10 |
-| 缓存 | Redis | 7.x |
-| Matrix SDK | mautrix-go | 0.26 |
-| 认证 | Authelia SSO + API Key | - |
-| 配置 | Viper + Cobra | - |
-| 日志 | Zap (结构化日志) | 1.26 |
-| 部署 | Docker 多阶段构建 | Alpine |
-
-### 功能模块状态
-
-| 模块 | 状态 | 说明 |
-|------|------|------|
-| LLM Proxy | ✅ 已实施 | 多渠道限速代理，虚拟模型组，熔断与粘性路由 |
-| RSS 管理 | ✅ 已实施 | 订阅源 CRUD，供 n8n 工作流使用 |
-| 标签体系 | ✅ 已实施 | 分类路由核心数据 |
-| URL 去重 | ✅ 已实施 | 三级匹配（精确→归一化→模糊） |
-| 分类路由 | ✅ 已实施 | LLM 驱动的文章分类 |
-| RAGFlow 集成 | ✅ 兼容层 | 保留但不再增强 |
-| n8n 集成 | ✅ 已实施 | 工作流管理 API |
-| 文件入库 | 🚧 实施中 | 提取器编排 + 文件落地 |
-| Matrix 平台 | 🚧 部分实施 | 命令路由 + 通知（核心功能待完成） |
-
----
-
-## 当前架构
-
-### 系统架构图
-
-```
-┌─────────────────────────────────────────────────────────────┐
-│                       外部系统                               │
-├──────────┬──────────┬──────────┬──────────┬─────────────────┤
-│  n8n     │ RAGFlow  │ Matrix   │  前端 UI  │  其他 API 调用方  │
-│ (工作流)  │ (向量库)  │(机器人)   │ (SolidJS) │                │
-└──────┬───┴────┬─────┴─────┬────┴─────┬────┴────────┬────────┘
-       │        │           │          │             │
-       ▼        ▼           ▼          ▼             ▼
-┌─────────────────────────────────────────────────────────────┐
-│                    Bellkeeper 应用层                          │
-│                                                               │
-│  ┌─────────────┐  ┌─────────────┐  ┌──────────────────────┐ │
-│  │  HTTP Router │→ │  Middleware  │→ │    Handler 层         │ │
-│  │  (Gin)      │  │  (Auth/CORS) │  │  (请求解析+响应封装)   │ │
-│  └─────────────┘  └─────────────┘  └──────────┬───────────┘ │
-│                                                 │             │
-│  ┌──────────────────────────────────────────────▼───────────┐ │
-│  │                     Service 层                           │ │
-│  │                     (业务逻辑)                            │ │
-│  │                                                           │ │
-│  │  ┌──────────┐ ┌──────────┐ ┌──────────┐ ┌──────────┐   │ │
-│  │  │ LLMProxy │ │ Dataset  │ │ Classify │ │ RSSFeed  │   │ │
-│  │  │ Service  │ │ Service  │ │ Service  │ │ Service  │   │ │
-│  │  └──────────┘ └──────────┘ └──────────┘ └──────────┘   │ │
-│  │  ┌──────────┐ ┌──────────┐ ┌──────────┐ ┌──────────┐   │ │
-│  │  │ RagFlow  │ │ Workflow │ │ Health   │ │ Notify   │   │ │
-│  │  │ Service  │ │ Service  │ │ Service  │ │ Service  │   │ │
-│  │  └──────────┘ └──────────┘ └──────────┘ └──────────┘   │ │
-│  └──────────────────────────────┬───────────────────────────┘ │
-│                                  │                             │
-│  ┌───────────────────────────────▼──────────────────────────┐ │
-│  │                   Repository 层                           │ │
-│  │                   (数据访问)                               │ │
-│  │                                                           │ │
-│  │  ┌──────────┐ ┌──────────┐ ┌──────────┐ ┌──────────┐   │ │
-│  │  │ Tag      │ │ RSS      │ │ Dataset  │ │ LLMProxy │   │ │
-│  │  │ Repo     │ │ Repo     │ │ Repo     │ │ Repo     │   │ │
-│  │  └──────────┘ └──────────┘ └──────────┘ └──────────┘   │ │
-│  └──────────────────────────────┬───────────────────────────┘ │
-│                                  │                             │
-└──────────────────────────────────┼─────────────────────────────┘
-                                   │
-┌──────────────────────────────────▼─────────────────────────────┐
-│                      基础设施层                                  │
-│                                                                  │
-│  ┌──────────┐ ┌──────────┐ ┌──────────┐ ┌──────────────────┐  │
-│  │PostgreSQL│ │  Redis   │ │  NATS    │ │  TrueNAS (挂载)   │  │
-│  │  (数据)   │ │  (缓存)  │ │  (队列)  │ │  (文件存储)       │  │
-│  └──────────┘ └──────────┘ └──────────┘ └──────────────────┘  │
-└────────────────────────────────────────────────────────────────┘
-```
-
-### 请求处理流程
-
-```
-HTTP 请求
-  ↓
-Gin Router (路由匹配)
-  ↓
-Middleware (CORS → Logger → Auth)
-  ↓
-Handler (请求解析)
-  ↓
-Service (业务逻辑)
-  ↓
-Repository (数据访问)
-  ↓
-Database (PostgreSQL)
-  ↓
-Response (统一格式)
-```
-
-### 数据流向
-
-```
-外部数据源
-  │
-  ├─ RSS Feed → n8n K02 工作流 → Bellkeeper /api/ragflow/upload/with-routing
-  │                                  ↓
-  │                              分类路由 → URL去重 → RAGFlow 上传
-  │
-  ├─ URL 入库 → Bellkeeper /api/files/ingest/url
-  │                  ↓
-  │              提取器编排 → 文件落地 → 索引排队
-  │
-  └─ Matrix 命令 → Matrix Gateway → Command Router → Handler → 响应
-```
+> **架构、技术栈、模块职责、数据模型、关键链路、部署形态以 [ARCHITECTURE.md](ARCHITECTURE.md) 为唯一事实源**；运行状态见 [STATUS.md](STATUS.md)，演进历史见 [TIMELINE.md](TIMELINE.md)。本指南只保留开发规范与协作约定，不重复架构细节（避免与 SSOT 双写漂移）。
 
 ---
 
@@ -163,150 +36,7 @@ Response (统一格式)
 
 ### 目录结构
 
-```
-Bellkeeper/
-├── cmd/bellkeeper/
-│   └── main.go                    # 入口：Cobra 命令（serve/migrate/version）
-│
-├── internal/                      # 内部包（Go 约定，不对外暴露）
-│   ├── config/
-│   │   └── config.go              # Viper 配置加载
-│   │
-│   ├── handler/                   # Handler 层：HTTP 请求处理
-│   │   ├── handler.go             # Handlers 聚合结构体
-│   │   ├── health.go              # 健康检查
-│   │   ├── tag.go                 # 标签管理
-│   │   ├── rss.go                 # RSS 订阅管理
-│   │   ├── dataset.go             # 知识库映射
-│   │   ├── ragflow.go             # RAGFlow 代理
-│   │   ├── setting.go             # 运行时设置
-│   │   ├── workflow.go            # n8n 工作流
-│   │   ├── system.go              # 系统管理
-│   │   ├── llm_proxy.go           # LLM 代理管理
-│   │   ├── classify.go            # 分类
-│   │   ├── file_ingestion.go      # 文件入库
-│   │   ├── matrix_notify.go       # Matrix 通知
-│   │   └── matrix_admin.go        # Matrix 管理
-│   │
-│   ├── service/                   # Service 层：业务逻辑
-│   │   ├── service.go             # Services 聚合结构体
-│   │   ├── tag.go                 # 标签业务
-│   │   ├── rss.go                 # RSS 业务
-│   │   ├── dataset.go             # 数据集 + URL去重 + 标签路由
-│   │   ├── ragflow.go             # RAGFlow API 封装
-│   │   ├── ragflow_parse_queue.go # 解析队列
-│   │   ├── workflow.go            # n8n API 封装
-│   │   ├── setting.go             # 设置管理
-│   │   ├── health.go              # 健康检查
-│   │   ├── llm_proxy.go           # LLM 代理核心（令牌桶 + 路由）
-│   │   ├── llm_channel_health.go  # 熔断器
-│   │   ├── llm_model_group.go     # 虚拟模型组 + 粘性路由
-│   │   ├── classify.go            # LLM 分类
-│   │   ├── extractor.go           # 内容提取器
-│   │   ├── file_ingestion.go      # 文件入库
-│   │   ├── activity_log.go        # 操作日志
-│   │   ├── command.go             # Matrix 命令
-│   │   ├── notification.go        # Matrix 通知
-│   │   ├── notification_sender.go # 通知发送器
-│   │   └── admin.go               # Matrix 管理
-│   │
-│   ├── repository/                # Repository 层：数据访问
-│   │   ├── repository.go          # Repositories 聚合结构体
-│   │   ├── tag.go
-│   │   ├── rss.go
-│   │   ├── dataset.go
-│   │   ├── setting.go
-│   │   ├── llm_proxy.go
-│   │   ├── llm_channel.go
-│   │   ├── llm_model_group.go
-│   │   └── activity_log.go
-│   │
-│   ├── model/                     # 数据模型（GORM）
-│   │   ├── db.go                  # 数据库初始化 + AutoMigrate + Seed
-│   │   ├── tag.go
-│   │   ├── rss.go
-│   │   ├── dataset.go
-│   │   ├── llm_proxy.go
-│   │   ├── llm_channel.go
-│   │   ├── llm_model_group.go
-│   │   ├── activity_log.go
-│   │   ├── matrix.go
-│   │   └── setting.go
-│   │
-│   ├── middleware/                # HTTP 中间件
-│   │   ├── auth.go               # 认证（Authelia + API Key）
-│   │   ├── cors.go               # 跨域处理
-│   │   └── logger.go             # 请求日志
-│   │
-│   ├── router/
-│   │   └── router.go             # 路由注册
-│   │
-│   ├── matrix/                   # Matrix 平台模块
-│   │   ├── gateway/              # Matrix 网关
-│   │   │   ├── client.go         # Matrix 客户端
-│   │   │   └── sync.go           # Sync Loop
-│   │   ├── command/              # 命令系统
-│   │   │   ├── parser.go         # 命令解析
-│   │   │   ├── router.go         # 命令路由
-│   │   │   ├── handler.go        # 处理器接口
-│   │   │   └── handlers.go       # 内置处理器
-│   │   ├── notify/               # 通知网关
-│   │   ├── policy/               # 权限引擎
-│   │   ├── registry/             # 注册中心
-│   │   ├── queue/                # 消息队列
-│   │   ├── worker/               # 后台工作者
-│   │   │   └── notification_worker.go
-│   │   └── infra/                # 基础设施
-│   │       ├── redis.go
-│   │       └── nats.go
-│   │
-│   └── pkg/                      # 内部公共包
-│       ├── response/             # 统一响应格式
-│       │   └── response.go
-│       ├── defaults/             # 默认常量
-│       │   └── defaults.go
-│       └── urlutil/              # URL 工具
-│           └── normalize.go
-│
-├── web/                          # 前端代码（SolidJS）
-│   ├── src/
-│   │   ├── api/index.ts          # API 客户端
-│   │   ├── types/index.ts        # TypeScript 类型
-│   │   ├── components/           # 通用组件
-│   │   │   ├── Layout.tsx
-│   │   │   ├── Toast.tsx
-│   │   │   └── Modal.tsx
-│   │   ├── pages/                # 页面组件
-│   │   │   ├── Dashboard.tsx
-│   │   │   ├── Tags.tsx
-│   │   │   ├── RSSFeeds.tsx
-│   │   │   ├── Datasets.tsx
-│   │   │   ├── Documents.tsx
-│   │   │   ├── Workflows.tsx
-│   │   │   └── Settings.tsx
-│   │   ├── index.tsx
-│   │   └── index.css
-│   ├── package.json
-│   ├── vite.config.ts
-│   └── tsconfig.json
-│
-├── config/
-│   └── bellkeeper.yaml           # 默认配置文件
-│
-├── migrations/                   # SQL 迁移文件（参考用）
-│   ├── 001_init.up.sql
-│   └── 001_init.down.sql
-│
-├── docker/
-│   ├── Dockerfile                # 多阶段构建
-│   └── docker-compose.yml        # 开发编排
-│
-├── doc/                          # 项目文档
-├── go.mod
-├── go.sum
-├── Makefile
-└── README.md
-```
+代码目录结构与各包职责见 [ARCHITECTURE.md](ARCHITECTURE.md) §代码结构（含 1.0 新增的 `eventbus` / `llmgateway` / `pkb` 等包）。以下分层与依赖注入约定长期有效：
 
 ### 分层职责
 
@@ -349,7 +79,7 @@ router.Setup(r, handlers, cfg.Server.Mode, cfg.Server.APIKey)
 
 ### 前提条件
 
-- Go 1.22+
+- Go 1.25+
 - Node.js 20+ (前端开发)
 - PostgreSQL 16+
 - Docker + Docker Compose
@@ -1510,7 +1240,7 @@ cd /home/ubuntu/SilkSpool
 |------|------|---------|
 | API 正常 | 所有端点返回正确响应 | HTTP 请求测试 |
 | 错误处理 | 错误响应格式正确 | 错误场景测试 |
-| 认证 | API Key 和 Authelia 都正常 | 认证测试 |
+| 认证 | noauth（纯内网）+ API Key + LLM Token 正常 | 认证测试 |
 | 分页 | 列表 API 分页正常 | 分页参数测试 |
 | 并发安全 | 无数据竞争 | `go test -race` |
 
@@ -1531,77 +1261,6 @@ cd /home/ubuntu/SilkSpool
 | 输入验证 | 所有输入经过验证 |
 | SQL 注入 | 使用 GORM 查询构建器 |
 | XSS 防护 | HTML 输出经过清理 |
-
----
-
-## 继续开发计划
-
-### Phase 6: Matrix 前端界面（优先级 P0）
-
-| 任务 | 工作量 | 验收标准 | 状态 |
-|------|--------|---------|------|
-| 类型定义和 API 客户端 | 1 天 | 类型完整，API 可用 | ✅ |
-| Matrix 总览页 | 1 天 | 统计卡片+事件列表 | ✅ |
-| 房间管理页 | 1 天 | CRUD 正常 | ✅ |
-| 频道管理页 | 1 天 | CRUD 正常 | ✅ |
-| 命令管理页 | 1 天 | CRUD+测试功能 | ✅ |
-| 通知管理页 | 1 天 | 列表+筛选+重试 | ✅ |
-| 事件日志页 | 1 天 | 列表+筛选 | ✅ |
-| 命令日志页 | 1 天 | 列表+详情 | ✅ |
-| 导航菜单+路由 | 1 天 | 页面可访问 | ✅ |
-
-### Phase 1: 基础设施修复（优先级 P0）
-
-| 任务 | 工作量 | 前置条件 | 验收标准 | 状态 |
-|------|--------|---------|---------|------|
-| 引入 testify 库 | 1 天 | 无 | `go test` 可运行 | ✅ |
-| 修复 logger.go init() 错误 | 0.5 天 | 无 | 不忽略错误 | ✅ |
-| 修复 activity_log 异步错误 | 0.5 天 | 无 | 错误被记录 | ✅ |
-| 统一错误类型定义 | 1 天 | 无 | internal/pkg/errors/ | ✅ |
-| Goroutine 生命周期管理 | 2 天 | 无 | 所有 goroutine 可停止 | ⚠️ |
-| 优雅关闭完善 | 1 天 | 上项 | Matrix/NATS/Redis 优雅关闭 | ✅ |
-| LLM Proxy 单元测试 | 3 天 | testify | 覆盖率 > 80% | ⏳ |
-| Dataset Service 测试 | 2 天 | testify | 覆盖率 > 70% | ⏳ |
-
-### Phase 2: 文件入库模块（优先级 P1）
-
-| 任务 | 工作量 | 前置条件 | 验收标准 | 状态 |
-|------|--------|---------|---------|------|
-| ExtractorService 实现 | 3 天 | 无 | Trafilatura + Firecrawl 可用 | ✅ |
-| FileIngestionService 实现 | 3 天 | ExtractorService | URL → 文件落地正常 | ✅ |
-| 文件入库 API 完善 | 2 天 | Service 完成 | API 端点正常 | ⚠️ |
-| 与 n8n 工作流集成 | 2 天 | API 完成 | K01/K02 切换完成 | ⏳ |
-| 单元测试 | 2 天 | Service 完成 | 覆盖率 > 60% | ⏳ |
-
-### Phase 3: Matrix 平台完善（优先级 P1）
-
-| 任务 | 工作量 | 前置条件 | 验收标准 | 状态 |
-|------|--------|---------|---------|------|
-| 评估并简化设计文档 | 2 天 | 无 | 设计与实际匹配 | ✅ |
-| 权限引擎实现 | 3 天 | 设计评估 | 基础权限校验可用 | ❌ |
-| 通知网关完善 | 3 天 | 设计评估 | 通知发送正常 | ✅ |
-| 命令路由完善 | 2 天 | 权限引擎 | 命令执行正常 | ✅ |
-| Admin API | 2 天 | 上述完成 | 管理接口可用 | ✅ |
-| 用户角色管理 | 1 天 | 权限引擎 | 角色 API 可用 | ✅ |
-| 单元测试 | 2 天 | 上述完成 | 覆盖率 > 60% | ⏳ |
-
-### Phase 4: 监控与运维（优先级 P2）
-
-| 任务 | 工作量 | 前置条件 | 验收标准 | 状态 |
-|------|--------|---------|---------|------|
-| Prometheus metrics | 3 天 | 无 | /metrics 端点可用 | ✅ |
-| 健康检查改进 | 1 天 | 无 | readiness/liveness 区分 | ✅ |
-| 日志改进 | 1 天 | 无 | 日志级别可动态调整 | ✅ |
-| 配置热重载 | 2 天 | 无 | 配置变更无需重启 | ✅ |
-
-### Phase 5: 数据库与安全（优先级 P2）
-
-| 任务 | 工作量 | 前置条件 | 验收标准 | 状态 |
-|------|--------|---------|---------|------|
-| 引入 golang-migrate | 2 天 | 无 | 版本化迁移可用 | ❌ |
-| API Key 常量时间比较 | 0.5 天 | 无 | 安全加固 | ✅ |
-| 请求限流中间件 | 1 天 | 无 | 限流可配置 | ✅ |
-| HTML 清理（防 XSS） | 1 天 | 无 | 输出安全 | ✅ |
 
 ---
 
@@ -1691,9 +1350,6 @@ llm_proxy:
   max_retries: 3
   default_bucket_rpm: 60
 
-ragflow:
-  base_url: "http://sp-ragflow:9380"
-  api_key: "${RAGFLOW_API_KEY}"
 
 n8n:
   base_url: "http://sp-n8n:5678"
