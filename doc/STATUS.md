@@ -77,7 +77,7 @@ RSS(rsshub + 官方直连) ─→ 后端 RSSFetcherService(fetch+enqueue)
 | LLM 持久队列 | ✅ 1.0 | `llm_jobs` DB 状态机 + `llm.job.submit` 事件驱动 + 原子 claim + recovery 兜底 |
 | 个人知识库 PKB | ✅ | `pkb-curate` 漏斗 + 原子化重构 + 知识骨架/双库 + 自动闭环调度 + golden set 评估；提示词外置 |
 | 爬取与提取 | ✅ 1.0 | DequeueFair 公平调度 + 域名冷却/健康度 + 三 worker 事件链 + LLM 规则优化 + recrawl 去重 |
-| RSS | ✅ 稳定 | feed CRUD/验证 + 后端调度 + 自动暂停恢复；6 feed 停用有因（见记忆） |
+| RSS | ✅ 稳定 | feed CRUD/验证 + 后端调度 + **自动暂停恢复（2026-07-27 接线修复，此前 probePausedFeeds 死代码致熔断源不自愈）**；停用源见记忆 |
 | Meilisearch 检索 | ✅ 1.0 | `/api/files/search\|ask`；入库即触发索引；问答 rerank 精排 |
 | Matrix 控制平面 | ✅ 稳定 | Gateway + Command Router + Agent + 通知聚合去重 + 权限两层 + Admin API |
 | Agent 系统 | ✅ MVP | 回合循环 + 9 工具 + Redis 房间会话 + 限速 + 权限分级；进程内直调 Gateway |
@@ -102,6 +102,7 @@ RSS(rsshub + 官方直连) ─→ 后端 RSSFetcherService(fetch+enqueue)
 | PKB 运营 | 存量 raw 分批跑 + cron 固化；`feature_pkb_auto_fill/feed/propose` 默认关、按需开 | 🔶 数据运营 |
 | LLM | prompt cache 命中率监控（new-api 容器已退役下线） | 🔶 待决策 |
 | 爬虫运营 | 新源批量导入 + 7 天成功率验收；周源健康报告 | 🔶 持续 |
+| RSS 源 | SeebugPaper 上游 TLS 证书链不完整（缺中间 CA）直连验证失败，暂保留停用；余 6 源（HN×3/HF Papers/Krebs/嘶吼）已 07-27 恢复 | 🔶 待修 |
 
 ---
 
