@@ -190,9 +190,14 @@ func (s *RSSFetcherService) runLoop(ctx context.Context) {
 	ticker := time.NewTicker(time.Duration(s.cfg.CheckInterval) * time.Second)
 	retryTicker := time.NewTicker(30 * time.Second)
 	heartbeat := time.NewTicker(5 * time.Minute)
+	// 暂停 feed 的自动恢复探测：周期性对 paused feed 抽样探测上游，
+	// 恢复后按通过率分级自动 resume（实现见 rss_recovery.go）。
+	// ProbeIntervalMinutes 在 NewRSSFetcherService 中已保证 > 0。
+	probeTicker := time.NewTicker(time.Duration(s.cfg.ProbeIntervalMinutes) * time.Minute)
 	defer ticker.Stop()
 	defer retryTicker.Stop()
 	defer heartbeat.Stop()
+	defer probeTicker.Stop()
 
 	for {
 		select {
@@ -200,6 +205,8 @@ func (s *RSSFetcherService) runLoop(ctx context.Context) {
 			s.fetchAllActive(ctx)
 		case <-retryTicker.C:
 			s.processRetryQueue(ctx)
+		case <-probeTicker.C:
+			s.probePausedFeeds(ctx)
 		case <-heartbeat.C:
 			s.logActivity("heartbeat", "rss_fetcher", "success", "RSSFetcher alive", 0, 0)
 		case <-s.stopCh:
