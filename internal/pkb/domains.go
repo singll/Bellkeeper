@@ -19,40 +19,49 @@ type Weights struct {
 
 // Defaults 全局默认（可被单领域覆盖）
 type Defaults struct {
-	VaultThreshold                  float64         `yaml:"vault_threshold"`
-	ArchiveThreshold                float64         `yaml:"archive_threshold"`
-	Weights                         Weights         `yaml:"weights"`
-	ScoreModel                      string          `yaml:"score_model"`
-	ReconstructModel                string          `yaml:"reconstruct_model"`
-	DigestModel                     string          `yaml:"digest_model"`
-	SkeletonModel                   string          `yaml:"skeleton_model"`         // 骨架生成用顶级推理档（高价值低频）；空则回退 digest_model
-	MatchModel                      string          `yaml:"match_model"`            // 归位匹配用快强档（卡↔骨架节点高频判断）；空则回退 score_model
-	GapfillModel                    string          `yaml:"gapfill_model"`          // 缺口填充起草用顶级推理档；空则回退 skeleton_model
-	VerifyModel                     string          `yaml:"verify_model"`           // 缺口填充 V2 核实用快强档；空则回退 match_model
-	PromoteModel                    string          `yaml:"promote_model"`          // 资讯综述/晋升判定用快强档；空则回退 match_model
-	FeedContentTypes                []string        `yaml:"feed_content_types"`     // 视为「资讯」的 content_type(pkb_type)，默认 [news, release]
-	PromoteEnabled                  *bool           `yaml:"promote_enabled"`        // 资讯晋升闸总开关（耐久知识点→知识库卡，走同一 V2 路径）；默认 true
-	PromoteDurabilityMin            float64         `yaml:"promote_durability_min"` // 晋升所需最低 durability（事件性一律不晋升）；默认 7.0
-	ScoreTemperature                float64         `yaml:"score_temperature"`
-	ReconstructTemperature          float64         `yaml:"reconstruct_temperature"`
-	DigestTemperature               float64         `yaml:"digest_temperature"`
-	PerRun                          int             `yaml:"per_run"`
-	ContentTruncate                 int             `yaml:"content_truncate"`
-	LLMTokenEnv                     string          `yaml:"llm_token_env"`
-	MaxCardsPerArticle              int             `yaml:"max_cards_per_article"`
-	EnableSemanticDedup             *bool           `yaml:"enable_semantic_dedup"`
-	MapSnapshotOnRefresh            *bool           `yaml:"map_snapshot_on_refresh"`
-	TopicMocEnabled                 *bool           `yaml:"topic_moc_enabled"`
-	TopicMinCards                   int             `yaml:"topic_min_cards"`
-	SkeletonChangeApprovalThreshold int             `yaml:"skeleton_change_approval_threshold"` // 骨架变更影响半径≤此值=小动作自动应用，>此值=大动作走 Matrix 批准
-	GapFillPerRun                   int             `yaml:"gap_fill_per_run"`                   // 缺口填充每领域每轮上限（默认10）
-	GapFillOrder                    string          `yaml:"gap_fill_order"`                     // breadth=自顶向下广度优先（先填根/主题层缺口）
-	GapFillEnabled                  map[string]bool `yaml:"gap_fill_enabled"`                   // 每领域开关（优先级最高，打样先只开一个域）
-	GapFillEnabledAll               *bool           `yaml:"gap_fill_enabled_all"`               // 一键总开关
-	GapFillDefault                  *bool           `yaml:"gap_fill_default"`                   // 未列入 gap_fill_enabled 的新领域默认开/关
-	AuditOnRun                      *bool           `yaml:"audit_on_run"`
-	Budget                          Budget          `yaml:"budget"`
-	Retry                           Retry           `yaml:"retry"`
+	VaultThreshold   float64 `yaml:"vault_threshold"`
+	ArchiveThreshold float64 `yaml:"archive_threshold"`
+	Weights          Weights `yaml:"weights"`
+	// 打分门控（结构性改造：堵离题噪音、修 atomic_potential 死字段、可审阈值）
+	RelevanceGate                   float64            `yaml:"relevance_gate"`             // relevance < 此值 → 封顶不进 vault（默认5；设负数关闭）
+	RelevanceHardFloor              float64            `yaml:"relevance_hard_floor"`       // relevance < 此值 → 直接 discard（默认3；设负数关闭）
+	ContentTypeAdjust               map[string]float64 `yaml:"content_type_adjust"`        // content_type→final 加减分；缺失的 key 回退内置默认（可只覆盖单项）
+	AtomicPotentialBonus            float64            `yaml:"atomic_potential_bonus"`     // atomic_potential 达标时 final 上浮（默认0.3，防信息密集好文漏召）
+	AtomicPotentialBonusMin         int                `yaml:"atomic_potential_bonus_min"` // 触发上浮的 atomic_potential 阈值（默认8；设>10 关闭）
+	ReviewLedgerEnabled             *bool              `yaml:"review_ledger_enabled"`      // 拒收台账开关（默认true）
+	SnapshotKeep                    int                `yaml:"snapshot_keep"`              // digest/ 每域滚动保留份数（默认5）
+	SnapshotWeekly                  *bool              `yaml:"snapshot_weekly"`            // 同周快照覆盖为一份（默认true）
+	ScoreModel                      string             `yaml:"score_model"`
+	ReconstructModel                string             `yaml:"reconstruct_model"`
+	DigestModel                     string             `yaml:"digest_model"`
+	SkeletonModel                   string             `yaml:"skeleton_model"`         // 骨架生成用顶级推理档（高价值低频）；空则回退 digest_model
+	MatchModel                      string             `yaml:"match_model"`            // 归位匹配用快强档（卡↔骨架节点高频判断）；空则回退 score_model
+	GapfillModel                    string             `yaml:"gapfill_model"`          // 缺口填充起草用顶级推理档；空则回退 skeleton_model
+	VerifyModel                     string             `yaml:"verify_model"`           // 缺口填充 V2 核实用快强档；空则回退 match_model
+	PromoteModel                    string             `yaml:"promote_model"`          // 资讯综述/晋升判定用快强档；空则回退 match_model
+	FeedContentTypes                []string           `yaml:"feed_content_types"`     // 视为「资讯」的 content_type(pkb_type)，默认 [news, release]
+	PromoteEnabled                  *bool              `yaml:"promote_enabled"`        // 资讯晋升闸总开关（耐久知识点→知识库卡，走同一 V2 路径）；默认 true
+	PromoteDurabilityMin            float64            `yaml:"promote_durability_min"` // 晋升所需最低 durability（事件性一律不晋升）；默认 7.0
+	ScoreTemperature                float64            `yaml:"score_temperature"`
+	ReconstructTemperature          float64            `yaml:"reconstruct_temperature"`
+	DigestTemperature               float64            `yaml:"digest_temperature"`
+	PerRun                          int                `yaml:"per_run"`
+	ContentTruncate                 int                `yaml:"content_truncate"`
+	LLMTokenEnv                     string             `yaml:"llm_token_env"`
+	MaxCardsPerArticle              int                `yaml:"max_cards_per_article"`
+	EnableSemanticDedup             *bool              `yaml:"enable_semantic_dedup"`
+	MapSnapshotOnRefresh            *bool              `yaml:"map_snapshot_on_refresh"`
+	TopicMocEnabled                 *bool              `yaml:"topic_moc_enabled"`
+	TopicMinCards                   int                `yaml:"topic_min_cards"`
+	SkeletonChangeApprovalThreshold int                `yaml:"skeleton_change_approval_threshold"` // 骨架变更影响半径≤此值=小动作自动应用，>此值=大动作走 Matrix 批准
+	GapFillPerRun                   int                `yaml:"gap_fill_per_run"`                   // 缺口填充每领域每轮上限（默认10）
+	GapFillOrder                    string             `yaml:"gap_fill_order"`                     // breadth=自顶向下广度优先（先填根/主题层缺口）
+	GapFillEnabled                  map[string]bool    `yaml:"gap_fill_enabled"`                   // 每领域开关（优先级最高，打样先只开一个域）
+	GapFillEnabledAll               *bool              `yaml:"gap_fill_enabled_all"`               // 一键总开关
+	GapFillDefault                  *bool              `yaml:"gap_fill_default"`                   // 未列入 gap_fill_enabled 的新领域默认开/关
+	AuditOnRun                      *bool              `yaml:"audit_on_run"`
+	Budget                          Budget             `yaml:"budget"`
+	Retry                           Retry              `yaml:"retry"`
 }
 
 // Budget 本轮大模型调用护栏。0 表示不限制。
@@ -78,8 +87,11 @@ type Domain struct {
 	VaultSubpath     string   `yaml:"vault_subpath"`
 	Keywords         []string `yaml:"keywords"`
 	IsDefault        bool     `yaml:"is_default"`
-	VaultThreshold   float64  `yaml:"vault_threshold"`   // 0 = 用 defaults
-	ArchiveThreshold float64  `yaml:"archive_threshold"` // 0 = 用 defaults
+	VaultThreshold   float64  `yaml:"vault_threshold"`     // 0 = 用 defaults
+	ArchiveThreshold float64  `yaml:"archive_threshold"`   // 0 = 用 defaults
+	RelevanceGate    float64  `yaml:"relevance_gate"`      // 0 = 用 defaults（相关度门）
+	VaultQuotaPerRun int      `yaml:"vault_quota_per_run"` // 每领域每轮 vault 上限，0=不限
+	FeedSection      string   `yaml:"feed_section"`        // 资讯合并小节名，空=用 Display
 	// Feed 标记该领域为「资讯库容器」（ADR-0005）：其 vault 子目录承载分领域分日资讯存档
 	// （资讯/<领域>/<日期>.md），不产知识原子卡——故 digest/audit 的领域遍历跳过它、知识卡
 	// 统计不计入，资讯不污染知识骨架（替代「collectDigestCards 路径排除」的更干净做法）。
@@ -116,6 +128,36 @@ func LoadDomains(path string) (*DomainsConfig, error) {
 	}
 	if d.Weights == (Weights{}) {
 		d.Weights = Weights{Relevance: 0.30, Depth: 0.25, Actionability: 0.20, Durability: 0.10, Novelty: 0.15}
+	}
+	if d.RelevanceGate == 0 {
+		d.RelevanceGate = 5.0
+	}
+	if d.RelevanceHardFloor == 0 {
+		d.RelevanceHardFloor = 3.0
+	}
+	if d.AtomicPotentialBonus == 0 {
+		d.AtomicPotentialBonus = 0.3
+	}
+	if d.AtomicPotentialBonusMin <= 0 {
+		d.AtomicPotentialBonusMin = 8
+	}
+	if d.ReviewLedgerEnabled == nil {
+		d.ReviewLedgerEnabled = boolPtr(true)
+	}
+	if d.SnapshotKeep <= 0 {
+		d.SnapshotKeep = 5
+	}
+	if d.SnapshotWeekly == nil {
+		d.SnapshotWeekly = boolPtr(true)
+	}
+	// content_type 加减分：补齐内置默认（用户在 yaml 里可只覆盖单项，其余保持默认）
+	if d.ContentTypeAdjust == nil {
+		d.ContentTypeAdjust = map[string]float64{}
+	}
+	for k, v := range defaultContentTypeAdjust {
+		if _, ok := d.ContentTypeAdjust[k]; !ok {
+			d.ContentTypeAdjust[k] = v
+		}
 	}
 	if d.ScoreModel == "" {
 		d.ScoreModel = "pool-summary"
@@ -262,6 +304,14 @@ func (d Domain) ArchiveThresholdOr(def Defaults) float64 {
 	return def.ArchiveThreshold
 }
 
+// RelevanceGateOr 领域相关度门优先（非0即用，含设负数关闭），否则用全局默认。
+func (d Domain) RelevanceGateOr(def Defaults) float64 {
+	if d.RelevanceGate != 0 {
+		return d.RelevanceGate
+	}
+	return def.RelevanceGate
+}
+
 // DomainsPromptBlock 把领域清单渲染成喂给打分 LLM 的文本块
 func (dc *DomainsConfig) DomainsPromptBlock() string {
 	var b strings.Builder
@@ -276,6 +326,30 @@ func (dc *DomainsConfig) DomainsPromptBlock() string {
 }
 
 func boolPtr(v bool) *bool { return &v }
+
+// defaultContentTypeAdjust content_type→final 加减分内置默认（可被 domains.yaml content_type_adjust 单项覆盖）。
+// 资讯/营销降权、教程/论文/代码提权——把原先硬编码在 FinalScore 的调整搬出来，可调不改代码。
+var defaultContentTypeAdjust = map[string]float64{
+	"marketing": -2.0, "news": -1.0, "release": -0.5,
+	"tutorial": 0.5, "paper": 0.5, "reference": 0.5,
+	"code": 0.7, "poc": 0.7,
+}
+
+// GetReviewLedgerEnabled 拒收台账开关（默认开）：记录被拒/降级条目连同评分，供定期审阈值/查漏召。
+func (d *Defaults) GetReviewLedgerEnabled() bool {
+	if d.ReviewLedgerEnabled != nil {
+		return *d.ReviewLedgerEnabled
+	}
+	return true
+}
+
+// GetSnapshotWeekly 同周 digest 快照覆盖为一份（默认开）：堵「一天多份全树快照」的冗余。
+func (d *Defaults) GetSnapshotWeekly() bool {
+	if d.SnapshotWeekly != nil {
+		return *d.SnapshotWeekly
+	}
+	return true
+}
 
 func (d *Defaults) GetEnableSemanticDedup() bool {
 	if d.EnableSemanticDedup != nil {

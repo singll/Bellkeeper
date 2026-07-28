@@ -11,6 +11,23 @@ defaults:
     actionability: 0.20
     durability: 0.10
     novelty: 0.15
+  # 打分门控（结构性改造 2026-07：不漏有用、不进噪音）——改这里即调策略，下轮运行生效，无需重编：
+  relevance_gate: 5.0            # relevance < 此值 → 封顶不进 vault（堵「离题但高深度」噪音，如离群科普）；设负数关闭
+  relevance_hard_floor: 3.0      # relevance < 此值 → 直接 discard（与配置领域基本无关）；设负数关闭
+  atomic_potential_bonus: 0.3    # atomic_potential 达标时 final 上浮（防信息密集好文因单项分不突出被误杀=漏召）
+  atomic_potential_bonus_min: 8  # 触发上浮所需 atomic_potential（≈5+ 个可独立知识点）；设 >10 关闭
+  content_type_adjust:           # content_type→final 加减分（可只写要改的项，其余用内置默认）；营销/资讯降权、教程/论文/代码提权
+    marketing: -2.0
+    news: -1.0
+    release: -0.5
+    tutorial: 0.5
+    paper: 0.5
+    reference: 0.5
+    code: 0.7
+    poc: 0.7
+  review_ledger_enabled: true    # 拒收台账：被拒/降级条目连同评分写入 vault/_拒收台账/<月>.md，供定期审阈值/查漏召
+  snapshot_keep: 5               # digest/ 每域滚动保留份数（增量快照，历史瘦身）
+  snapshot_weekly: true          # 同周 digest 快照覆盖为一份（堵一天多份全树冗余）
   score_model: pool-summary    # 打分用快模型组（deepseek/qwen，便宜快，适合批量打分）
   reconstruct_model: pool-pkb  # 重构用 kimi-k2.6（moonshot，推理强；仅 >=7 高分文章触发，量少）
   digest_model: pool-pkb       # 体系化综述用强模型，低频触发
