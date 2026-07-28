@@ -64,14 +64,19 @@ func (c *Curator) RunFeed(opts FeedOptions) error {
 	}
 	sort.Strings(domainNames)
 
-	var written, promotedTotal int
+	// 资讯改「一天一文件」：各领域各自综述（保质量），按小节合并进 vault/资讯/<date>.md。
+	// 领域→小节：FeedSection 优先，兜底域(misc)/资讯容器域(news) 归「其他」，消除「最新资讯」子目录与领域重复。
+	sectionByName := map[string]*feedSection{}
+	var sectionOrder []string
+	var promotedTotal int
 	for _, dn := range domainNames {
 		group := byDomain[dn]
 		domain, ok := c.domains.FindDomain(dn)
 		if !ok {
 			domain = c.domains.DefaultDomain()
 		}
-		fmt.Printf("\n[pkb-feed] 领域 %s(%s) 资讯条目=%d\n", domain.Display, dn, len(group))
+		secName := feedSectionName(domain)
+		fmt.Printf("\n[pkb-feed] 领域 %s(%s)→小节「%s」资讯条目=%d\n", domain.Display, dn, secName, len(group))
 		if opts.DryRun {
 			for _, it := range group {
 				fmt.Printf("  - %s（%s）\n", it.title, it.url)
@@ -83,13 +88,13 @@ func (c *Curator) RunFeed(opts FeedOptions) error {
 			fmt.Printf("[pkb-feed] ⚠ %s 综述失败（跳过该领域，不中断整批）: %v\n", domain.Display, err)
 			continue
 		}
-		dst, err := c.writeFeedArchive(feedRoot, domain, date, summary, len(group))
-		if err != nil {
-			fmt.Printf("[pkb-feed] ⚠ %s 落盘失败: %v\n", domain.Display, err)
-			continue
+		if s, exists := sectionByName[secName]; exists {
+			s.summary += "\n\n" + strings.TrimSpace(summary) // 同小节合并（misc+news→其他）
+			s.count += len(group)
+		} else {
+			sectionByName[secName] = &feedSection{name: secName, summary: strings.TrimSpace(summary), count: len(group)}
+			sectionOrder = append(sectionOrder, secName)
 		}
-		fmt.Printf("    → %s\n", dst)
-		written++
 
 		// 晋升闸（ADR-0005 §5.2）：从当日资讯识别耐久知识点，走缺口填充同一 V2 路径晋升为知识库卡。
 		// 仅对知识领域晋升（feed 容器领域的资讯多为事件性、无对应知识骨架，不晋升）。
@@ -102,14 +107,62 @@ func (c *Curator) RunFeed(opts FeedOptions) error {
 		fmt.Printf("\n[pkb-feed] DRY-RUN：仅列出将综述/晋升的资讯条目，不调用 LLM/不抓取/不写盘\n")
 		return nil
 	}
+
+	written := 0
+	if len(sectionOrder) > 0 {
+		dst, err := c.writeFeedDaily(feedRoot, date, orderedSections(sectionByName, sectionOrder), len(items))
+		if err != nil {
+			fmt.Printf("[pkb-feed] ⚠ 当日资讯落盘失败: %v\n", err)
+		} else {
+			fmt.Printf("    → %s\n", dst)
+			written = 1
+		}
+	}
+
 	if promotedTotal > 0 {
 		fmt.Printf("\n[pkb-feed] 晋升 %d 个耐久知识点入知识库，触发 rebuild 对齐索引...\n", promotedTotal)
 		if err := c.client.Rebuild(); err != nil {
 			fmt.Printf("[pkb-feed] ⚠ rebuild 失败（卡已落盘，可稍后手动 rebuild）: %v\n", err)
 		}
 	}
-	fmt.Printf("\n[pkb-feed] 完成：生成 %d 个领域的资讯存档，晋升 %d 个知识点\n", written, promotedTotal)
+	fmt.Printf("\n[pkb-feed] 完成：生成 %d 份当日资讯（%d 小节），晋升 %d 个知识点\n", written, len(sectionOrder), promotedTotal)
 	return nil
+}
+
+// feedSection 当日资讯的一个领域小节（合并写入 vault/资讯/<date>.md）。
+type feedSection struct {
+	name    string
+	summary string
+	count   int
+}
+
+// feedSectionName 领域→资讯小节名：FeedSection 优先；兜底域(misc)/资讯容器域(news) 归「其他」；
+// 其余用 Display。消除旧「最新资讯」子目录与领域内容重复。
+func feedSectionName(domain Domain) string {
+	if domain.FeedSection != "" {
+		return domain.FeedSection
+	}
+	if domain.IsDefault || domain.Feed {
+		return "其他"
+	}
+	return domain.Display
+}
+
+// orderedSections 按出现顺序组装小节，「其他」始终垫底。
+func orderedSections(byName map[string]*feedSection, order []string) []feedSection {
+	out := make([]feedSection, 0, len(order))
+	var other *feedSection
+	for _, name := range order {
+		if name == "其他" {
+			other = byName[name]
+			continue
+		}
+		out = append(out, *byName[name])
+	}
+	if other != nil {
+		out = append(out, *other)
+	}
+	return out
 }
 
 // feedArchiveRoot 返回资讯库容器领域（feed:true）的 vault 子路径，作为资讯存档根（如 vault/资讯）。
@@ -229,10 +282,10 @@ func renderFeedItems(items []feedItem) string {
 	return b.String()
 }
 
-// writeFeedArchive 落资讯库当日存档 <feedRoot>/<领域 display>/<date>.md（一天一文件，原子写）。
+// writeFeedDaily 落当日资讯为「一天一文件」vault/资讯/<date>.md，正文按领域分 ## 小节（原子写）。
 // frontmatter type: pkb_feed 标记非知识卡；跨天只新增文件不删历史，单天重跑覆盖（当天全量综述，幂等）。
-func (c *Curator) writeFeedArchive(feedRoot string, domain Domain, date, summary string, itemCount int) (string, error) {
-	dir := filepath.Join(c.basePath, feedRoot, sanitizeFilename(domain.Display))
+func (c *Curator) writeFeedDaily(feedRoot, date string, sections []feedSection, totalItems int) (string, error) {
+	dir := filepath.Join(c.basePath, feedRoot)
 	if err := os.MkdirAll(dir, 0755); err != nil {
 		return "", fmt.Errorf("mkdir feed dir: %w", err)
 	}
@@ -240,20 +293,23 @@ func (c *Curator) writeFeedArchive(feedRoot string, domain Domain, date, summary
 
 	var b strings.Builder
 	b.WriteString("---\n")
-	b.WriteString(fmt.Sprintf("title: %s 资讯 %s\n", domain.Display, date))
+	b.WriteString(fmt.Sprintf("title: 资讯 %s\n", date))
 	b.WriteString("type: pkb_feed\n")
-	b.WriteString(fmt.Sprintf("domain: %s\n", domain.Name))
 	b.WriteString(fmt.Sprintf("date: %s\n", date))
 	b.WriteString(fmt.Sprintf("generated_at: %s\n", time.Now().Format(time.RFC3339)))
-	b.WriteString(fmt.Sprintf("item_count: %d\n", itemCount))
-	b.WriteString(fmt.Sprintf("tags: [pkb-feed, %s]\n", domain.Display))
+	b.WriteString(fmt.Sprintf("item_count: %d\n", totalItems))
+	b.WriteString("tags: [pkb-feed]\n")
 	b.WriteString("---\n\n")
-	b.WriteString(fmt.Sprintf("### %s · %s 资讯\n\n", date, domain.Display))
-	b.WriteString(summary)
-	b.WriteString("\n")
+	b.WriteString(fmt.Sprintf("# %s 资讯\n\n", date))
+	for _, s := range sections {
+		b.WriteString(fmt.Sprintf("## %s\n\n", s.name))
+		b.WriteString(strings.TrimSpace(s.summary))
+		b.WriteString("\n\n")
+	}
+	content := strings.TrimRight(b.String(), "\n") + "\n"
 
 	tmp := dst + ".tmp.md"
-	if err := os.WriteFile(tmp, []byte(b.String()), 0644); err != nil {
+	if err := os.WriteFile(tmp, []byte(content), 0644); err != nil {
 		return "", fmt.Errorf("write tmp: %w", err)
 	}
 	if err := os.Rename(tmp, dst); err != nil {

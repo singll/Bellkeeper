@@ -244,14 +244,24 @@ type PKBFeedArchive struct {
 // 目录名与 domains.yaml feed 领域 vault_subpath 末段一致）。供日报聚合链接当日资讯；无则返回空。
 func (s *PKBReportService) FeedArchivesByDate(date string) ([]PKBFeedArchive, error) {
 	feedRoot := filepath.Join(s.basePath, "vault", "资讯")
+	var out []PKBFeedArchive
+	// 新结构（一天一文件）：vault/资讯/<date>.md，Domain 记「资讯」代表整天。
+	daily := filepath.Join(feedRoot, date+".md")
+	if _, err := os.Stat(daily); err == nil {
+		rel, relErr := filepath.Rel(s.basePath, daily)
+		if relErr != nil {
+			rel = daily
+		}
+		out = append(out, PKBFeedArchive{Domain: "资讯", RelPath: filepath.ToSlash(rel)})
+	}
+	// 兼容旧结构（存量迁移前仍可浏览）：vault/资讯/<领域>/<date>.md
 	entries, err := os.ReadDir(feedRoot)
 	if err != nil {
 		if os.IsNotExist(err) {
-			return nil, nil
+			return out, nil
 		}
-		return nil, fmt.Errorf("read feed root: %w", err)
+		return out, fmt.Errorf("read feed root: %w", err)
 	}
-	var out []PKBFeedArchive
 	for _, e := range entries {
 		if !e.IsDir() {
 			continue
@@ -333,7 +343,11 @@ func (s *PKBReportService) FeedArchiveHTML(date, domain string) (PKBFeedArchiveC
 	if domain == "" || strings.ContainsAny(domain, `/\`) || strings.Contains(domain, "..") {
 		return PKBFeedArchiveContent{}, fmt.Errorf("invalid domain")
 	}
-	path := filepath.Join(s.basePath, "vault", "资讯", domain, date+".md")
+	// 新结构（一天一文件）优先：vault/资讯/<date>.md；回退旧结构 vault/资讯/<domain>/<date>.md（存量兼容）。
+	path := filepath.Join(s.basePath, "vault", "资讯", date+".md")
+	if _, statErr := os.Stat(path); statErr != nil {
+		path = filepath.Join(s.basePath, "vault", "资讯", domain, date+".md")
+	}
 	raw, err := os.ReadFile(path)
 	if err != nil {
 		if os.IsNotExist(err) {

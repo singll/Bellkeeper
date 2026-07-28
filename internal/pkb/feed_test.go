@@ -76,16 +76,19 @@ func TestFeedArchiveRoot(t *testing.T) {
 	assert.False(t, ok2, "无 feed 领域时应返回 false")
 }
 
-// TestWriteFeedArchive 守住资讯存档落盘契约：路径 <root>/<display>/<date>.md + frontmatter type: pkb_feed。
-func TestWriteFeedArchive(t *testing.T) {
+// TestWriteFeedDaily 守住资讯「一天一文件」落盘契约：路径 <root>/<date>.md + type: pkb_feed + 按 ## 小节。
+func TestWriteFeedDaily(t *testing.T) {
 	base := t.TempDir()
 	c := &Curator{basePath: base}
-	domain := Domain{Name: "programming", Display: "编程"}
-	dst, err := c.writeFeedArchive("vault/资讯", domain, "2026-06-17", "今日要点：Go 1.24 发布。", 3)
-	if err != nil {
-		t.Fatalf("writeFeedArchive: %v", err)
+	sections := []feedSection{
+		{name: "编程", summary: "今日要点：Go 1.24 发布。", count: 3},
+		{name: "AI", summary: "GPT 新模型发布。", count: 2},
 	}
-	want := filepath.Join(base, "vault", "资讯", "编程", "2026-06-17.md")
+	dst, err := c.writeFeedDaily("vault/资讯", "2026-06-17", sections, 5)
+	if err != nil {
+		t.Fatalf("writeFeedDaily: %v", err)
+	}
+	want := filepath.Join(base, "vault", "资讯", "2026-06-17.md")
 	if dst != want {
 		t.Fatalf("落盘路径 = %q, want %q", dst, want)
 	}
@@ -95,10 +98,36 @@ func TestWriteFeedArchive(t *testing.T) {
 	}
 	content := string(data)
 	assert.Contains(t, content, "type: pkb_feed", "资讯存档须标 type: pkb_feed（非知识卡）")
-	assert.Contains(t, content, "domain: programming")
-	assert.Contains(t, content, "item_count: 3")
-	assert.Contains(t, content, "### 2026-06-17 · 编程 资讯")
+	assert.Contains(t, content, "item_count: 5")
+	assert.Contains(t, content, "# 2026-06-17 资讯")
+	assert.Contains(t, content, "## 编程")
+	assert.Contains(t, content, "## AI")
 	assert.Contains(t, content, "今日要点：Go 1.24 发布。")
+	assert.Contains(t, content, "GPT 新模型发布。")
+}
+
+// TestFeedSectionName 守住领域→小节映射：兜底/资讯容器域归「其他」，其余用 FeedSection/Display。
+func TestFeedSectionName(t *testing.T) {
+	assert.Equal(t, "AI", feedSectionName(Domain{Name: "ai", Display: "人工智能", FeedSection: "AI"}))
+	assert.Equal(t, "编程", feedSectionName(Domain{Name: "programming", Display: "编程"}))
+	assert.Equal(t, "其他", feedSectionName(Domain{Name: "misc", Display: "周边杂项", IsDefault: true}))
+	assert.Equal(t, "其他", feedSectionName(Domain{Name: "news", Display: "最新资讯", Feed: true}))
+}
+
+// TestOrderedSections 守住小节排序：「其他」始终垫底。
+func TestOrderedSections(t *testing.T) {
+	byName := map[string]*feedSection{
+		"AI": {name: "AI"},
+		"其他": {name: "其他"},
+		"编程": {name: "编程"},
+	}
+	got := orderedSections(byName, []string{"AI", "其他", "编程"})
+	if len(got) != 3 {
+		t.Fatalf("应 3 小节，实得 %d", len(got))
+	}
+	if got[len(got)-1].name != "其他" {
+		t.Errorf("「其他」应垫底，实际末位: %s", got[len(got)-1].name)
+	}
 }
 
 func writeFeedTestFile(t *testing.T, path, content string) {

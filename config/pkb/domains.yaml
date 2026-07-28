@@ -78,24 +78,28 @@ domains:
     display: 编程
     scope: 后端与全栈工程实践——主流语言（Java/C#/.NET/Go/Rust）、前端框架（React/Vue/TypeScript）、服务端架构与微服务的设计与落地。
     vault_subpath: vault/编程
+    feed_section: 编程          # 资讯合并「一天一文件」时的小节名（## 编程）
     keywords: [java, .net, csharp, golang, go, rust, 前端, react, vue, typescript, 后端, 架构, 微服务]
 
   - name: security
     display: 网络安全
     scope: 攻防安全——Web/二进制/移动端漏洞挖掘与利用、代码审计、内网与域渗透、逆向工程，以及对应的防御与合规。
     vault_subpath: vault/安全
+    feed_section: 安全          # 资讯合并小节名（## 安全）
     keywords: [渗透测试, 代码审计, 逆向, 安卓, android, 内网渗透, 域渗透, 安全合规, owasp, cve, poc, exp, 漏洞]
 
   - name: cs-fundamentals
     display: 计算机基础
     scope: 计算机基础与系统——算法与数据结构、操作系统、网络协议（TCP/HTTP）、数据库，以及 Linux 运维与容器/K8s 编排。
     vault_subpath: vault/基础
+    feed_section: 基础          # 资讯合并小节名（## 基础）
     keywords: [算法, 数据结构, 操作系统, 网络协议, tcp, http, 运维, linux, 容器, k8s, 数据库]
 
   - name: ai
     display: 人工智能
     scope: 人工智能工程——大模型原理与微调、RAG/Agent 应用、机器学习与深度学习基础、NLP 与 Transformer 架构。
     vault_subpath: vault/AI
+    feed_section: AI            # 资讯合并小节名（## AI）
     keywords: [大模型, llm, nlp, 机器学习, 深度学习, 强化学习, rag, agent, transformer, 微调, embedding]
 
   - name: misc
