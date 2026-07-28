@@ -21,7 +21,7 @@ type ReportService struct {
 func NewReportService(basePath string) *ReportService {
 	return &ReportService{
 		basePath:        basePath,
-		dailyReportPath: filepath.Join("vault", "daily"),
+		dailyReportPath: filepath.Join("logs-archive", "daily"), // 日报=运维日志非知识，迁出 vault 不进检索/骨架
 	}
 }
 

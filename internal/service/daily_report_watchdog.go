@@ -58,7 +58,7 @@ func NewDailyReportWatchdog(cfg config.DailyReportConfig, basePath string, notif
 
 func normalizeDailyReportConfig(cfg config.DailyReportConfig) config.DailyReportConfig {
 	if cfg.Path == "" {
-		cfg.Path = filepath.Join("vault", "daily")
+		cfg.Path = filepath.Join("logs-archive", "daily") // 日报=运维日志非知识，迁出 vault
 	}
 	if cfg.WatchdogTime == "" {
 		cfg.WatchdogTime = "22:30"

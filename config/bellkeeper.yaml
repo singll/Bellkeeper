@@ -286,7 +286,7 @@ knowledge:
 
 daily_report:
   enabled: true
-  path: vault/daily
+  path: logs-archive/daily        # 日报是运维日志非知识，落 knowledge/logs-archive 而非 vault（不进 Obsidian 检索/骨架）
   watchdog_enabled: true
   watchdog_time: "22:30"
   timezone: Asia/Shanghai

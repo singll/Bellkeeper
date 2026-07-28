@@ -633,7 +633,7 @@ func setDefaults(v *viper.Viper) {
 
 	// Daily report
 	v.SetDefault("daily_report.enabled", true)
-	v.SetDefault("daily_report.path", "vault/daily")
+	v.SetDefault("daily_report.path", "logs-archive/daily")
 	v.SetDefault("daily_report.watchdog_enabled", true)
 	v.SetDefault("daily_report.watchdog_time", "22:30")
 	v.SetDefault("daily_report.timezone", "Asia/Shanghai")

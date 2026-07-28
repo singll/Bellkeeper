@@ -209,7 +209,7 @@ func TestMergeMarkdown_PreservesExistingSections(t *testing.T) {
 	}
 }
 
-func TestReportServiceWritesDailyToVaultDaily(t *testing.T) {
+func TestReportServiceWritesDailyToLogsArchive(t *testing.T) {
 	base := t.TempDir()
 	svc := NewReportService(base)
 	result, err := svc.WriteMessage(&WriteRequest{
@@ -220,7 +220,8 @@ func TestReportServiceWritesDailyToVaultDaily(t *testing.T) {
 	if err != nil {
 		t.Fatalf("WriteMessage returned error: %v", err)
 	}
-	wantDir := filepath.Join(base, "vault", "daily")
+	// 日报=运维日志非知识，落 logs-archive/daily 而非 vault/daily（不进 Obsidian 检索/骨架）。
+	wantDir := filepath.Join(base, "logs-archive", "daily")
 	if filepath.Dir(result.FilePath) != wantDir {
 		t.Fatalf("daily path dir = %q, want %q", filepath.Dir(result.FilePath), wantDir)
 	}
