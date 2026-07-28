@@ -2,7 +2,11 @@ package pkb
 
 import (
 	"math"
+	"os"
+	"path/filepath"
+	"strings"
 	"testing"
+	"time"
 )
 
 func approxEqual(a, b float64) bool { return math.Abs(a-b) < 1e-9 }
@@ -92,5 +96,58 @@ func TestDecideGateQuota(t *testing.T) {
 	c.vaultCount["ai"] = 0
 	if d, g := c.decide(&ScoreResult{Relevance: 8}, 8.0, domQuota); d != "vault" || g != "" {
 		t.Errorf("quota-open: got (%s,%s), want (vault,)", d, g)
+	}
+}
+
+// TestLedgerCell 验证台账单元格清理（| 与换行会破坏 Markdown 表格）。
+func TestLedgerCell(t *testing.T) {
+	cases := map[string]string{
+		"a|b":          "a／b",
+		"line1\nline2": "line1 line2",
+		"  x  ":        "x",
+		"正常":           "正常",
+	}
+	for in, want := range cases {
+		if got := ledgerCell(in); got != want {
+			t.Errorf("ledgerCell(%q) = %q, want %q", in, got, want)
+		}
+	}
+}
+
+// TestAppendReviewLedger 验证拒收台账：被拒/降级条目落账、标题 | 转义、vault 不记、表头一次。
+func TestAppendReviewLedger(t *testing.T) {
+	tmp := t.TempDir()
+	dc := &DomainsConfig{Defaults: Defaults{ReviewLedgerEnabled: boolPtr(true)}, Domains: []Domain{{Name: "ai"}}}
+	c := &Curator{basePath: tmp, domains: dc}
+	art := ArticleMeta{Title: "离题|标题", URL: "http://x"}
+	sr := &ScoreResult{Relevance: 2, Depth: 8, ContentType: "reference", AtomicPotential: 5}
+
+	c.appendReviewLedger(art, sr, 7.7, dc.Domains[0], "discard", "hard_floor")
+	c.appendReviewLedger(art, sr, 8.0, dc.Domains[0], "vault", "") // vault 不记
+
+	path := filepath.Join(tmp, "vault", "_拒收台账", time.Now().Format("2006-01")+".md")
+	data, err := os.ReadFile(path)
+	if err != nil {
+		t.Fatalf("台账未生成: %v", err)
+	}
+	content := string(data)
+	if !strings.Contains(content, "hard_floor") {
+		t.Error("缺 hard_floor 行")
+	}
+	if !strings.Contains(content, "离题／标题") {
+		t.Error("标题内 | 未转义为 ／")
+	}
+	if n := strings.Count(content, "| discard |"); n != 1 {
+		t.Errorf("应恰好 1 条 discard（vault 不记），实际 %d 条\n%s", n, content)
+	}
+	if n := strings.Count(content, "# 拒收台账"); n != 1 {
+		t.Errorf("表头应只写一次，实际 %d 次", n)
+	}
+
+	// 关闭台账时不落账。
+	c2 := &Curator{basePath: t.TempDir(), domains: &DomainsConfig{Defaults: Defaults{ReviewLedgerEnabled: boolPtr(false)}}}
+	c2.appendReviewLedger(art, sr, 3.0, dc.Domains[0], "discard", "")
+	if _, err := os.Stat(filepath.Join(c2.basePath, "vault", "_拒收台账")); !os.IsNotExist(err) {
+		t.Error("台账关闭时不应创建目录")
 	}
 }

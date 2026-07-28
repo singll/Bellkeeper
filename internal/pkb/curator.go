@@ -299,6 +299,7 @@ func (c *Curator) processOne(art ArticleMeta, sum *runSummary) error {
 	}
 
 	decision, gate := c.decide(score, final, domain)
+	c.appendReviewLedger(art, score, final, domain, decision, gate)
 	switch decision {
 	case "discard":
 		if gate == "hard_floor" {
@@ -359,6 +360,53 @@ func (c *Curator) decide(score *ScoreResult, final float64, domain Domain) (stri
 		return "archive", "quota"
 	}
 	return "vault", ""
+}
+
+// appendReviewLedger 把被拒(discard)/降级(archive) 条目连同评分 append 到
+// vault/_拒收台账/<YYYY-MM>.md，供定期审阈值（漏召→放宽 gate/阈值；噪音漏进→收紧）。
+// vault 正常入库不记；dry-run 或台账关闭时跳过。落账失败仅告警、不中断分流。
+func (c *Curator) appendReviewLedger(art ArticleMeta, score *ScoreResult, final float64, domain Domain, decision, gate string) {
+	if c.dryRun || !c.domains.Defaults.GetReviewLedgerEnabled() || decision == "vault" {
+		return
+	}
+	now := time.Now()
+	dir := filepath.Join(c.basePath, "vault", "_拒收台账")
+	if err := os.MkdirAll(dir, 0755); err != nil {
+		fmt.Printf("    ⚠ 拒收台账 mkdir 失败（跳过记账，不影响分流）: %v\n", err)
+		return
+	}
+	path := filepath.Join(dir, now.Format("2006-01")+".md")
+	if _, err := os.Stat(path); os.IsNotExist(err) {
+		header := fmt.Sprintf("# 拒收台账 %s\n\n> PKB 漏斗被拒/降级条目（连同评分），供定期审阈值与查漏召。"+
+			"门：hard_floor=离题直接弃 / gate=达 vault 线但相关度不足降级 / quota=领域配额降级 / 空=常规阈值。\n\n"+
+			"| 时间 | 决策 | 门 | 领域 | rel | dep | act | dur | nov | atom | type | final | 标题 | 来源 |\n"+
+			"|------|------|----|------|-----|-----|-----|-----|-----|------|------|-------|------|------|\n", now.Format("2006-01"))
+		if err := os.WriteFile(path, []byte(header), 0644); err != nil {
+			fmt.Printf("    ⚠ 拒收台账写表头失败（跳过记账）: %v\n", err)
+			return
+		}
+	}
+	f, err := os.OpenFile(path, os.O_APPEND|os.O_WRONLY, 0644)
+	if err != nil {
+		fmt.Printf("    ⚠ 拒收台账打开失败（跳过记账）: %v\n", err)
+		return
+	}
+	defer f.Close()
+	row := fmt.Sprintf("| %s | %s | %s | %s | %d | %d | %d | %d | %d | %d | %s | %.1f | %s | %s |\n",
+		now.Format("2006-01-02 15:04"), decision, gate, domain.Name,
+		score.Relevance, score.Depth, score.Actionability, score.Durability, score.Novelty, score.AtomicPotential,
+		ledgerCell(score.ContentType), final, ledgerCell(art.Title), ledgerCell(art.URL))
+	if _, err := f.WriteString(row); err != nil {
+		fmt.Printf("    ⚠ 拒收台账写入失败（跳过记账）: %v\n", err)
+	}
+}
+
+// ledgerCell 清理台账单元格：替换会破坏 Markdown 表格的 | 与换行。
+func ledgerCell(s string) string {
+	s = strings.ReplaceAll(s, "|", "／")
+	s = strings.ReplaceAll(s, "\n", " ")
+	s = strings.ReplaceAll(s, "\r", " ")
+	return strings.TrimSpace(s)
 }
 
 // markDiscard 低分：保留 raw 原文，仅在 frontmatter 标记决策（可溯源、可调阈值后重评）。
