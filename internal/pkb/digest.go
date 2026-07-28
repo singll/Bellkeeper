@@ -369,9 +369,18 @@ func (c *Curator) loadExistingIndex(domain Domain) string {
 	return strings.TrimSpace(string(data))
 }
 
-// snapshotIndex 将当前 _index.md 快照到 digest/ 子目录。
+// snapshotIndex 增量快照当前领域 _index.md 到 digest/ 子目录（配置驱动 keep/weekly）。
 func (c *Curator) snapshotIndex(domain Domain) error {
-	src := filepath.Join(c.basePath, domain.VaultSubpath, "_index.md")
+	return snapshotIndexIncremental(c.basePath, domain.VaultSubpath,
+		c.domains.Defaults.SnapshotKeep, c.domains.Defaults.GetSnapshotWeekly())
+}
+
+// snapshotIndexIncremental 增量快照 _index.md 到 digest/（替代旧全量拷贝，堵「一天多份 99% 全树重复」）：
+// ① 只存结构（## 知识树）+ 增量（## 新增与变化），不再重抄体系概览/核心脉络等散文；
+// ② 与最近一份快照的知识树结构相同则跳过（挂卡刷新无结构变化时不产快照）；
+// ③ weekly=true 时按 ISO 周命名，同周覆盖为一份；④ 写后滚动清理只留最新 keepN 份。
+func snapshotIndexIncremental(basePath, vaultSubpath string, keepN int, weekly bool) error {
+	src := filepath.Join(basePath, vaultSubpath, "_index.md")
 	data, err := os.ReadFile(src)
 	if err != nil {
 		if os.IsNotExist(err) {
@@ -379,13 +388,121 @@ func (c *Curator) snapshotIndex(domain Domain) error {
 		}
 		return fmt.Errorf("read index for snapshot: %w", err)
 	}
-	digestDir := filepath.Join(c.basePath, domain.VaultSubpath, "digest")
+	content := string(data)
+	snap := buildIncrementalSnapshot(content)
+	if strings.TrimSpace(extractSection(snap, "## 知识树")) == "" {
+		return nil // 无知识树可快照（如资讯/兜底领域）
+	}
+
+	digestDir := filepath.Join(basePath, vaultSubpath, "digest")
 	if err := os.MkdirAll(digestDir, 0755); err != nil {
 		return fmt.Errorf("mkdir digest for snapshot: %w", err)
 	}
-	snapName := fmt.Sprintf("%s_快照.md", time.Now().Format("20060102_1504"))
-	dst := filepath.Join(digestDir, snapName)
-	return os.WriteFile(dst, data, 0644)
+	// 去重：与最近一份快照的知识树结构相同则跳过（忽略时间戳/散文差异）。
+	if latest := latestSnapshotContent(digestDir); latest != "" && sameSnapshotStructure(latest, snap) {
+		return nil
+	}
+
+	now := time.Now()
+	var name string
+	if weekly {
+		y, w := now.ISOWeek()
+		name = fmt.Sprintf("%04dW%02d_快照.md", y, w) // 同周覆盖为一份
+	} else {
+		name = fmt.Sprintf("%s_快照.md", now.Format("20060102_1504"))
+	}
+	if err := os.WriteFile(filepath.Join(digestDir, name), []byte(snap), 0644); err != nil {
+		return fmt.Errorf("write snapshot: %w", err)
+	}
+	pruneSnapshots(digestDir, keepN)
+	return nil
+}
+
+// buildIncrementalSnapshot 从 _index.md 抽出「结构+增量」两段构成增量快照体（不重抄全文散文）。
+func buildIncrementalSnapshot(indexContent string) string {
+	fm := parseFrontmatterMap(indexContent)
+	var b strings.Builder
+	b.WriteString("---\n")
+	b.WriteString("type: pkb_map_snapshot\n")
+	if d := fm["domain"]; d != "" {
+		b.WriteString("domain: " + d + "\n")
+	}
+	b.WriteString("snapshot_at: " + time.Now().Format(time.RFC3339) + "\n")
+	if rc := fm["root_concepts"]; rc != "" {
+		b.WriteString("root_concepts: " + rc + "\n")
+	}
+	b.WriteString("---\n\n")
+	if tree := extractSection(indexContent, "## 知识树"); tree != "" {
+		b.WriteString("## 知识树\n" + tree + "\n\n")
+	}
+	if changes := extractSection(indexContent, "## 新增与变化"); changes != "" {
+		b.WriteString("## 新增与变化\n" + changes + "\n")
+	}
+	return strings.TrimRight(b.String(), "\n") + "\n"
+}
+
+// sameSnapshotStructure 仅比较两份快照的知识树结构（忽略 frontmatter 时间戳与增量叙述）。
+func sameSnapshotStructure(a, b string) bool {
+	return strings.TrimSpace(extractSection(a, "## 知识树")) == strings.TrimSpace(extractSection(b, "## 知识树"))
+}
+
+// latestSnapshotContent 读 digest/ 中 mtime 最新一份 .md 的内容（无则空串）。
+func latestSnapshotContent(digestDir string) string {
+	entries, err := os.ReadDir(digestDir)
+	if err != nil {
+		return ""
+	}
+	var latestName string
+	var latestMod time.Time
+	for _, e := range entries {
+		if e.IsDir() || filepath.Ext(e.Name()) != ".md" {
+			continue
+		}
+		info, infoErr := e.Info()
+		if infoErr != nil {
+			continue
+		}
+		if info.ModTime().After(latestMod) {
+			latestMod = info.ModTime()
+			latestName = e.Name()
+		}
+	}
+	if latestName == "" {
+		return ""
+	}
+	data, _ := os.ReadFile(filepath.Join(digestDir, latestName))
+	return string(data)
+}
+
+// pruneSnapshots 按 mtime 保留 digest/ 最新 keepN 份 .md，删其余（keepN<=0 不清理）。
+func pruneSnapshots(digestDir string, keepN int) {
+	if keepN <= 0 {
+		return
+	}
+	entries, err := os.ReadDir(digestDir)
+	if err != nil {
+		return
+	}
+	type snap struct {
+		name string
+		mod  time.Time
+	}
+	var snaps []snap
+	for _, e := range entries {
+		if e.IsDir() || filepath.Ext(e.Name()) != ".md" {
+			continue
+		}
+		if info, infoErr := e.Info(); infoErr == nil {
+			snaps = append(snaps, snap{e.Name(), info.ModTime()})
+		}
+	}
+	if len(snaps) <= keepN {
+		return
+	}
+	sort.Slice(snaps, func(i, j int) bool { return snaps[i].mod.After(snaps[j].mod) })
+	for _, s := range snaps[keepN:] {
+		_ = os.Remove(filepath.Join(digestDir, s.name))
+	}
 }
 
 // extractRootTopics 从已生成的 _index.md 的 frontmatter root_concepts 提取顶层主题列表。

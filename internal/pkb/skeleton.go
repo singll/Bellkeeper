@@ -830,20 +830,8 @@ func RejectSkeletonProposal(basePath, id string) (string, error) {
 	return fmt.Sprintf("🗑 提议 %s 已驳回，骨架未改动", id), nil
 }
 
-// snapshotIndexFile 把 basePath/vaultSubpath/_index.md 快照到同领域 digest/ 子目录（包级，无需 Curator）。
+// snapshotIndexFile 把 basePath/vaultSubpath/_index.md 增量快照到同领域 digest/（包级，无需
+// Curator，供 CLI / Matrix !pkb approve 复用）。用默认 keep=5/weekly=true（与 Defaults 默认一致）。
 func snapshotIndexFile(basePath, vaultSubpath string) error {
-	src := filepath.Join(basePath, vaultSubpath, "_index.md")
-	data, err := os.ReadFile(src)
-	if err != nil {
-		if os.IsNotExist(err) {
-			return nil
-		}
-		return fmt.Errorf("read index for snapshot: %w", err)
-	}
-	digestDir := filepath.Join(basePath, vaultSubpath, "digest")
-	if err := os.MkdirAll(digestDir, 0755); err != nil {
-		return fmt.Errorf("mkdir digest for snapshot: %w", err)
-	}
-	dst := filepath.Join(digestDir, fmt.Sprintf("%s_快照.md", time.Now().Format("20060102_1504")))
-	return os.WriteFile(dst, data, 0644)
+	return snapshotIndexIncremental(basePath, vaultSubpath, 5, true)
 }

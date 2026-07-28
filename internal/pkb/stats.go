@@ -107,20 +107,9 @@ func collectDomainStat(root string, st *DomainStat, todayStart, weekStart time.T
 			}
 		}
 	}
-	// 最近 digest：digest/ 子目录最新 .md 的修改时间。
-	if digs, err := os.ReadDir(filepath.Join(root, "digest")); err == nil {
-		var latest time.Time
-		for _, dg := range digs {
-			if dg.IsDir() || filepath.Ext(dg.Name()) != ".md" {
-				continue
-			}
-			if info, infoErr := dg.Info(); infoErr == nil && info.ModTime().After(latest) {
-				latest = info.ModTime()
-			}
-		}
-		if !latest.IsZero() {
-			st.LastDigestAt = latest.Format(time.RFC3339)
-		}
+	// 最近 digest：_index.md 自身修改时间（快照增量化后 digest/ 稀疏，_index 才是「最新态」真相源）。
+	if info, err := os.Stat(filepath.Join(root, "_index.md")); err == nil {
+		st.LastDigestAt = info.ModTime().Format(time.RFC3339)
 	}
 }
 

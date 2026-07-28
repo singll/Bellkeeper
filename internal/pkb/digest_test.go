@@ -1,10 +1,24 @@
 package pkb
 
 import (
+	"fmt"
+	"os"
+	"path/filepath"
 	"strings"
 	"testing"
 	"time"
 )
+
+func listMD(dir string) []string {
+	entries, _ := os.ReadDir(dir)
+	var out []string
+	for _, e := range entries {
+		if !e.IsDir() && filepath.Ext(e.Name()) == ".md" {
+			out = append(out, e.Name())
+		}
+	}
+	return out
+}
 
 // TestNormalizeMapFrontmatter 复刻线上「安全/_index.md」三个真实 bug：缺闭合 ---、
 // generated_at 幻觉未来时间、末尾误抄「## 元信息」——验证落盘前规整全部修正。
@@ -72,5 +86,97 @@ func TestEnsureFrontmatterClosed(t *testing.T) {
 	none := "# 普通标题\n正文"
 	if got := ensureFrontmatterClosed(none); got != none {
 		t.Errorf("无 frontmatter 不应改动:\n%s", got)
+	}
+}
+
+// TestSnapshotIndexIncremental 验证增量快照：只存结构+增量段、结构不变去重、结构变化产新份。
+func TestSnapshotIndexIncremental(t *testing.T) {
+	tmp := t.TempDir()
+	sub := "vault/AI"
+	dir := filepath.Join(tmp, sub)
+	if err := os.MkdirAll(dir, 0755); err != nil {
+		t.Fatal(err)
+	}
+	indexPath := filepath.Join(dir, "_index.md")
+	digestDir := filepath.Join(dir, "digest")
+
+	index := `---
+title: AI
+type: pkb_map
+domain: ai
+root_concepts: [A, B]
+---
+
+## 体系概览
+一大段散文不该进快照。
+
+## 知识树
+- A [[卡1]]
+- B [缺口]
+
+## 新增与变化
+新增卡1。
+
+## 缺口与探索方向
+略。`
+	mustWrite(t, indexPath, index)
+
+	// 首次快照：只含结构+增量段，不含散文全文。
+	if err := snapshotIndexIncremental(tmp, sub, 5, false); err != nil {
+		t.Fatal(err)
+	}
+	snaps := listMD(digestDir)
+	if len(snaps) != 1 {
+		t.Fatalf("首次应产 1 份快照，实际 %d", len(snaps))
+	}
+	body, _ := os.ReadFile(filepath.Join(digestDir, snaps[0]))
+	sb := string(body)
+	if !strings.Contains(sb, "## 知识树") || !strings.Contains(sb, "## 新增与变化") {
+		t.Errorf("快照缺结构/增量段:\n%s", sb)
+	}
+	if strings.Contains(sb, "体系概览") || strings.Contains(sb, "缺口与探索方向") {
+		t.Errorf("快照不应含散文全文:\n%s", sb)
+	}
+
+	// 结构不变再快照 → 去重跳过（即便 weekly=false）。
+	if err := snapshotIndexIncremental(tmp, sub, 5, false); err != nil {
+		t.Fatal(err)
+	}
+	if n := len(listMD(digestDir)); n != 1 {
+		t.Errorf("结构不变应去重，实际 %d 份", n)
+	}
+
+	// 知识树结构变化 → 去重不跳过，最新快照应反映新结构（卡2/C）。
+	index2 := strings.Replace(index, "- B [缺口]", "- B [[卡2]]\n- C [缺口]", 1)
+	mustWrite(t, indexPath, index2)
+	if err := snapshotIndexIncremental(tmp, sub, 5, false); err != nil {
+		t.Fatal(err)
+	}
+	latest := latestSnapshotContent(digestDir)
+	if !strings.Contains(latest, "C [缺口]") || !strings.Contains(latest, "卡2") {
+		t.Errorf("结构变化后最新快照未反映新结构:\n%s", latest)
+	}
+}
+
+// TestPruneSnapshots 验证滚动保留最新 keepN 份。
+func TestPruneSnapshots(t *testing.T) {
+	dir := t.TempDir()
+	for i := 0; i < 4; i++ {
+		p := filepath.Join(dir, fmt.Sprintf("snap%d.md", i))
+		mustWrite(t, p, "x")
+		mt := time.Now().Add(time.Duration(i) * time.Hour) // mtime 递增，snap3 最新
+		if err := os.Chtimes(p, mt, mt); err != nil {
+			t.Fatal(err)
+		}
+	}
+	pruneSnapshots(dir, 2)
+	left := listMD(dir)
+	if len(left) != 2 {
+		t.Fatalf("应保留 2 份，实际 %d：%v", len(left), left)
+	}
+	for _, name := range left {
+		if name == "snap0.md" || name == "snap1.md" {
+			t.Errorf("应删最旧份，却保留 %s", name)
+		}
 	}
 }
