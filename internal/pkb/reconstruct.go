@@ -33,7 +33,7 @@ func (c *Curator) reconstructCard(art ArticleMeta, body string, score *ScoreResu
 		candBlock = "- " + strings.Join(displayCandidates, "\n- ")
 	}
 	scoreStr := fmt.Sprintf("relevance=%d depth=%d actionability=%d final=%.1f",
-		score.Relevance, score.Depth, score.Actionability, score.FinalScore(c.domains.Defaults.Weights))
+		score.Relevance, score.Depth, score.Actionability, score.FinalScore(c.domains.Defaults))
 	maxCards := c.domains.Defaults.MaxCardsPerArticle
 	if maxCards <= 0 {
 		maxCards = 5
@@ -163,7 +163,6 @@ func buildValidLinkSet(vaultCandidates, batchConcepts []string, cards []string) 
 	}
 	return result
 }
-
 
 // pruneWikilinks 移除指向不存在卡片的 [[wikilink]]（候选为空则全部降级为纯文本）。
 func pruneWikilinks(card string, candidates []string) string {

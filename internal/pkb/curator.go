@@ -10,8 +10,8 @@ import (
 	"strings"
 	"time"
 
-	"github.com/singll/bellkeeper/internal/llmgateway"
 	"github.com/singll/bellkeeper/internal/config"
+	"github.com/singll/bellkeeper/internal/llmgateway"
 	"github.com/singll/bellkeeper/internal/repository"
 )
 
@@ -62,6 +62,7 @@ type Curator struct {
 	scoreCalls            int
 	reconstructCalls      int
 	digestCalls           int
+	vaultCount            map[string]int // 本轮各领域已进 vault 数（领域配额护栏，每轮 Run 重置）
 	lastSummary           runSummary
 	llmJobs               *llmgateway.LLMJobQueueService
 	domainRepo            *repository.CrawlDomainProfileRepository
@@ -177,6 +178,7 @@ func NewCurator(cfg *config.Config, opts Options, articleRepo *repository.Articl
 		rescan:                opts.Rescan,
 		perRun:                perRun,
 		ctx:                   ctx,
+		vaultCount:            map[string]int{},
 		llmJobs:               opts.LLMJobs,
 		domainRepo:            opts.DomainRepo,
 	}, nil
@@ -216,6 +218,7 @@ func (c *Curator) Run() error {
 		c.domains.Defaults.Retry.MaxBackoffSeconds,
 		c.domains.Defaults.Retry.GetStopRunOnRateLimit())
 
+	c.vaultCount = map[string]int{} // 领域配额每轮重置
 	articles, err := c.client.ListRaw(c.perRun, !c.rescan)
 	if err != nil {
 		return fmt.Errorf("list raw articles: %w", err)
@@ -285,36 +288,77 @@ func (c *Curator) processOne(art ArticleMeta, sum *runSummary) error {
 	if err != nil {
 		return err
 	}
-	final := score.FinalScore(c.domains.Defaults.Weights)
+	final := score.FinalScore(c.domains.Defaults)
 	domain := c.domains.ResolveDomain(score.MatchedDomains)
 	sum.processed++
 
-	fmt.Printf("    打分 rel=%d depth=%d action=%d durable=%d novelty=%d type=%s → final=%.1f 领域=%s\n",
-		score.Relevance, score.Depth, score.Actionability, score.Durability, score.Novelty, score.ContentType, final, domain.Name)
+	fmt.Printf("    打分 rel=%d depth=%d action=%d durable=%d novelty=%d atomic=%d type=%s → final=%.1f 领域=%s\n",
+		score.Relevance, score.Depth, score.Actionability, score.Durability, score.Novelty, score.AtomicPotential, score.ContentType, final, domain.Name)
 	if score.Reason != "" {
 		fmt.Printf("    依据=%s\n", score.Reason)
 	}
 
-	switch {
-	case final < domain.ArchiveThresholdOr(c.domains.Defaults):
-		fmt.Printf("    决策=discard（保留 raw，仅标记 frontmatter）\n")
+	decision, gate := c.decide(score, final, domain)
+	switch decision {
+	case "discard":
+		if gate == "hard_floor" {
+			fmt.Printf("    决策=discard（相关度 %d < 硬地板 %.0f，离题直接弃）\n", score.Relevance, c.domains.Defaults.RelevanceHardFloor)
+		} else {
+			fmt.Printf("    决策=discard（final %.1f < archive 阈值，保留 raw 仅标记）\n", final)
+		}
 		sum.discard++
 		return c.markDiscard(art, score, final, domain)
-	case final < domain.VaultThresholdOr(c.domains.Defaults):
-		fmt.Printf("    决策=archive\n")
+	case "archive":
+		switch gate {
+		case "gate":
+			fmt.Printf("    决策=archive（相关度门：rel %d < 门 %.0f，达 vault 线但离题，封顶降级）\n", score.Relevance, domain.RelevanceGateOr(c.domains.Defaults))
+		case "quota":
+			fmt.Printf("    决策=archive（领域配额：%s 本轮 vault 已达上限 %d，降级）\n", domain.Name, domain.VaultQuotaPerRun)
+		default:
+			fmt.Printf("    决策=archive\n")
+		}
 		if err := c.moveToArchive(art, body, score, final, domain); err != nil {
 			return err
 		}
 		sum.archive++
 		return nil
-	default:
+	default: // vault
 		fmt.Printf("    决策=vault（原子化重构）\n")
 		if err := c.reconstructToVault(art, body, score, final, domain); err != nil {
 			return err
 		}
+		c.vaultCount[domain.Name]++
 		sum.vault++
 		return nil
 	}
+}
+
+// decide 决策分流：相关度硬地板 → discard；常规阈值 → discard/archive/vault；达 vault 线但
+// 相关度不足门 → 封顶降级 archive（堵离题高分噪音）；vault 超领域配额 → 降级 archive。
+// 返回 (决策, 门命中标记)；标记 hard_floor/gate/quota/"" 供日志与拒收台账。
+func (c *Curator) decide(score *ScoreResult, final float64, domain Domain) (string, string) {
+	def := c.domains.Defaults
+	rel := float64(score.Relevance)
+
+	// 1) 相关度硬地板：与配置领域基本无关 → 直接 discard，无论其它维度多高（堵离群科普噪音根因）。
+	if def.RelevanceHardFloor > 0 && rel < def.RelevanceHardFloor {
+		return "discard", "hard_floor"
+	}
+	// 2) 常规阈值分流。
+	switch {
+	case final < domain.ArchiveThresholdOr(def):
+		return "discard", ""
+	case final < domain.VaultThresholdOr(def):
+		return "archive", ""
+	}
+	// 3) 达 vault 线：相关度门 + 领域配额两道封顶（保留可溯源，降级 archive 而非弃）。
+	if gate := domain.RelevanceGateOr(def); gate > 0 && rel < gate {
+		return "archive", "gate"
+	}
+	if domain.VaultQuotaPerRun > 0 && c.vaultCount[domain.Name] >= domain.VaultQuotaPerRun {
+		return "archive", "quota"
+	}
+	return "vault", ""
 }
 
 // markDiscard 低分：保留 raw 原文，仅在 frontmatter 标记决策（可溯源、可调阈值后重评）。

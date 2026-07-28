@@ -5,12 +5,12 @@
 defaults:
   vault_threshold: 7.0       # final_score >= 此值 → 进 vault（原子化重构）
   archive_threshold: 4.0     # final_score >= 此值且 < vault_threshold → 进 archive；< 此值 → discard
-  weights:                   # 长期知识价值加权（和建议为 1.0）
-    relevance: 0.30
-    depth: 0.25
-    actionability: 0.20
-    durability: 0.10
-    novelty: 0.15
+  weights:                   # 长期知识价值加权（和建议为 1.0）；2026-07 重构：长期库重耐久，durability 0.10→0.18，
+    relevance: 0.28          #   relevance 略降(0.30→0.28，有相关度硬门兜底离题)，novelty/depth/action 相应下调，和仍=1.0
+    depth: 0.24
+    actionability: 0.16
+    durability: 0.18
+    novelty: 0.14
   # 打分门控（结构性改造 2026-07：不漏有用、不进噪音）——改这里即调策略，下轮运行生效，无需重编：
   relevance_gate: 5.0            # relevance < 此值 → 封顶不进 vault（堵「离题但高深度」噪音，如离群科普）；设负数关闭
   relevance_hard_floor: 3.0      # relevance < 此值 → 直接 discard（与配置领域基本无关）；设负数关闭

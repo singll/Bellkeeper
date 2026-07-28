@@ -119,7 +119,7 @@ func RunEval(cfg *config.Config, opts EvalOptions) (*EvalReport, error) {
 			report.Cases = append(report.Cases, cr)
 			continue
 		}
-		final := score.FinalScore(curator.domains.Defaults.Weights)
+		final := score.FinalScore(curator.domains.Defaults)
 		domain := curator.domains.ResolveDomain(score.MatchedDomains)
 		cr.FinalScore = final
 		cr.ActualDecision = decideFor(final, domain, curator.domains.Defaults)

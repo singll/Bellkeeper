@@ -21,24 +21,26 @@ type ScoreResult struct {
 	Reason          string   `json:"reason"`
 }
 
-// FinalScore 按权重计算综合分（0–10）
-func (sr *ScoreResult) FinalScore(w Weights) float64 {
+// FinalScore 综合分（0–10）：五维加权 + content_type 调整(配置化) + atomic_potential 上浮(防漏召)。
+// 注意：相关度门（gate / hard_floor）不在此计算——门是「决策封顶」而非分数变换，由 Curator.decide 应用。
+func (sr *ScoreResult) FinalScore(def Defaults) float64 {
+	w := def.Weights
 	score := w.Relevance*float64(sr.Relevance) +
 		w.Depth*float64(sr.Depth) +
 		w.Actionability*float64(sr.Actionability) +
 		w.Durability*float64(sr.Durability) +
 		w.Novelty*float64(sr.Novelty)
-	switch strings.ToLower(strings.TrimSpace(sr.ContentType)) {
-	case "marketing":
-		score -= 2.0
-	case "news":
-		score -= 1.0
-	case "release":
-		score -= 0.5
-	case "tutorial", "paper", "reference":
-		score += 0.5
-	case "code", "poc":
-		score += 0.7
+	// content_type 调整：配置优先（domains.yaml content_type_adjust），未配则回退内置默认。
+	ct := strings.ToLower(strings.TrimSpace(sr.ContentType))
+	if adj, ok := def.ContentTypeAdjust[ct]; ok {
+		score += adj
+	} else if adj, ok := defaultContentTypeAdjust[ct]; ok {
+		score += adj
+	}
+	// atomic_potential 上浮（修死字段 + 防漏召）：信息密集（含多个可独立知识点）的好文，
+	// 即使单维不突出也给小幅上浮，避免被阈值误杀。达标阈值与幅度均配置化。
+	if def.AtomicPotentialBonusMin > 0 && sr.AtomicPotential >= def.AtomicPotentialBonusMin {
+		score += def.AtomicPotentialBonus
 	}
 	if score < 0 {
 		return 0
