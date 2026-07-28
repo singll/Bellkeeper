@@ -46,7 +46,7 @@
 ## 已有体系结构（请在此基础上增量更新，不要从零重写）
 {{existing_map}}
 
-## 元信息
+## 元信息（仅供你参考的上下文，**严禁把本段或本段标题写进输出**；generated_at 由系统覆盖，无需纠结其值）
 领域：{{domain_display}}（{{domain_name}}）
 周期：{{period}}
 生成时间：{{generated_at}}

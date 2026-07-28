@@ -297,6 +297,7 @@ func (c *Curator) writeDigestRoot(domain Domain, period string, cards []digestCa
 	}
 	card := textutil.StripFence(out)
 	card = pruneWikilinks(card, digestTitles(cards))
+	card = normalizeMapFrontmatter(card, domain, now) // 不信 LLM 复述：强制 generated_at/domain、补闭合、剥离误抄的「## 元信息」
 	if err := validateDigestWithMode(card, digestModeRoot); err != nil {
 		return err
 	}
@@ -341,6 +342,7 @@ func (c *Curator) writeDigestTopic(domain Domain, topic string, cards []digestCa
 	}
 	card := textutil.StripFence(out)
 	card = pruneWikilinks(card, digestTitles(cards))
+	card = normalizeMapFrontmatter(card, domain, now) // 同根索引：规整元信息、补闭合、剥离误抄段
 	if err := validateDigestWithMode(card, digestModeTopic); err != nil {
 		return err
 	}
@@ -426,11 +428,90 @@ func (c *Curator) collectTopicCards(domain Domain, topic string, allCards []dige
 	return matched
 }
 
+// normalizeMapFrontmatter 规整 digest/骨架 _index 的 LLM 输出，不信任 LLM 复述的元信息：
+// ① 剥离正文里误抄的「## 元信息」段（提示词末尾的上下文块常被照抄进输出）；
+// ② 补 frontmatter 闭合 ---（LLM 偶尔漏写第二个 ---，Obsidian 会解析不出属性）；
+// ③ 强制 generated_at=now、domain=真实领域（修 generated_at 幻觉未来时间 bug）。
+// 顺序：先剥离误抄段 → 补闭合（否则 upsert 无法定位 frontmatter 边界）→ 覆盖字段。
+func normalizeMapFrontmatter(card string, domain Domain, now time.Time) string {
+	card = stripMetaSection(card)
+	card = ensureFrontmatterClosed(card)
+	card = upsertFrontmatter(card, map[string]string{
+		"generated_at": now.Format(time.RFC3339),
+		"domain":       domain.Name,
+	})
+	return card
+}
+
+// stripMetaSection 剥离正文里误抄的「## 元信息」章节（到下一个 ## 标题或文末止）。
+func stripMetaSection(content string) string {
+	lines := strings.Split(content, "\n")
+	out := make([]string, 0, len(lines))
+	skip := false
+	for _, line := range lines {
+		t := strings.TrimSpace(line)
+		if strings.HasPrefix(t, "## ") {
+			skip = t == "## 元信息"
+			if skip {
+				continue
+			}
+		}
+		if skip {
+			continue
+		}
+		out = append(out, line)
+	}
+	return strings.TrimRight(strings.Join(out, "\n"), "\n") + "\n"
+}
+
+// ensureFrontmatterClosed 若首行是 --- 但缺闭合 ---，在 frontmatter 结束处（第一个空行或 # 标题前）补一行 ---。
+// frontmatter 内规范无空行、root_concepts 用行内数组，故「首个空行/标题」即边界，安全。
+func ensureFrontmatterClosed(content string) string {
+	lines := strings.Split(content, "\n")
+	if len(lines) == 0 || strings.TrimSpace(lines[0]) != "---" {
+		return content // 无 frontmatter，不处理
+	}
+	if hasClosedFrontmatter(content) {
+		return content
+	}
+	end := len(lines)
+	for i := 1; i < len(lines); i++ {
+		t := strings.TrimSpace(lines[i])
+		if t == "" || strings.HasPrefix(t, "#") {
+			end = i
+			break
+		}
+	}
+	out := make([]string, 0, len(lines)+1)
+	out = append(out, lines[:end]...)
+	out = append(out, "---")
+	out = append(out, lines[end:]...)
+	return strings.Join(out, "\n")
+}
+
+// hasClosedFrontmatter 首行 --- 且后续存在闭合 --- 时返回 true。
+func hasClosedFrontmatter(content string) bool {
+	lines := strings.Split(content, "\n")
+	if len(lines) == 0 || strings.TrimSpace(lines[0]) != "---" {
+		return false
+	}
+	for i := 1; i < len(lines); i++ {
+		if strings.TrimSpace(lines[i]) == "---" {
+			return true
+		}
+	}
+	return false
+}
+
 // validateDigestWithMode 按 mode 校验 digest 输出。
 func validateDigestWithMode(card string, mode digestWriteMode) error {
 	trimmed := strings.TrimSpace(card)
 	if !strings.HasPrefix(trimmed, "---\n") {
 		return fmt.Errorf("generated digest missing YAML frontmatter")
+	}
+	// frontmatter 必须闭合（第二个 ---）：规整后应已闭合，此为双保险，堵「缺闭合 --- 致 Obsidian 解析不出属性」。
+	if !hasClosedFrontmatter(trimmed) {
+		return fmt.Errorf("generated digest frontmatter not closed (missing second ---)")
 	}
 	requiredKeys := []string{"title:", "type:", "domain:", "generated_at:"}
 	for _, key := range requiredKeys {

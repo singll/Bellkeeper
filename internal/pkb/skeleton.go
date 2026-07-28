@@ -64,6 +64,7 @@ func (c *Curator) RunSkeleton(opts SkeletonOptions) error {
 		return fmt.Errorf("skeleton llm: %w", err)
 	}
 	card := textutil.StripFence(out)
+	card = normalizeMapFrontmatter(card, domain, now) // 不信 LLM 复述：强制 generated_at/domain、补闭合、剥离误抄的「## 元信息」
 	if err := validateDigestWithMode(card, digestModeRoot); err != nil {
 		return fmt.Errorf("骨架输出不合法（缺 frontmatter 或必需章节）: %w", err)
 	}
