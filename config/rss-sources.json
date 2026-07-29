@@ -1,14 +1,339 @@
 {
+  "_comment": "线上 rss_feeds 表活跃源快照（非程序加载，仅供复现/文档）。以 http(s) 开头=官方直连；/ 开头=RSSHub 相对路径。",
   "sources": [
     {
+      "name": "Go 官方博客",
+      "url": "https://go.dev/blog/feed.atom",
+      "category": "编程",
+      "description": "Go 语言官方博客，语言演进与工程实践"
+    },
+    {
+      "name": "Rust 官方博客",
+      "url": "https://blog.rust-lang.org/feed.xml",
+      "category": "编程",
+      "description": "Rust 语言官方发布与设计决策"
+    },
+    {
+      "name": "This Week in Rust",
+      "url": "https://this-week-in-rust.org/rss.xml",
+      "category": "编程",
+      "description": "Rust 生态每周精选"
+    },
+    {
+      "name": "Inside Java",
+      "url": "https://inside.java/feed.xml",
+      "category": "编程",
+      "description": "Oracle Java 团队官方技术博客"
+    },
+    {
+      "name": "CSS-Tricks",
+      "url": "https://css-tricks.com/feed/",
+      "category": "编程",
+      "description": "前端 CSS/JS 权威技术站"
+    },
+    {
+      "name": "web.dev",
+      "url": "https://web.dev/feed.xml",
+      "category": "编程",
+      "description": "Google Web 平台最佳实践"
+    },
+    {
+      "name": "Smashing Magazine",
+      "url": "https://www.smashingmagazine.com/feed/",
+      "category": "编程",
+      "description": "前端与设计深度长文"
+    },
+    {
+      "name": "V8 引擎博客",
+      "url": "https://v8.dev/blog.atom",
+      "category": "编程",
+      "description": "V8/JavaScript 引擎官方内幕"
+    },
+    {
+      "name": "React 官方博客",
+      "url": "https://react.dev/rss.xml",
+      "category": "编程",
+      "description": "React 官方发布与 RFC"
+    },
+    {
+      "name": "Overreacted (Dan Abramov)",
+      "url": "https://overreacted.io/rss.xml",
+      "category": "编程",
+      "description": "React 核心成员的深度前端思考"
+    },
+    {
+      "name": "Lobsters",
+      "url": "https://lobste.rs/rss",
+      "category": "编程",
+      "description": "高质量技术链接聚合社区"
+    },
+    {
+      "name": "DEV Community",
+      "url": "https://dev.to/feed",
+      "category": "编程",
+      "description": "开发者技术文章社区"
+    },
+    {
+      "name": "InfoQ",
+      "url": "https://feed.infoq.com/",
+      "category": "编程",
+      "description": "企业级软件架构与工程资讯"
+    },
+    {
+      "name": "The Register",
+      "url": "https://www.theregister.com/headlines.atom",
+      "category": "编程",
+      "description": "资深 IT 行业新闻与硬核评论"
+    },
+    {
+      "name": "Martin Fowler",
+      "url": "https://martinfowler.com/feed.atom",
+      "category": "编程",
+      "description": "软件架构与重构的权威思考"
+    },
+    {
+      "name": "Dan Luu",
+      "url": "https://danluu.com/atom.xml",
+      "category": "编程",
+      "description": "系统与工程深度分析博客"
+    },
+    {
+      "name": "DHH (Hey World)",
+      "url": "https://world.hey.com/dhh/feed.atom",
+      "category": "编程",
+      "description": "Rails 之父的技术与行业观点"
+    },
+    {
+      "name": "GitHub Blog",
+      "url": "https://github.blog/feed/",
+      "category": "编程",
+      "description": "GitHub 官方工程与产品博客"
+    },
+    {
+      "name": "Netflix TechBlog",
+      "url": "https://netflixtechblog.com/feed",
+      "category": "编程",
+      "description": "Netflix 大规模系统工程实践"
+    },
+    {
+      "name": "Meta Engineering",
+      "url": "https://engineering.fb.com/feed/",
+      "category": "编程",
+      "description": "Meta 基础设施与工程博客"
+    },
+    {
+      "name": "Stripe Blog",
+      "url": "https://stripe.com/blog/feed.rss",
+      "category": "编程",
+      "description": "Stripe 工程与支付基础设施"
+    },
+    {
+      "name": "Discord Blog",
+      "url": "https://discord.com/blog/rss.xml",
+      "category": "编程",
+      "description": "Discord 高并发实时系统工程"
+    },
+    {
+      "name": "Spotify Engineering",
+      "url": "https://engineering.atspotify.com/feed/",
+      "category": "编程",
+      "description": "Spotify 后端与数据工程实践"
+    },
+    {
+      "name": "AWS 官方博客",
+      "url": "https://aws.amazon.com/blogs/aws/feed/",
+      "category": "编程",
+      "description": "AWS 云服务发布与架构"
+    },
+    {
+      "name": "HashiCorp Blog",
+      "url": "https://www.hashicorp.com/blog/feed.xml",
+      "category": "编程",
+      "description": "Terraform/Vault 等基础设施工具"
+    },
+    {
+      "name": "Cloudflare Blog",
+      "url": "https://blog.cloudflare.com/rss/",
+      "category": "编程",
+      "description": "网络/边缘计算深度技术博客"
+    },
+    {
+      "name": "Kubernetes Blog",
+      "url": "https://kubernetes.io/feed.xml",
+      "category": "编程",
+      "description": "Kubernetes 官方发布与实践"
+    },
+    {
+      "name": "CNCF Blog",
+      "url": "https://www.cncf.io/feed/",
+      "category": "编程",
+      "description": "云原生计算基金会官方博客"
+    },
+    {
+      "name": "阮一峰的网络日志",
+      "url": "https://www.ruanyifeng.com/blog/atom.xml",
+      "category": "编程",
+      "description": "中文技术科普与周刊标杆"
+    },
+    {
+      "name": "酷壳 CoolShell",
+      "url": "https://coolshell.cn/feed",
+      "category": "编程",
+      "description": "陈皓的经典中文技术博客"
+    },
+    {
+      "name": "云风的 BLOG",
+      "url": "https://blog.codingnow.com/atom.xml",
+      "category": "编程",
+      "description": "游戏引擎/系统编程深度博客"
+    },
+    {
+      "name": "美团技术团队",
+      "url": "https://tech.meituan.com/feed/",
+      "category": "编程",
+      "description": "美团大规模工程与算法实践"
+    },
+    {
+      "name": "Draveness",
+      "url": "https://draveness.me/feed.xml",
+      "category": "编程",
+      "description": "Go/分布式系统源码剖析"
+    },
+    {
+      "name": "V2EX",
+      "url": "https://www.v2ex.com/index.xml",
+      "category": "编程",
+      "description": "中文创意工作者与技术社区"
+    },
+    {
+      "name": "SegmentFault 思否",
+      "url": "https://segmentfault.com/feeds",
+      "category": "编程",
+      "description": "中文开发者问答与专栏"
+    },
+    {
+      "name": "开源中国资讯",
+      "url": "https://www.oschina.net/news/rss",
+      "category": "编程",
+      "description": "国内开源与技术新闻"
+    },
+    {
+      "name": "Ruby China",
+      "url": "https://ruby-china.org/topics/feed",
+      "category": "编程",
+      "description": "中文 Ruby/全栈社区"
+    },
+    {
+      "name": "量子位",
+      "url": "https://www.qbitai.com/feed",
+      "category": "人工智能",
+      "description": "关注人工智能和前沿科技"
+    },
+    {
+      "name": "AI 科技评论",
+      "url": "https://www.leiphone.com/feed",
+      "category": "人工智能",
+      "description": "雷锋网 AI 科技评论"
+    },
+    {
+      "name": "Hugging Face Papers",
+      "url": "/huggingface/daily-papers",
+      "category": "人工智能",
+      "description": "每日精选 AI 论文"
+    },
+    {
+      "name": "Anthropic News",
+      "url": "/anthropic/news",
+      "category": "人工智能",
+      "description": "Anthropic 官方新闻"
+    },
+    {
+      "name": "Google Research",
+      "url": "https://research.google/blog/rss/",
+      "category": "人工智能",
+      "description": "Google 研究院前沿论文解读"
+    },
+    {
+      "name": "Google DeepMind",
+      "url": "https://deepmind.google/blog/rss.xml",
+      "category": "人工智能",
+      "description": "DeepMind 官方研究博客"
+    },
+    {
+      "name": "Google AI Blog",
+      "url": "https://blog.google/technology/ai/rss/",
+      "category": "人工智能",
+      "description": "Google AI 产品与研究动态"
+    },
+    {
+      "name": "Berkeley AI Research",
+      "url": "https://bair.berkeley.edu/blog/feed.xml",
+      "category": "人工智能",
+      "description": "BAIR 学术前沿博客"
+    },
+    {
+      "name": "The Gradient",
+      "url": "https://thegradient.pub/rss/",
+      "category": "人工智能",
+      "description": "AI 研究深度评论"
+    },
+    {
+      "name": "Simon Willison",
+      "url": "https://simonwillison.net/atom/everything/",
+      "category": "人工智能",
+      "description": "LLM 实战与工具的高产观察者"
+    },
+    {
+      "name": "Sebastian Raschka",
+      "url": "https://magazine.sebastianraschka.com/feed",
+      "category": "人工智能",
+      "description": "LLM 训练与机器学习深度长文"
+    },
+    {
+      "name": "Lilian Weng",
+      "url": "https://lilianweng.github.io/index.xml",
+      "category": "人工智能",
+      "description": "OpenAI 研究员的系统化 AI 综述"
+    },
+    {
+      "name": "Hugging Face Blog",
+      "url": "https://huggingface.co/blog/feed.xml",
+      "category": "人工智能",
+      "description": "HF 官方模型与工程博客"
+    },
+    {
+      "name": "安全客-知识",
+      "url": "/anquanke/knowledge",
+      "category": "security",
+      "description": "安全客技术知识文章"
+    },
+    {
+      "name": "嘶吼-资讯",
+      "url": "https://www.4hou.com/feed",
+      "category": "security",
+      "description": "嘶吼安全资讯"
+    },
+    {
+      "name": "先知社区",
+      "url": "https://xz.aliyun.com/feed",
+      "category": "security",
+      "description": "先知社区安全研究文章"
+    },
+    {
+      "name": "SeebugPaper",
+      "url": "https://paper.seebug.org/rss/",
+      "category": "vulnerability",
+      "description": "Seebug 最新漏洞"
+    },
+    {
       "name": "FreeBuf - 网络安全",
-      "url": "/freebuf/index",
+      "url": "https://www.freebuf.com/feed",
       "category": "网络安全",
       "description": "国内领先的网络安全行业门户"
     },
     {
       "name": "安全客 - 最新",
-      "url": "/aqk/index",
+      "url": "https://api.anquanke.com/data/v1/rss",
       "category": "网络安全",
       "description": "安全客最新文章"
     },
@@ -20,79 +345,121 @@
     },
     {
       "name": "The Hacker News",
-      "url": "/thehackernews/posts",
+      "url": "https://feeds.feedburner.com/TheHackersNews",
       "category": "网络安全",
       "description": "国际知名网络安全新闻网站"
     },
     {
       "name": "Krebs on Security",
-      "url": "/krebsonsecurity/blog",
+      "url": "https://krebsonsecurity.com/feed/",
       "category": "网络安全",
       "description": "Brian Krebs 的安全博客"
     },
     {
-      "name": "Bleeping Computer - Security",
-      "url": "/bleepingcomputer/news/security",
+      "name": "Google Project Zero",
+      "url": "https://googleprojectzero.blogspot.com/feeds/posts/default",
       "category": "网络安全",
-      "description": "安全新闻和漏洞分析"
+      "description": "顶级 0day 漏洞研究"
     },
     {
-      "name": "机器之心",
-      "url": "/jiqizhixin/index",
-      "category": "人工智能",
-      "description": "专业的人工智能媒体和产业服务平台"
+      "name": "PortSwigger Research",
+      "url": "https://portswigger.net/research/rss",
+      "category": "网络安全",
+      "description": "Web 安全前沿研究（Burp 团队）"
     },
     {
-      "name": "量子位",
-      "url": "/qbitai/index",
-      "category": "人工智能",
-      "description": "关注人工智能和前沿科技"
+      "name": "Schneier on Security",
+      "url": "https://www.schneier.com/feed/atom/",
+      "category": "网络安全",
+      "description": "密码学与安全政策权威评论"
     },
     {
-      "name": "AI 科技评论",
-      "url": "/leiphone/ai",
-      "category": "人工智能",
-      "description": "雷锋网 AI 科技评论"
+      "name": "Troy Hunt",
+      "url": "https://feeds.feedburner.com/troyhunt",
+      "category": "网络安全",
+      "description": "HIBP 作者的安全实践博客"
     },
     {
-      "name": "Hugging Face Papers",
-      "url": "/huggingface/daily-papers",
-      "category": "人工智能",
-      "description": "每日精选 AI 论文"
+      "name": "SANS ISC",
+      "url": "https://isc.sans.edu/rssfeed_full.xml",
+      "category": "网络安全",
+      "description": "每日威胁情报与事件处置"
     },
     {
-      "name": "OpenAI Blog",
-      "url": "/openai/blog",
-      "category": "人工智能",
-      "description": "OpenAI 官方博客"
+      "name": "Hacker News-Best",
+      "url": "/hackernews/best",
+      "category": "news",
+      "description": "Hacker News 热门文章"
     },
     {
-      "name": "Anthropic News",
-      "url": "/anthropic/news",
-      "category": "人工智能",
-      "description": "Anthropic 官方新闻"
+      "name": "Ars Technica",
+      "url": "https://arstechnica.com/feed/",
+      "category": "资讯",
+      "description": "深度科技新闻与硬核评测"
+    },
+    {
+      "name": "TechCrunch",
+      "url": "https://techcrunch.com/feed/",
+      "category": "资讯",
+      "description": "创投与科技产品新闻"
+    },
+    {
+      "name": "Wired",
+      "url": "https://www.wired.com/feed/rss",
+      "category": "资讯",
+      "description": "科技与社会深度报道"
+    },
+    {
+      "name": "MIT Technology Review",
+      "url": "https://www.technologyreview.com/feed/",
+      "category": "资讯",
+      "description": "前沿科技趋势权威刊物"
+    },
+    {
+      "name": "Quanta Magazine",
+      "url": "https://www.quantamagazine.org/feed/",
+      "category": "资讯",
+      "description": "数学/物理/计算机科学深度科普"
+    },
+    {
+      "name": "36氪",
+      "url": "https://36kr.com/feed",
+      "category": "资讯",
+      "description": "中文创投与科技商业资讯"
+    },
+    {
+      "name": "少数派",
+      "url": "https://sspai.com/feed",
+      "category": "资讯",
+      "description": "数码效率与生活方式"
+    },
+    {
+      "name": "爱范儿",
+      "url": "https://www.ifanr.com/feed",
+      "category": "资讯",
+      "description": "科技与消费电子新闻"
+    },
+    {
+      "name": "奇客Solidot",
+      "url": "https://www.solidot.org/index.rss",
+      "category": "资讯",
+      "description": "中文极客新闻聚合"
     },
     {
       "name": ".NET Blog",
-      "url": "/dotnet/blog",
+      "url": "https://devblogs.microsoft.com/dotnet/feed/",
       "category": ".NET",
       "description": "微软 .NET 官方博客"
     },
     {
-      "name": "C# Digest",
-      "url": "/csharpdigest/index",
-      "category": ".NET",
-      "description": "C# 技术文章精选"
-    },
-    {
       "name": "Scott Hanselman",
-      "url": "/scotthanselman/blog",
+      "url": "https://www.hanselman.com/blog/feed/rss",
       "category": ".NET",
       "description": "微软 .NET 技术专家博客"
     },
     {
       "name": "Andrew Lock",
-      "url": "/andrewlock/blog",
+      "url": "https://andrewlock.net/rss.xml",
       "category": ".NET",
       "description": ".NET Core 深度技术博客"
     }
