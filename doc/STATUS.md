@@ -56,7 +56,7 @@ RSS(rsshub + 官方直连) ─→ 后端 RSSFetcherService(fetch+enqueue)
             落盘 /mnt/knowledge/raw + PG 入库 + Meili 索引
   └→ PKB 漏斗(pkb-curate 五维打分)：≥7 → vault(原子卡) / 4~7 → archive / <4 → discard
        └→ 知识骨架确定性归位 + 缺口填充 + 资讯库 + 晋升闸
-  └→ 日报/资讯摘要(DailyReportService) ─→ Matrix 推送
+  └→ 资讯早报 08:00(滚动24h) / 系统日报 21:00 (DailyReportService) ─→ Matrix 推送
 ```
 
 - **LLM**：进程内调用方（KB/Agent/日报/分类/规则优化）经 `llmgateway.Gateway` 直调；外部（CLI/n8n）经 `/api/llm/v1/*` OpenAI 兼容 + Token 鉴权。
@@ -81,7 +81,7 @@ RSS(rsshub + 官方直连) ─→ 后端 RSSFetcherService(fetch+enqueue)
 | Meilisearch 检索 | ✅ 1.0 | `/api/files/search\|ask`；入库即触发索引；问答 rerank 精排 |
 | Matrix 控制平面 | ✅ 稳定 | Gateway + Command Router + Agent + 通知聚合去重 + 权限两层 + Admin API |
 | Agent 系统 | ✅ MVP | 回合循环 + 9 工具 + Redis 房间会话 + 限速 + 权限分级；进程内直调 Gateway |
-| 日报系统 | ✅ 稳定 | 后端驱动 + 并行采集 + n8n 仅触发；进程内直调 Gateway |
+| 日报系统 | ✅ 稳定 | 资讯早报(08:00·滚动24h·域字典归类·LLM总结·技术为主) + 系统日报(21:00·内嵌今日资讯速览) 早晚分离；后端驱动+并行采集+n8n 仅触发 |
 | n8n 工作流治理 | ✅ 落地 | 8 活跃工作流（源真相 `internal/n8n_workflows/`）；10 已退役归档 |
 | 日志中心 | ✅ 1.0 | threshold + pattern 告警 + 归档调度 + trace_id 全链路；**Loki/Grafana 已外挂（M6）** |
 | 可观测性 | ✅ **M6 上线** | Prometheus + Loki + Grafana@silkdata + 三机 cAdvisor/Promtail |
