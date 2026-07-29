@@ -54,6 +54,7 @@ type Defaults struct {
 	TopicMocEnabled                 *bool              `yaml:"topic_moc_enabled"`
 	TopicMinCards                   int                `yaml:"topic_min_cards"`
 	SkeletonChangeApprovalThreshold int                `yaml:"skeleton_change_approval_threshold"` // 骨架变更影响半径≤此值=小动作自动应用，>此值=大动作走 Matrix 批准
+	ProposeMaxPerRound              int                `yaml:"propose_max_per_round"`              // 单轮涌现回流 propose 喂入的待归位卡上限（默认40）；超额按概念排序取前N、其余下轮，防一次喂满上下文致提议质量差
 	GapFillPerRun                   int                `yaml:"gap_fill_per_run"`                   // 缺口填充每领域每轮上限（默认10）
 	GapFillOrder                    string             `yaml:"gap_fill_order"`                     // breadth=自顶向下广度优先（先填根/主题层缺口）
 	GapFillEnabled                  map[string]bool    `yaml:"gap_fill_enabled"`                   // 每领域开关（优先级最高，打样先只开一个域）
@@ -224,6 +225,9 @@ func LoadDomains(path string) (*DomainsConfig, error) {
 	}
 	if d.SkeletonChangeApprovalThreshold <= 0 {
 		d.SkeletonChangeApprovalThreshold = 5
+	}
+	if d.ProposeMaxPerRound <= 0 {
+		d.ProposeMaxPerRound = 40
 	}
 	if d.GapFillPerRun <= 0 {
 		d.GapFillPerRun = 10

@@ -47,6 +47,7 @@ defaults:
   topic_moc_enabled: true          # 是否生成主题 MOC（topics/<主题>.md 中间层）
   topic_min_cards: 5               # 一个主题至少含几张卡才单独生成主题 MOC
   skeleton_change_approval_threshold: 5  # 骨架变更影响半径≤此值=小动作快照后自动应用；>此值=大动作走 Matrix !pkb approve 批准
+  propose_max_per_round: 40       # 单轮涌现回流 propose 喂入的待归位卡上限；超额按概念排序取前N、其余下轮，防一次喂满上下文致提议质量差
   # 缺口填充（pkb-curate fill）配额与开关 —— 全配置驱动，改本文件即调方向，无需重编/重启：
   gap_fill_per_run: 10           # 每领域每轮最多填几个缺口
   gap_fill_order: breadth        # 自顶向下广度优先：先填根/主题层缺口

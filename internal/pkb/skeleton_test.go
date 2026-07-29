@@ -342,3 +342,29 @@ func TestProposalApplyRejectRoundtrip(t *testing.T) {
 		t.Error("reject 不存在的提议应报错")
 	}
 }
+
+// TestBatchWaitlistForPropose 守住单轮 propose 分批：不超额不分批；超额按概念排序取前 N；不改动入参切片。
+func TestBatchWaitlistForPropose(t *testing.T) {
+	cards := []matchCard{{Concept: "c"}, {Concept: "a"}, {Concept: "b"}, {Concept: "e"}, {Concept: "d"}}
+
+	// max<=0 视为不限：整份返回、不分批
+	if got, batched := batchWaitlistForPropose(cards, 0); batched || len(got) != 5 {
+		t.Errorf("max=0 应不分批返回全部，得 batched=%v len=%d", batched, len(got))
+	}
+	// max>=len：不分批
+	if got, batched := batchWaitlistForPropose(cards, 5); batched || len(got) != 5 {
+		t.Errorf("max>=len 应不分批，得 batched=%v len=%d", batched, len(got))
+	}
+	// max<len：分批，按概念排序取前 max
+	got, batched := batchWaitlistForPropose(cards, 3)
+	if !batched || len(got) != 3 {
+		t.Fatalf("max<len 应分批取前 3，得 batched=%v len=%d", batched, len(got))
+	}
+	if got[0].Concept != "a" || got[1].Concept != "b" || got[2].Concept != "c" {
+		t.Errorf("应按概念排序取前 3（a,b,c），得 %q,%q,%q", got[0].Concept, got[1].Concept, got[2].Concept)
+	}
+	// 不改动入参切片顺序（内部复制后排序）
+	if cards[0].Concept != "c" {
+		t.Errorf("入参切片不应被改动，cards[0]=%q", cards[0].Concept)
+	}
+}

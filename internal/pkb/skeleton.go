@@ -6,6 +6,7 @@ import (
 	"os"
 	"path/filepath"
 	"regexp"
+	"sort"
 	"strings"
 	"time"
 
@@ -555,15 +556,23 @@ func (c *Curator) RunPropose(opts ProposeOptions) error {
 		return fmt.Errorf("load waitlist: %w", err)
 	}
 	threshold := c.domains.Defaults.SkeletonChangeApprovalThreshold
-	fmt.Printf("[pkb-propose] 模式=%s 领域=%s(%s) 待归位=%d 阈值=%d model=%s prompt=%s\n",
-		digestMode(opts.DryRun), domain.Display, domain.Name, len(waitlist), threshold,
-		c.domains.Defaults.SkeletonModel, c.proposePromptName)
-	if len(waitlist) == 0 {
-		fmt.Printf("[pkb-propose] 无待归位卡，无需提议\n")
+	totalWait := len(waitlist)
+	if totalWait == 0 {
+		fmt.Printf("[pkb-propose] 领域=%s(%s) 无待归位卡，无需提议\n", domain.Display, domain.Name)
 		return nil
 	}
+	// 单轮上限：待归位过多时只取前 N 条本轮提议，避免一次喂满上下文致提议质量差；
+	// 其余下轮处理（小动作 apply 会重归位抽干 waitlist，重复调用自然排空）。
+	round, batched := batchWaitlistForPropose(waitlist, c.domains.Defaults.ProposeMaxPerRound)
+	fmt.Printf("[pkb-propose] 模式=%s 领域=%s(%s) 待归位=%d 本轮=%d 阈值=%d model=%s prompt=%s\n",
+		digestMode(opts.DryRun), domain.Display, domain.Name, totalWait, len(round), threshold,
+		c.domains.Defaults.SkeletonModel, c.proposePromptName)
+	if batched {
+		fmt.Printf("[pkb-propose] 待归位 %d > 单轮上限 %d：按概念排序取前 %d 条本轮提议，其余下轮处理\n",
+			totalWait, c.domains.Defaults.ProposeMaxPerRound, len(round))
+	}
 
-	prop, err := c.proposeSkeletonChange(domain, currentTree, waitlist)
+	prop, err := c.proposeSkeletonChange(domain, currentTree, round)
 	if err != nil {
 		return fmt.Errorf("propose llm: %w", err)
 	}
@@ -636,6 +645,20 @@ func (c *Curator) loadWaitlistCards(domain Domain) ([]matchCard, error) {
 		cards = append(cards, matchCard{Concept: m[1], Excerpt: m[2]})
 	}
 	return cards, nil
+}
+
+// batchWaitlistForPropose 单轮涌现回流 propose 的待归位分批：max>0 且超额时，按概念排序（词法相邻
+// ≈ 概念前缀相近的粗聚类，让本轮喂入的卡尽量同主题）取前 max 条，返回本轮切片与是否分批标记；
+// 不改动入参切片（复制后排序）。其余卡由后续调用处理——小动作 apply 会重归位抽干 waitlist，
+// 重复调用自然排空。max<=0 视为不限（整份返回）。
+func batchWaitlistForPropose(cards []matchCard, max int) ([]matchCard, bool) {
+	if max <= 0 || len(cards) <= max {
+		return cards, false
+	}
+	sorted := make([]matchCard, len(cards))
+	copy(sorted, cards)
+	sort.Slice(sorted, func(i, j int) bool { return sorted[i].Concept < sorted[j].Concept })
+	return sorted[:max], true
 }
 
 func (c *Curator) proposeSkeletonChange(domain Domain, currentTree string, waitlist []matchCard) (SkeletonProposal, error) {
