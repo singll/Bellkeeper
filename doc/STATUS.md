@@ -1,6 +1,6 @@
 # Bellkeeper 运行状态
 
-> 最后更新: 2026-07-26 · **1.0 已 GA，系统进入稳定运行状态**
+> 最后更新: 2026-07-29 · **1.0 已 GA，系统进入稳定运行状态**
 >
 > 本文档记录**当前线上真实状态**。历史演进见 [TIMELINE.md](TIMELINE.md)；架构细节见 [ARCHITECTURE.md](ARCHITECTURE.md)；待办见 [ROADMAP.md](ROADMAP.md)。
 
@@ -99,7 +99,7 @@ RSS(rsshub + 官方直连) ─→ 后端 RSSFetcherService(fetch+enqueue)
 | silkdata 收尾 | 稳定 ≥7 天后删 keeper 旧数据卷(~15G)、删停用 LXC 107/108/109、knowledge 降内存 | 🔶 计划中 |
 | 观测遗留 | keeper 单容器 CPU/内存指标缺失（Docker 29 + cAdvisor）；可试更新 cadvisor 或改回 overlay2 | 🔶 不影响核心 |
 | 成本 | openclash 省流量 VPS 采购；firecrawl fetch 翻转后流量已降 95%+，或不必买 | ⏸️ 观察中 |
-| PKB 运营 | 存量 raw 分批跑 + cron 固化；`feature_pkb_auto_fill/feed/propose` 默认关、按需开 | 🔶 数据运营 |
+| PKB 运营 | **打分重构 Tier 0-8 已上线(2026-07-29)**：相关度硬门+配置化+atomic_potential 修复+领域配额+拒收台账+污染防护(反爬页/NO_CARD)+propose 单轮上限分批；已手动 `propose` 跑一轮消化各域存量待归位（skeleton 加节点填盲区，快照可回滚）。存量 raw 分批跑 + cron 固化；`feature_pkb_auto_fill/feed/propose` 默认关、按需开 | 🔶 数据运营 |
 | LLM | prompt cache 命中率监控（new-api 容器已退役下线） | 🔶 待决策 |
 | 爬虫运营 | 新源批量导入 + 7 天成功率验收；周源健康报告 | 🔶 持续 |
 | RSS 源 | SeebugPaper 上游 TLS 证书链不完整（缺中间 CA）直连验证失败，暂保留停用；余 6 源（HN×3/HF Papers/Krebs/嘶吼）已 07-27 恢复 | 🔶 待修 |
