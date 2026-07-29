@@ -5,6 +5,7 @@ import (
 	"testing"
 	"time"
 
+	"github.com/singll/bellkeeper/internal/model"
 	"github.com/stretchr/testify/assert"
 )
 
@@ -169,4 +170,31 @@ func TestComputeBriefWindow(t *testing.T) {
 		_, _, err := computeBriefWindow(BriefGenerateOptions{Date: "not-a-date"}, now, loc)
 		assert.Error(t, err)
 	})
+}
+
+func TestCategoryForArticle(t *testing.T) {
+	domCat := map[string]string{"rss-source.example.com": "网络安全"}
+	cases := []struct{ name, domain, tag, want string }{
+		{"RSS源匹配优先", "rss-source.example.com", "", "网络安全"},
+		{"技术字典-github归编程", "github.com", "", "编程"},
+		{"技术字典-arxiv归AI", "arxiv.org", "", "人工智能"},
+		{"技术字典-thehackernews归安全", "thehackernews.com", "", "网络安全"},
+		{"www前缀归一命中", "www.github.com", "", "编程"},
+		{"标签兜底归技术", "unknown.example.com", "人工智能", "人工智能"},
+		{"标签为资讯不算数", "unknown.example.com", "资讯", "资讯"},
+		{"全未知落资讯兜底", "unknown.example.com", "", "资讯"},
+	}
+	for _, c := range cases {
+		t.Run(c.name, func(t *testing.T) {
+			a := model.ArticleTag{SourceDomain: c.domain, Tag: model.Tag{Name: c.tag}}
+			assert.Equal(t, c.want, categoryForArticle(a, domCat))
+		})
+	}
+}
+
+func TestIsNoiseDomain(t *testing.T) {
+	assert.True(t, isNoiseDomain("youtube.com"))
+	assert.True(t, isNoiseDomain("x.com"))
+	assert.False(t, isNoiseDomain("github.com"))
+	assert.False(t, isNoiseDomain(""))
 }

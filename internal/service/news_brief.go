@@ -24,6 +24,10 @@ var newsCategoryOrder = []string{"编程", "人工智能", "网络安全", "资�
 // newsBriefPerGroupCap 单领域早报正文最多展示条数，超出在 render 层折叠为「还有 N 条」。
 const newsBriefPerGroupCap = 12
 
+// newsFallbackCap 「资讯」（泛资讯兜底）组数据层最多保留条数，按时间倒序取最新，
+// 防止长尾泛资讯在数量上盖过技术三领域（编程/AI/网络安全）。技术领域不受此限。
+const newsFallbackCap = 25
+
 // NewsItem 是一条资讯（去重后一篇文章一条）。
 type NewsItem struct {
 	Title    string    `json:"title"`
@@ -104,17 +108,67 @@ func feedHost(raw string) string {
 	return strings.TrimPrefix(strings.ToLower(u.Host), "www.")
 }
 
+// techDomainCategory 已知技术站点 → 早报领域的静态映射，补足 RSS 源 host 匹配的盲区：
+// 文章 source_domain 常是原始链接域名（如 github.com），与聚合源/feedburner/RSSHub 的 host
+// 不一致，只靠 RSS 源匹配会让大量技术内容漏进「资讯」兜底。此表把明确的技术站点直接归位。
+var techDomainCategory = map[string]string{
+	// 编程 / 开发
+	"github.com": "编程", "github.blog": "编程", "gitlab.com": "编程",
+	"stackoverflow.com": "编程", "devblogs.microsoft.com": "编程", "dev.to": "编程",
+	"infoq.com": "编程", "martinfowler.com": "编程", "go.dev": "编程",
+	"blog.golang.org": "编程", "rust-lang.org": "编程", "lwn.net": "编程",
+	"phoronix.com": "编程", "thenewstack.io": "编程", "hackaday.com": "编程",
+	"johndcook.com": "编程",
+	// 人工智能
+	"arxiv.org": "人工智能", "huggingface.co": "人工智能", "paperswithcode.com": "人工智能",
+	"openai.com": "人工智能", "anthropic.com": "人工智能", "deepmind.com": "人工智能",
+	"ai.googleblog.com": "人工智能", "pytorch.org": "人工智能", "simonwillison.net": "人工智能",
+	// 网络安全
+	"thehackernews.com": "网络安全", "bleepingcomputer.com": "网络安全",
+	"krebsonsecurity.com": "网络安全", "portswigger.net": "网络安全",
+	"unit42.paloaltonetworks.com": "网络安全", "sans.org": "网络安全",
+	"cisa.gov": "网络安全", "snyk.io": "网络安全", "darkreading.com": "网络安全",
+	"securityweek.com": "网络安全", "schneier.com": "网络安全",
+}
+
+// noiseDomains 纯 UGC 社交/视频源：作为早报「资讯头条」质量偏低，采集时跳过（内容仍在知识库/资讯库）。
+var noiseDomains = map[string]struct{}{
+	"youtube.com": {}, "m.youtube.com": {}, "twitter.com": {}, "x.com": {},
+	"facebook.com": {}, "instagram.com": {}, "tiktok.com": {}, "t.co": {},
+}
+
+// normHost 归一化域名：小写 + 去 www. 前缀，供域名字典/noise 集合命中。
+func normHost(raw string) string {
+	return strings.TrimPrefix(strings.ToLower(strings.TrimSpace(raw)), "www.")
+}
+
+// isNoiseDomain 判断域名是否为早报应跳过的纯 UGC 社交/视频源。
+func isNoiseDomain(host string) bool {
+	if host == "" {
+		return false
+	}
+	_, ok := noiseDomains[host]
+	return ok
+}
+
 // categoryForArticle 判定一篇入库文章归哪个早报领域：优先按来源域名匹配 RSS 源分类，
-// 退化到关联标签名归一，再退化为「资讯」。
+// 再查已知技术站点字典（把技术从「资讯」捞回），退化到关联标签名归一（仅当能归入技术领域时），
+// 最终退化为「资讯」。
 func categoryForArticle(a model.ArticleTag, domCat map[string]string) string {
-	d := strings.TrimPrefix(strings.ToLower(strings.TrimSpace(a.SourceDomain)), "www.")
+	d := normHost(a.SourceDomain)
 	if d != "" {
 		if c, ok := domCat[d]; ok {
 			return c
 		}
+		if c, ok := techDomainCategory[d]; ok {
+			return c
+		}
 	}
 	if a.Tag.Name != "" {
-		return normalizeNewsCategory(a.Tag.Name)
+		// 标签仅用于把内容归入技术领域；标签本身归「资讯」时不算数，交由后续域名/兜底判定。
+		if c := normalizeNewsCategory(a.Tag.Name); c != "资讯" {
+			return c
+		}
 	}
 	return "资讯"
 }
@@ -132,7 +186,6 @@ func (s *DailyReportService) collectNewsBetween(start, end time.Time) (*NewsBrie
 
 	seen := make(map[string]struct{})
 	byCat := make(map[string][]NewsItem)
-	total := 0
 	for _, a := range rows {
 		// ListSince 只保证 >= start；窗口右界在此裁剪。
 		if !a.CreatedAt.Before(end) {
@@ -140,6 +193,9 @@ func (s *DailyReportService) collectNewsBetween(start, end time.Time) (*NewsBrie
 		}
 		if a.ArticleTitle == "" || a.ArticleURL == "" {
 			continue
+		}
+		if isNoiseDomain(normHost(a.SourceDomain)) {
+			continue // 社交/视频等纯 UGC 源不进早报（内容仍在知识库/资讯库）
 		}
 		key := a.DocumentID
 		if key == "" {
@@ -158,22 +214,27 @@ func (s *DailyReportService) collectNewsBetween(start, end time.Time) (*NewsBrie
 			Category: cat,
 			At:       a.CreatedAt,
 		})
-		total++
 	}
 
 	data := &NewsBriefData{
 		Date:        end.In(s.loc).Format("2006-01-02"),
 		WindowStart: start.In(s.loc).Format("01-02 15:04"),
 		WindowEnd:   end.In(s.loc).Format("01-02 15:04"),
-		Total:       total,
 	}
+	total := 0
 	for _, cat := range newsCategoryOrder {
 		items := byCat[cat]
 		if len(items) == 0 {
 			continue
 		}
+		// 泛资讯长尾易在数量上盖过技术：资讯组按时间倒序限量为「少量最新」，技术三领域全列。
+		if cat == "资讯" && len(items) > newsFallbackCap {
+			items = items[:newsFallbackCap]
+		}
 		data.Groups = append(data.Groups, NewsGroup{Category: cat, Items: items})
+		total += len(items)
 	}
+	data.Total = total
 	return data, nil
 }
 
