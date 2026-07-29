@@ -151,3 +151,17 @@ func TestAppendReviewLedger(t *testing.T) {
 		t.Error("台账关闭时不应创建目录")
 	}
 }
+
+// TestIsNoCardReconstruct 守住重构拒产卡信号识别（正文为反爬/无关内容时 LLM 输出 NO_CARD）。
+func TestIsNoCardReconstruct(t *testing.T) {
+	for _, s := range []string{"NO_CARD", "NO_CARD\n（正文实为反爬页）", "  NO_CARD  "} {
+		if !isNoCardReconstruct(s) {
+			t.Errorf("应识别为 NO_CARD: %q", s)
+		}
+	}
+	for _, s := range []string{"---\ntitle: x", "正常卡片正文", ""} {
+		if isNoCardReconstruct(s) {
+			t.Errorf("不应误判为 NO_CARD: %q", s)
+		}
+	}
+}

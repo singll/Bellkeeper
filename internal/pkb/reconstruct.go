@@ -56,6 +56,9 @@ func (c *Curator) reconstructCard(art ArticleMeta, body string, score *ScoreResu
 		return nil, nil, fmt.Errorf("reconstruct llm: %w", err)
 	}
 	raw := textutil.StripFence(out)
+	if isNoCardReconstruct(raw) {
+		return nil, nil, fmt.Errorf("reconstruct declined: 正文无有效内容或与主题无关（NO_CARD）")
+	}
 
 	cards := splitCards(raw)
 	if len(cards) == 0 {
@@ -241,4 +244,10 @@ func validateCard(card string) error {
 		return fmt.Errorf("generated card too short")
 	}
 	return nil
+}
+
+// isNoCardReconstruct 识别重构 LLM 拒绝产卡的信号（正文实为反爬/验证/错误页，或与参考主题完全无关）。
+func isNoCardReconstruct(raw string) bool {
+	t := strings.TrimSpace(raw)
+	return t == "NO_CARD" || strings.HasPrefix(t, "NO_CARD")
 }
