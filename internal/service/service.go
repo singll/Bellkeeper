@@ -146,6 +146,8 @@ func NewServices(repos *repository.Repositories, cfg *config.Config, version str
 		pkbReportSvc,
 		repos.ActivityLog,
 		repos.CrawlJob,
+		repos.ArticleTag,
+		repos.RSS,
 		nil,
 		reportSvc,
 		cfg.DailyReport,

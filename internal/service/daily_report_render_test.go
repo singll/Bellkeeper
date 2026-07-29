@@ -154,38 +154,50 @@ func TestRenderDailyReport_Empty(t *testing.T) {
 	}
 }
 
-func TestRenderBriefReport(t *testing.T) {
-	data := &DailyReportData{
-		Date: "2026-06-11",
-		Crawl: &CrawlDashboardStats{
-			TodayNew: 50, TodaySuccess: 40, TodayFailed: 2,
+func TestRenderNewsBrief(t *testing.T) {
+	data := &NewsBriefData{
+		Date:        "2026-06-11",
+		WindowStart: "06-10 08:00",
+		WindowEnd:   "06-11 08:00",
+		WindowHours: 24,
+		Total:       3,
+		AISummary:   "今日总结测试内容。\n\n**看点**\n- 要点一",
+		Groups: []NewsGroup{
+			{Category: "编程", Items: []NewsItem{
+				{Title: "Go 1.99 发布", URL: "https://go.dev/a", Domain: "go.dev", Category: "编程"},
+			}},
+			{Category: "人工智能", Items: []NewsItem{
+				{Title: "某模型 [beta] 上线", URL: "https://x.ai/b", Domain: "x.ai", Category: "人工智能"},
+				{Title: "论文速览", URL: "https://y.com/c", Category: "人工智能"},
+			}},
 		},
-		RSSIngest: &RSSIngestStats{
-			Success: 120, Duplicate: 5, Failure: 1,
-		},
-		PKB: &PKBVaultStats{
-			CardsToday: 3,
-		},
-		PKBCards: []PKBCardSummary{
-			{Title: "测试卡片1", Domain: "ai", Score: 80},
-			{Title: "测试卡片2", Domain: "security", Score: 75},
-		},
-		AISummary: "今日资讯摘要测试内容。",
 	}
 
-	md := RenderBriefReport(data)
+	md := RenderNewsBrief(data)
 
-	if !strings.Contains(md, "2026-06-11 资讯摘要") {
+	if !strings.Contains(md, "每日资讯早报 · 2026-06-11") {
 		t.Error("missing brief title")
 	}
-	if !strings.Contains(md, "新增 50") {
-		t.Error("missing crawl data")
+	if !strings.Contains(md, "共 3 条") {
+		t.Error("missing total count")
 	}
-	if !strings.Contains(md, "测试卡片1") {
-		t.Error("missing card title")
-	}
-	if !strings.Contains(md, "今日资讯摘要测试内容") {
+	if !strings.Contains(md, "今日总结测试内容") {
 		t.Error("missing AI summary")
+	}
+	if !strings.Contains(md, "[Go 1.99 发布](https://go.dev/a)") {
+		t.Error("missing item link")
+	}
+	// 标题内方括号应被转义，避免破坏 markdown 链接
+	if !strings.Contains(md, "某模型 【beta】 上线") {
+		t.Error("bracket in title not escaped")
+	}
+}
+
+func TestRenderNewsBrief_Empty(t *testing.T) {
+	data := &NewsBriefData{Date: "2026-06-11", WindowStart: "06-10 08:00", WindowEnd: "06-11 08:00", WindowHours: 24, Total: 0}
+	md := RenderNewsBrief(data)
+	if !strings.Contains(md, "暂无新入库资讯") {
+		t.Error("empty brief should state no news")
 	}
 }
 

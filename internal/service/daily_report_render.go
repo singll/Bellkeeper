@@ -18,6 +18,7 @@ func RenderDailyReport(data *DailyReportData) string {
 	sb.WriteString(renderClassifySection(data))
 	sb.WriteString(renderPKBSection(data))
 	sb.WriteString(renderFeedArchiveSection(data))
+	sb.WriteString(renderNewsGlanceSection(data))
 	sb.WriteString(renderLLMSection(data))
 	sb.WriteString(renderFailureSection(data))
 	sb.WriteString(renderTodoSection(data))
@@ -249,44 +250,21 @@ func renderFeedArchiveSection(data *DailyReportData) string {
 	return sb.String()
 }
 
-func RenderBriefReport(data *DailyReportData) string {
+// renderNewsGlanceSection 晚间日报内嵌「今日资讯速览」：只列当日最新数条头条链接，
+// 指回当日 08:00 的资讯早报（全文/分领域在早报），避免与早报重复铺陈。
+func renderNewsGlanceSection(data *DailyReportData) string {
+	if len(data.NewsTop) == 0 {
+		return ""
+	}
 	var sb strings.Builder
-
-	sb.WriteString(fmt.Sprintf("### %s 资讯摘要\n", data.Date))
-
-	if data.Crawl != nil {
-		sb.WriteString(fmt.Sprintf("- 今日爬取: 新增 %d / 成功 %d / 失败 %d\n",
-			data.Crawl.TodayNew, data.Crawl.TodaySuccess, data.Crawl.TodayFailed))
-	}
-
-	if data.RSSIngest != nil {
-		sb.WriteString(fmt.Sprintf("- RSS入库: 成功 %d / 重复 %d / 失败 %d\n",
-			data.RSSIngest.Success, data.RSSIngest.Duplicate, data.RSSIngest.Failure))
-	}
-
-	if data.PKB != nil && data.PKB.CardsToday > 0 {
-		sb.WriteString(fmt.Sprintf("- 知识库新增: %d 张卡片\n", data.PKB.CardsToday))
-	}
-
-	if len(data.PKBCards) > 0 {
-		sb.WriteString("\n**今日新卡片:**\n")
-		for i, card := range data.PKBCards {
-			if i >= 10 {
-				sb.WriteString(fmt.Sprintf("- ...还有 %d 张\n", len(data.PKBCards)-10))
-				break
-			}
-			domain := card.Domain
-			if domain != "" {
-				sb.WriteString(fmt.Sprintf("- [%s] %s\n", domain, card.Title))
-			} else {
-				sb.WriteString(fmt.Sprintf("- %s\n", card.Title))
-			}
+	sb.WriteString("\n#### 今日资讯速览\n")
+	for _, it := range data.NewsTop {
+		if it.Domain != "" {
+			sb.WriteString(fmt.Sprintf("- [%s](%s) · %s\n", newsEscape(it.Title), it.URL, it.Domain))
+		} else {
+			sb.WriteString(fmt.Sprintf("- [%s](%s)\n", newsEscape(it.Title), it.URL))
 		}
 	}
-
-	if data.AISummary != "" {
-		sb.WriteString("\n" + data.AISummary + "\n")
-	}
-
+	sb.WriteString("- 📩 完整分领域资讯见今晨「每日资讯早报」\n")
 	return sb.String()
 }

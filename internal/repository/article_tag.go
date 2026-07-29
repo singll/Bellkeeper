@@ -1,6 +1,8 @@
 package repository
 
 import (
+	"time"
+
 	"github.com/singll/bellkeeper/internal/model"
 
 	"gorm.io/gorm"
@@ -193,6 +195,23 @@ func (r *ArticleTagRepository) ListWithFilter(opts ListArticleTagOpts) ([]model.
 		Find(&articles).Error
 
 	return articles, total, err
+}
+
+// ListSince 返回 created_at >= since 的入库文章，供资讯早报按滚动时间窗取材。
+// 仅取真实入库条目（排除 tag_association 关联占位行），按时间倒序，预加载 Tag 便于分类归类。
+func (r *ArticleTagRepository) ListSince(since time.Time, limit int) ([]model.ArticleTag, error) {
+	if limit <= 0 {
+		limit = 500
+	}
+	var articles []model.ArticleTag
+	err := r.db.
+		Where("created_at >= ?", since).
+		Where("ingest_status IS NULL OR ingest_status <> ?", "tag_association").
+		Preload("Tag").
+		Order("created_at DESC").
+		Limit(limit).
+		Find(&articles).Error
+	return articles, err
 }
 
 // MarkPkbProcessed 标记一篇文章已被 pkb-curate 处理（幂等：下次 ListRaw 默认将其排除）。

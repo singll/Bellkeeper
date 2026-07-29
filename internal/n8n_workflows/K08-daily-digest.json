@@ -9,13 +9,13 @@
         "rule": {
           "interval": [
             {
-              "triggerAtHour": 20
+              "triggerAtHour": 8
             }
           ]
         }
       },
       "id": "k08-0001",
-      "name": "每日20点触发",
+      "name": "每日8点触发",
       "type": "n8n-nodes-base.scheduleTrigger",
       "typeVersion": 1.2,
       "position": [
@@ -116,7 +116,7 @@
     }
   ],
   "connections": {
-    "每日20点触发": {
+    "每日8点触发": {
       "main": [
         [
           {

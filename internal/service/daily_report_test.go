@@ -3,6 +3,7 @@ package service
 import (
 	"strings"
 	"testing"
+	"time"
 
 	"github.com/stretchr/testify/assert"
 )
@@ -129,6 +130,43 @@ func TestGenerateOptions_Fields(t *testing.T) {
 }
 
 func TestBriefGenerateOptions_Fields(t *testing.T) {
-	opts := BriefGenerateOptions{Date: "2026-06-12"}
+	opts := BriefGenerateOptions{Date: "2026-06-12", WindowHours: 6}
 	assert.Equal(t, "2026-06-12", opts.Date)
+	assert.Equal(t, 6, opts.WindowHours)
+}
+
+func TestComputeBriefWindow(t *testing.T) {
+	loc, err := time.LoadLocation("Asia/Shanghai")
+	if err != nil {
+		t.Fatalf("load location: %v", err)
+	}
+	// 模拟每日 08:00 推送时刻触发。
+	now := time.Date(2026, 6, 12, 8, 0, 0, 0, loc)
+
+	t.Run("默认滚动24h：昨08:00→今08:00", func(t *testing.T) {
+		start, end, err := computeBriefWindow(BriefGenerateOptions{}, now, loc)
+		assert.NoError(t, err)
+		assert.Equal(t, now, end)
+		assert.Equal(t, time.Date(2026, 6, 11, 8, 0, 0, 0, loc), start)
+		assert.Equal(t, 24*time.Hour, end.Sub(start))
+	})
+
+	t.Run("自定义窗口小时数", func(t *testing.T) {
+		start, end, err := computeBriefWindow(BriefGenerateOptions{WindowHours: 6}, now, loc)
+		assert.NoError(t, err)
+		assert.Equal(t, now, end)
+		assert.Equal(t, time.Date(2026, 6, 12, 2, 0, 0, 0, loc), start)
+	})
+
+	t.Run("指定历史日期→右界该日08:00", func(t *testing.T) {
+		start, end, err := computeBriefWindow(BriefGenerateOptions{Date: "2026-06-10"}, now, loc)
+		assert.NoError(t, err)
+		assert.Equal(t, time.Date(2026, 6, 10, 8, 0, 0, 0, loc), end)
+		assert.Equal(t, time.Date(2026, 6, 9, 8, 0, 0, 0, loc), start)
+	})
+
+	t.Run("非法日期返回错误", func(t *testing.T) {
+		_, _, err := computeBriefWindow(BriefGenerateOptions{Date: "not-a-date"}, now, loc)
+		assert.Error(t, err)
+	})
 }

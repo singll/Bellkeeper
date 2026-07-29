@@ -68,8 +68,8 @@
 | GET | `/api/pkb/daily` | PKB 日报数据 |
 | GET | `/api/pkb/vault-cards` `/api/pkb/digests/latest` | vault 卡片 / 最新综述 |
 | POST | `/api/reports/write` | 报告写入(n8n 日报交接) |
-| GET | `/api/reports/daily-data` `/api/reports/brief-data` | 日报 / 晨报数据 |
-| POST | `/api/reports/daily/generate` `/api/reports/brief/generate` | 生成日报 / 晨报 |
+| GET | `/api/reports/daily-data` `/api/reports/brief-data` | 系统日报 / 资讯早报数据 |
+| POST | `/api/reports/daily/generate` `/api/reports/brief/generate` | 生成系统日报(晚 21:00·系统统计+PKB) / 资讯早报(晨 08:00·滚动 24h 分领域资讯+LLM 总结) |
 
 ## Dashboard
 

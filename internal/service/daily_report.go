@@ -20,6 +20,8 @@ type DailyReportService struct {
 	pkbReport    *PKBReportService
 	activityRepo *repository.ActivityLogRepository
 	crawlJobRepo *repository.CrawlJobRepository
+	articleRepo  *repository.ArticleTagRepository
+	rssRepo      *repository.RSSRepository
 	notify       *NotificationService
 	report       *ReportService
 	llm          llmgateway.Gateway
@@ -34,6 +36,8 @@ func NewDailyReportService(
 	pkbReport *PKBReportService,
 	activityRepo *repository.ActivityLogRepository,
 	crawlJobRepo *repository.CrawlJobRepository,
+	articleRepo *repository.ArticleTagRepository,
+	rssRepo *repository.RSSRepository,
 	notify *NotificationService,
 	report *ReportService,
 	cfg config.DailyReportConfig,
@@ -52,6 +56,8 @@ func NewDailyReportService(
 		pkbReport:    pkbReport,
 		activityRepo: activityRepo,
 		crawlJobRepo: crawlJobRepo,
+		articleRepo:  articleRepo,
+		rssRepo:      rssRepo,
 		notify:       notify,
 		report:       report,
 		llm:          llm,
@@ -105,6 +111,7 @@ type DailyReportData struct {
 	LLM          *LLMDashboardStats   `json:"llm,omitempty"`
 	Failures     []FailureDetail      `json:"failures,omitempty"`
 	FeedArchives []PKBFeedArchive     `json:"feed_archives,omitempty"`
+	NewsTop      []NewsItem           `json:"news_top,omitempty"`
 	AISummary    string               `json:"ai_summary,omitempty"`
 	Errors       []CollectError       `json:"errors,omitempty"`
 }
@@ -178,6 +185,14 @@ func (s *DailyReportService) Collect(ctx context.Context, date string) (*DailyRe
 		}},
 		{name: "feed_archives", fn: func(ctx context.Context) (interface{}, error) {
 			return s.pkbReport.FeedArchivesByDate(dateStr)
+		}},
+		{name: "news_top", fn: func(ctx context.Context) (interface{}, error) {
+			// 晚间日报只内嵌当日（自 dayStart 起）最新数条资讯链接指回早报，不复述早报全文。
+			nd, err := s.collectNewsBetween(dayStart, time.Now().In(s.loc))
+			if err != nil {
+				return nil, err
+			}
+			return topNews(nd, 6), nil
 		}},
 	}
 
@@ -267,6 +282,8 @@ func (s *DailyReportService) Collect(ctx context.Context, date string) (*DailyRe
 			result.Failures = cr.data.([]FailureDetail)
 		case "feed_archives":
 			result.FeedArchives = cr.data.([]PKBFeedArchive)
+		case "news_top":
+			result.NewsTop = cr.data.([]NewsItem)
 		}
 	}
 
@@ -465,56 +482,69 @@ func formatTopicsForPrompt(topics []string) string {
 	return result
 }
 
-func (s *DailyReportService) CollectBrief(date string) ([]ActionStatEntry, error) {
-	var dayStart time.Time
-	if date != "" {
-		parsed, err := time.ParseInLocation("2006-01-02", date, s.loc)
-		if err != nil {
-			return nil, fmt.Errorf("invalid date format: %w", err)
-		}
-		dayStart = time.Date(parsed.Year(), parsed.Month(), parsed.Day(), 0, 0, 0, 0, s.loc)
-	} else {
-		now := time.Now().In(s.loc)
-		dayStart = time.Date(now.Year(), now.Month(), now.Day(), 0, 0, 0, 0, s.loc)
-	}
-
-	return s.collectActionStats("rss_fetch", dayStart)
-}
-
 type BriefGenerateOptions struct {
-	Date string `json:"date,omitempty"`
+	// Date 为空=按滚动窗（默认，用于每日 08:00 推送）；指定 YYYY-MM-DD=以该天 08:00 为窗口右界（回补/测试）。
+	Date        string `json:"date,omitempty"`
+	WindowHours int    `json:"window_hours,omitempty"` // 取材窗口小时数，默认 24
 }
 
 type BriefGenerateResult struct {
-	Date     string           `json:"date"`
-	Markdown string           `json:"markdown"`
-	Data     *DailyReportData `json:"data"`
+	Date     string         `json:"date"`
+	Markdown string         `json:"markdown"`
+	News     *NewsBriefData `json:"news"`
 }
 
+// computeBriefWindow 计算早报取材时间窗 [start, end)，抽为纯函数便于单测。
+// opts.Date 为空→右界=now（每日 08:00 推送即取「昨 08:00 → 今 08:00」滚动窗）；
+// 指定 YYYY-MM-DD→右界=该日 08:00（回补/测试历史）。WindowHours 默认 24。
+func computeBriefWindow(opts BriefGenerateOptions, now time.Time, loc *time.Location) (start, end time.Time, err error) {
+	window := 24 * time.Hour
+	if opts.WindowHours > 0 {
+		window = time.Duration(opts.WindowHours) * time.Hour
+	}
+	end = now.In(loc)
+	if opts.Date != "" {
+		parsed, perr := time.ParseInLocation("2006-01-02", opts.Date, loc)
+		if perr != nil {
+			return time.Time{}, time.Time{}, fmt.Errorf("invalid date format (expected YYYY-MM-DD): %w", perr)
+		}
+		end = time.Date(parsed.Year(), parsed.Month(), parsed.Day(), 8, 0, 0, 0, loc)
+	}
+	start = end.Add(-window)
+	return start, end, nil
+}
+
+// GenerateBrief 产出「资讯早报」：滚动时间窗内真实入库的资讯，分领域列出 + LLM 全局总结/看点。
+// 与运维日报（Generate）彻底分家——早报讲「今天世界/技术圈发生了什么」，日报讲「本系统今天怎么样」。
 func (s *DailyReportService) GenerateBrief(ctx context.Context, opts BriefGenerateOptions) (*BriefGenerateResult, error) {
-	data, err := s.Collect(ctx, opts.Date)
+	start, end, err := computeBriefWindow(opts, time.Now(), s.loc)
 	if err != nil {
-		return nil, fmt.Errorf("collect brief data: %w", err)
+		return nil, err
 	}
 
-	aiSummary, aiErr := s.generateAISummary(ctx, data)
-	if aiErr != nil {
-		log.Printf("[DailyReport] AI summary failed: %v", aiErr)
-		data.Errors = append(data.Errors, CollectError{
-			Source: "ai_summary",
-			Error:  aiErr.Error(),
-		})
-		data.AISummary = "(AI总结暂不可用)"
-	} else {
-		data.AISummary = aiSummary
+	data, err := s.collectNewsBetween(start, end)
+	if err != nil {
+		return nil, fmt.Errorf("collect news brief: %w", err)
+	}
+	data.WindowHours = int(end.Sub(start) / time.Hour)
+
+	if data.Total > 0 {
+		summary, aiErr := s.generateNewsSummary(ctx, data)
+		if aiErr != nil {
+			log.Printf("[NewsBrief] AI summary failed: %v", aiErr)
+			data.Errors = append(data.Errors, CollectError{Source: "ai_summary", Error: aiErr.Error()})
+			data.AISummary = "(AI 总结暂不可用)"
+		} else {
+			data.AISummary = summary
+		}
 	}
 
-	markdown := RenderBriefReport(data)
+	markdown := RenderNewsBrief(data)
 
 	return &BriefGenerateResult{
 		Date:     data.Date,
 		Markdown: markdown,
-		Data:     data,
+		News:     data,
 	}, nil
 }
 
