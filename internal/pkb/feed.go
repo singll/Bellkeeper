@@ -17,6 +17,9 @@ type FeedOptions struct {
 	Date        string // YYYY-MM-DD，空=今天
 	DryRun      bool
 	SkipPromote bool // 本轮只生成资讯库存档，跳过晋升闸（耐久知识点→知识库卡）
+	// SkipDailyWrite 跳过每日资讯 md（writeFeedDaily）。资讯早报（GenerateBrief）已接管
+	// vault/资讯/<date>.md 的唯一写入，feed 退化为「只做晋升闸」；置 true 避免覆盖早报落地。
+	SkipDailyWrite bool
 }
 
 // feedItem 当日一条时效资讯（从 raw/archive 文件 frontmatter 采集，不存独立原子卡）。
@@ -83,21 +86,24 @@ func (c *Curator) RunFeed(opts FeedOptions) error {
 			}
 			continue
 		}
-		summary, err := c.summarizeFeed(domain, date, group)
-		if err != nil {
-			fmt.Printf("[pkb-feed] ⚠ %s 综述失败（跳过该领域，不中断整批）: %v\n", domain.Display, err)
-			continue
-		}
-		if s, exists := sectionByName[secName]; exists {
-			s.summary += "\n\n" + strings.TrimSpace(summary) // 同小节合并（misc+news→其他）
-			s.count += len(group)
-		} else {
-			sectionByName[secName] = &feedSection{name: secName, summary: strings.TrimSpace(summary), count: len(group)}
-			sectionOrder = append(sectionOrder, secName)
+
+		// 每日综述 md（资讯库存档）：早报已接管为唯一写入者时跳过（SkipDailyWrite），避免覆盖早报落地。
+		// 综述失败只跳过该领域「小节」，不再连带跳过下方晋升（两者独立）。
+		if !opts.SkipDailyWrite {
+			summary, err := c.summarizeFeed(domain, date, group)
+			if err != nil {
+				fmt.Printf("[pkb-feed] ⚠ %s 综述失败（跳过该领域小节，不影响晋升/整批）: %v\n", domain.Display, err)
+			} else if s, exists := sectionByName[secName]; exists {
+				s.summary += "\n\n" + strings.TrimSpace(summary) // 同小节合并（misc+news→其他）
+				s.count += len(group)
+			} else {
+				sectionByName[secName] = &feedSection{name: secName, summary: strings.TrimSpace(summary), count: len(group)}
+				sectionOrder = append(sectionOrder, secName)
+			}
 		}
 
 		// 晋升闸（ADR-0005 §5.2）：从当日资讯识别耐久知识点，走缺口填充同一 V2 路径晋升为知识库卡。
-		// 仅对知识领域晋升（feed 容器领域的资讯多为事件性、无对应知识骨架，不晋升）。
+		// 仅对知识领域晋升（feed 容器领域的资讯多为事件性、无对应知识骨架，不晋升）。独立于每日 md。
 		if !domain.Feed && c.domains.Defaults.GetPromoteEnabled() && !opts.SkipPromote {
 			promotedTotal += c.promoteFromFeed(domain, date, group)
 		}
@@ -109,7 +115,10 @@ func (c *Curator) RunFeed(opts FeedOptions) error {
 	}
 
 	written := 0
-	if len(sectionOrder) > 0 {
+	switch {
+	case opts.SkipDailyWrite:
+		fmt.Printf("\n[pkb-feed] ⏭️ 跳过每日资讯 md（早报已接管 vault/资讯/<date>.md 写入；本轮 feed 只做晋升）\n")
+	case len(sectionOrder) > 0:
 		dst, err := c.writeFeedDaily(feedRoot, date, orderedSections(sectionByName, sectionOrder), len(items))
 		if err != nil {
 			fmt.Printf("[pkb-feed] ⚠ 当日资讯落盘失败: %v\n", err)

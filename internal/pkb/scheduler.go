@@ -11,8 +11,8 @@ import (
 	"sync"
 	"time"
 
-	"github.com/singll/bellkeeper/internal/llmgateway"
 	"github.com/singll/bellkeeper/internal/config"
+	"github.com/singll/bellkeeper/internal/llmgateway"
 	"github.com/singll/bellkeeper/internal/repository"
 	"github.com/singll/bellkeeper/internal/service"
 	"gorm.io/gorm"
@@ -268,16 +268,17 @@ func (s *Scheduler) runFill(ctx context.Context) (string, error) {
 	return fmt.Sprintf("PKB 自动缺口填充完成（%d 个领域）", n), nil
 }
 
-// runFeed 资讯库：全域生成当日资讯存档 + 晋升闸（耐久知识点→知识库卡）。
+// runFeed 资讯库：资讯早报（GenerateBrief）已接管 vault/资讯/<date>.md 每日 md 的唯一写入，
+// 故自动 feed 只做晋升闸（耐久知识点→知识库卡），跳过每日 md（SkipDailyWrite）避免覆盖早报落地。
 func (s *Scheduler) runFeed(ctx context.Context) (string, error) {
 	c, err := s.newCurator(ctx)
 	if err != nil {
 		return "", err
 	}
-	if err := c.RunFeed(FeedOptions{}); err != nil {
+	if err := c.RunFeed(FeedOptions{SkipDailyWrite: true}); err != nil {
 		return "", err
 	}
-	return "PKB 自动资讯库生成完成", nil
+	return "PKB 自动资讯库生成完成（只晋升，每日 md 由早报接管）", nil
 }
 
 // runPropose 骨架结构增长：遍历知识域，从待归位簇生成骨架变更提议（影响半径闸——小动作自动应用、

@@ -6,10 +6,10 @@ import (
 	"os"
 	"time"
 
-	"github.com/singll/bellkeeper/internal/llmclient"
-	"github.com/singll/bellkeeper/internal/llmgateway"
 	"github.com/singll/bellkeeper/internal/app"
 	"github.com/singll/bellkeeper/internal/config"
+	"github.com/singll/bellkeeper/internal/llmclient"
+	"github.com/singll/bellkeeper/internal/llmgateway"
 	"github.com/singll/bellkeeper/internal/middleware"
 	"github.com/singll/bellkeeper/internal/model"
 	"github.com/singll/bellkeeper/internal/pkb"
@@ -47,8 +47,9 @@ var (
 	pkbFillPerRun int
 
 	// pkb-curate feed flags
-	pkbFeedDate      string
-	pkbFeedNoPromote bool
+	pkbFeedDate       string
+	pkbFeedNoPromote  bool
+	pkbFeedWriteDaily bool
 )
 
 func main() {
@@ -204,6 +205,7 @@ Requires a feed-container domain (feed: true) in domains.yaml. Use --dry-run to 
 	pkbFeedCmd.Flags().BoolVar(&pkbDryRun, "dry-run", false, "list the feed items this run would summarize without calling the LLM or writing files")
 	pkbFeedCmd.Flags().StringVar(&pkbFeedDate, "date", "", "target date YYYY-MM-DD (default: today)")
 	pkbFeedCmd.Flags().BoolVar(&pkbFeedNoPromote, "no-promote", false, "only build the feed archive; skip promoting durable knowledge into the knowledge base")
+	pkbFeedCmd.Flags().BoolVar(&pkbFeedWriteDaily, "write-daily", false, "(re)build the daily feed md from scored articles; off by default because the news brief now owns vault/资讯/<date>.md")
 	pkbFeedCmd.Flags().StringVar(&pkbCfgDir, "pkb-config", "config/pkb", "directory holding domains.yaml + prompts/")
 	pkbCurateCmd.AddCommand(pkbFeedCmd)
 
@@ -666,9 +668,10 @@ func runPkbFeed(cmd *cobra.Command, args []string) {
 		os.Exit(1)
 	}
 	if err := curator.RunFeed(pkb.FeedOptions{
-		Date:        pkbFeedDate,
-		DryRun:      pkbDryRun,
-		SkipPromote: pkbFeedNoPromote,
+		Date:           pkbFeedDate,
+		DryRun:         pkbDryRun,
+		SkipPromote:    pkbFeedNoPromote,
+		SkipDailyWrite: !pkbFeedWriteDaily,
 	}); err != nil {
 		fmt.Fprintf(os.Stderr, "pkb-curate feed failed: %v\n", err)
 		os.Exit(1)
