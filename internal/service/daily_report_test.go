@@ -242,3 +242,37 @@ func TestIsNoiseDomain(t *testing.T) {
 	assert.False(t, isNoiseDomain("github.com"))
 	assert.False(t, isNoiseDomain(""))
 }
+
+func TestParseNewsImportanceScores(t *testing.T) {
+	out := "```\n1: 9\n2：3\n3: 7.5\n4: 15\n9: 6\n乱码行无冒号\n```"
+	scores := parseNewsImportanceScores(out, 5)
+	assert.Equal(t, 9.0, scores[0])  // 半角冒号
+	assert.Equal(t, 3.0, scores[1])  // 全角冒号
+	assert.Equal(t, 7.5, scores[2])  // 小数分
+	assert.Equal(t, 10.0, scores[3]) // 15 封顶到 10
+	_, ok := scores[8]               // 序号 9 > n=5，越界忽略
+	assert.False(t, ok)
+	assert.Len(t, scores, 4)
+}
+
+func TestSelectImportantNews(t *testing.T) {
+	items := []NewsItem{{Title: "A"}, {Title: "B"}, {Title: "C"}, {Title: "D"}}
+	scores := map[int]float64{0: 9, 1: 4, 2: 7, 3: 6} // B=4 低于阈值 6
+
+	got := selectImportantNews(items, scores, 6.0, 2)
+	// 过阈值 A9/C7/D6 → 按分降序 A,C,D → cap=2 → A,C
+	assert.Len(t, got, 2)
+	assert.Equal(t, "A", got[0].Title)
+	assert.Equal(t, 9.0, got[0].Score)
+	assert.Equal(t, "C", got[1].Title)
+	assert.Equal(t, 7.0, got[1].Score)
+}
+
+func TestSelectImportantNews_UnscoredDropped(t *testing.T) {
+	items := []NewsItem{{Title: "A"}, {Title: "B"}}
+	scores := map[int]float64{0: 8} // B 未打分 → 丢弃
+
+	got := selectImportantNews(items, scores, 6.0, 30)
+	assert.Len(t, got, 1)
+	assert.Equal(t, "A", got[0].Title)
+}

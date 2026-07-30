@@ -321,6 +321,17 @@ type DailyReportConfig struct {
 	Timezone        string `mapstructure:"timezone"`
 	ReportChannel   string `mapstructure:"report_channel"`
 	AlertChannel    string `mapstructure:"alert_channel"`
+
+	NewsBrief NewsBriefConfig `mapstructure:"news_brief"`
+}
+
+// NewsBriefConfig 控制资讯早报的「重要性打分过滤」：LLM 给每条资讯打 0-10 重要性分，
+// 过阈值才入选，按分排序取每领域上限，替代旧的固定条数截断。
+type NewsBriefConfig struct {
+	ImportanceScoring   bool    `mapstructure:"importance_scoring"`   // 是否启用 LLM 重要性打分过滤（关=按时间倒序取每组上限）
+	ImportanceThreshold float64 `mapstructure:"importance_threshold"` // 入选阈值（0-10），低于此分不进早报/资讯库
+	PerGroupCap         int     `mapstructure:"per_group_cap"`        // 每领域展示上限（打分过滤后的安全兜底）
+	ScoreCandidatesCap  int     `mapstructure:"score_candidates_cap"` // 每组喂 LLM 打分的候选上限（按时间倒序，控 token）
 }
 
 // HealthConfig controls which services are probed by the health check endpoint.
@@ -639,6 +650,10 @@ func setDefaults(v *viper.Viper) {
 	v.SetDefault("daily_report.timezone", "Asia/Shanghai")
 	v.SetDefault("daily_report.report_channel", "daily")
 	v.SetDefault("daily_report.alert_channel", "alerts")
+	v.SetDefault("daily_report.news_brief.importance_scoring", true)
+	v.SetDefault("daily_report.news_brief.importance_threshold", 6.0)
+	v.SetDefault("daily_report.news_brief.per_group_cap", 30)
+	v.SetDefault("daily_report.news_brief.score_candidates_cap", 80)
 
 	// Health check probes (keeper host service bundle)
 	v.SetDefault("health.services", []map[string]interface{}{

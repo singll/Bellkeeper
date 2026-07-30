@@ -5,13 +5,18 @@ import (
 	"fmt"
 	"log"
 	"net/url"
+	"regexp"
 	"sort"
+	"strconv"
 	"strings"
+	"sync"
 	"time"
 
+	"github.com/singll/bellkeeper/internal/config"
 	"github.com/singll/bellkeeper/internal/llmclient"
 	"github.com/singll/bellkeeper/internal/llmgateway"
 	"github.com/singll/bellkeeper/internal/model"
+	"github.com/singll/bellkeeper/internal/pkg/textutil"
 )
 
 // 资讯早报（news brief）—— 与运维日报同源但职责不同：
@@ -21,13 +26,6 @@ import (
 // newsCategoryOrder 决定早报分组的展示顺序（技术在前、泛资讯在后）。
 var newsCategoryOrder = []string{"编程", "人工智能", "网络安全", "资讯"}
 
-// newsBriefPerGroupCap 单领域早报正文最多展示条数，超出在 render 层折叠为「还有 N 条」。
-const newsBriefPerGroupCap = 12
-
-// newsFallbackCap 「资讯」（泛资讯兜底）组数据层最多保留条数，按时间倒序取最新，
-// 防止长尾泛资讯在数量上盖过技术三领域（编程/AI/网络安全）。技术领域不受此限。
-const newsFallbackCap = 25
-
 // NewsItem 是一条资讯（去重后一篇文章一条）。
 type NewsItem struct {
 	Title    string    `json:"title"`
@@ -35,6 +33,7 @@ type NewsItem struct {
 	Domain   string    `json:"domain,omitempty"`
 	Category string    `json:"category"`
 	At       time.Time `json:"at"`
+	Score    float64   `json:"score,omitempty"` // LLM 重要性打分（0-10），未打分=0
 }
 
 // NewsGroup 是同一领域的资讯集合。
@@ -227,10 +226,7 @@ func (s *DailyReportService) collectNewsBetween(start, end time.Time) (*NewsBrie
 		if len(items) == 0 {
 			continue
 		}
-		// 泛资讯长尾易在数量上盖过技术：资讯组按时间倒序限量为「少量最新」，技术三领域全列。
-		if cat == "资讯" && len(items) > newsFallbackCap {
-			items = items[:newsFallbackCap]
-		}
+		// 全量候选按序入组；限量交由后续「重要性打分过滤 + 每组上限」（scoreAndFilterGroups）统一处理。
 		data.Groups = append(data.Groups, NewsGroup{Category: cat, Items: items})
 		total += len(items)
 	}
@@ -293,18 +289,28 @@ func (s *DailyReportService) generateNewsSummary(ctx context.Context, data *News
 今日资讯标题（按领域）：
 %s`, sb.String())
 
+	return s.chatPoolSummary(ctx, "news-brief-service",
+		llmgateway.LLMJobIdempotencyKey("news-brief-summary", data.Date), prompt, 0.4)
+}
+
+// chatPoolSummary 用 pool-summary 模型跑一次补全：优先走 llm_jobs 持久队列，无队列时直调 Gateway 兜底。
+// 抽出供早报「今日总结」与资讯「重要性打分」复用（两处 LLM 调用样板一致）。
+func (s *DailyReportService) chatPoolSummary(ctx context.Context, callerID, idempotencyKey, prompt string, temperature float64) (string, error) {
 	messages := []llmclient.ChatMessage{{Role: "user", Content: prompt}}
 
 	if s.llmJobs != nil {
-		job, err := s.llmJobs.EnqueueChat(llmgateway.EnqueueLLMChatOptions{
-			TaskType:       "summary",
-			CallerID:       "news-brief-service",
-			Model:          "pool-summary",
-			Messages:       messages,
-			Temperature:    0.4,
-			Priority:       30,
-			IdempotencyKey: llmgateway.LLMJobIdempotencyKey("news-brief-summary", data.Date),
-		})
+		opts := llmgateway.EnqueueLLMChatOptions{
+			TaskType:    "summary",
+			CallerID:    callerID,
+			Model:       "pool-summary",
+			Messages:    messages,
+			Temperature: temperature,
+			Priority:    30,
+		}
+		if idempotencyKey != "" {
+			opts.IdempotencyKey = idempotencyKey
+		}
+		job, err := s.llmJobs.EnqueueChat(opts)
 		if err != nil {
 			return "", fmt.Errorf("enqueue llm job: %w", err)
 		}
@@ -328,13 +334,163 @@ func (s *DailyReportService) generateNewsSummary(ctx context.Context, data *News
 	resp, err := s.llm.Chat(callCtx, llmclient.ChatRequest{
 		Model:       "pool-summary",
 		Messages:    messages,
-		Temperature: 0.4,
+		Temperature: temperature,
 	}, llmclient.ChatOptions{
-		CallerID: "news-brief-service",
+		CallerID: callerID,
 		TaskType: "summary",
 	})
 	if err != nil {
 		return "", fmt.Errorf("llm summarize: %w", err)
 	}
 	return strings.TrimSpace(resp.Content), nil
+}
+
+// scoreAndFilterGroups 对各领域资讯做「重要性打分过滤 + 每组上限」（ADR：资讯早报只留重大/关键）：
+// 每组按时间倒序取候选上限 → LLM 打 0-10 重要性分 → 过阈值 → 按分排序取每组上限。各组并行打分
+// （互不相干、只改各自 Items）；打分失败/关闭时回退按时间取前 N（显式 🔶 记日志，不静默、不阻断）。
+// 打分后重算 Total 并剔除空组。
+func (s *DailyReportService) scoreAndFilterGroups(ctx context.Context, data *NewsBriefData) {
+	if data == nil || data.Total == 0 {
+		return
+	}
+	cfg := s.cfg.NewsBrief
+	cap := cfg.PerGroupCap
+	if cap <= 0 {
+		cap = 30
+	}
+	candCap := cfg.ScoreCandidatesCap
+	if candCap <= 0 {
+		candCap = 80
+	}
+
+	var wg sync.WaitGroup
+	for gi := range data.Groups {
+		wg.Add(1)
+		go func(g *NewsGroup) {
+			defer wg.Done()
+			s.scoreOneGroup(ctx, g, cfg, cap, candCap)
+		}(&data.Groups[gi])
+	}
+	wg.Wait()
+
+	// 重算 Total + 剔除空组（某组当日无重要资讯时整组消失，符合「只留重要」预期）。
+	kept := data.Groups[:0]
+	total := 0
+	for _, g := range data.Groups {
+		if len(g.Items) == 0 {
+			continue
+		}
+		kept = append(kept, g)
+		total += len(g.Items)
+	}
+	data.Groups = kept
+	data.Total = total
+}
+
+// scoreOneGroup 处理单个领域组：按时间倒序取候选上限，打分启用则 LLM 打分+过滤+取每组上限，
+// 否则/打分失败则回退按时间取前 cap。就地写回 g.Items。
+func (s *DailyReportService) scoreOneGroup(ctx context.Context, g *NewsGroup, cfg config.NewsBriefConfig, cap, candCap int) {
+	if len(g.Items) == 0 {
+		return
+	}
+	sort.Slice(g.Items, func(i, j int) bool { return g.Items[i].At.After(g.Items[j].At) })
+	cands := g.Items
+	if len(cands) > candCap {
+		cands = cands[:candCap]
+	}
+
+	if !cfg.ImportanceScoring {
+		if len(cands) > cap {
+			cands = cands[:cap]
+		}
+		g.Items = cands
+		return
+	}
+
+	scores, err := s.scoreNewsImportance(ctx, g.Category, cands)
+	if err != nil || len(scores) == 0 {
+		log.Printf("[NewsBrief] 🔶 %s 重要性打分失败/空（回退按时间取前 %d，不过滤）: %v", g.Category, cap, err)
+		if len(cands) > cap {
+			cands = cands[:cap]
+		}
+		g.Items = cands
+		return
+	}
+	g.Items = selectImportantNews(cands, scores, cfg.ImportanceThreshold, cap)
+}
+
+// selectImportantNews 纯逻辑：保留分数≥threshold 的条目（附上分数），按分降序稳定排序，取前 cap。
+func selectImportantNews(items []NewsItem, scores map[int]float64, threshold float64, cap int) []NewsItem {
+	kept := make([]NewsItem, 0, len(items))
+	for i := range items {
+		sc, ok := scores[i]
+		if !ok || sc < threshold {
+			continue // 未打分或低于阈值→不重要，丢弃
+		}
+		it := items[i]
+		it.Score = sc
+		kept = append(kept, it)
+	}
+	sort.SliceStable(kept, func(i, j int) bool { return kept[i].Score > kept[j].Score })
+	if cap > 0 && len(kept) > cap {
+		kept = kept[:cap]
+	}
+	return kept
+}
+
+// scoreNewsImportance 让 LLM 给某领域候选资讯逐条打 0-10 重要性分，返回「候选下标(0基)→分数」。
+func (s *DailyReportService) scoreNewsImportance(ctx context.Context, category string, items []NewsItem) (map[int]float64, error) {
+	var sb strings.Builder
+	for i, it := range items {
+		src := it.Domain
+		if src != "" {
+			src = " — " + src
+		}
+		sb.WriteString(fmt.Sprintf("%d. %s%s\n", i+1, it.Title, src))
+	}
+
+	prompt := fmt.Sprintf(`你是一名资深技术情报编辑，正在为「%s」领域筛选每日资讯早报。
+下面是过去约 24 小时入库的资讯标题（含来源）。请给每一条打一个「重要性」整数分（0-10）：
+- 8-10：重大发布/严重漏洞(高危CVE)/重要研究突破/影响面很广的行业动向；
+- 6-7：值得关注的实质进展、有信息量的技术更新；
+- 3-5：常规小更新、一般博客、深度不足；
+- 0-2：软文/营销/标题党/招聘/纯八卦/与技术关系很弱/重复边角料。
+判据是「对关注技术的读者是否重大、关键、值得知道」。请充分使用整个 0-10 区间，不要给所有条目打相近的分。
+
+只输出打分，每行一条，格式严格（不要理由、不要寒暄、不要遗漏任何序号）：
+<序号>: <0-10 整数>
+
+资讯列表：
+%s`, category, sb.String())
+
+	// 打分按候选「下标」映射，对候选集敏感：不设幂等键，每次新鲜打分，避免同日候选集变化时
+	// 幂等复用旧分数按下标错配到新列表（总结是整体性的、不敏感，故其幂等键保留）。
+	out, err := s.chatPoolSummary(ctx, "news-importance-service", "", prompt, 0.2)
+	if err != nil {
+		return nil, err
+	}
+	return parseNewsImportanceScores(out, len(items)), nil
+}
+
+// newsScoreLineRe 匹配打分行「<序号>: <分数>」（半/全角冒号，分数可带小数）。
+var newsScoreLineRe = regexp.MustCompile(`(?m)^\s*(\d+)\s*[:：]\s*(\d+(?:\.\d+)?)`)
+
+// parseNewsImportanceScores 解析 LLM 打分输出为「候选下标(0基)→分数」；越界序号忽略，分数封顶 10。
+func parseNewsImportanceScores(out string, n int) map[int]float64 {
+	scores := make(map[int]float64)
+	for _, m := range newsScoreLineRe.FindAllStringSubmatch(textutil.StripFence(out), -1) {
+		idx, err := strconv.Atoi(m[1])
+		if err != nil || idx < 1 || idx > n {
+			continue
+		}
+		val, err := strconv.ParseFloat(m[2], 64)
+		if err != nil {
+			continue
+		}
+		if val > 10 {
+			val = 10
+		}
+		scores[idx-1] = val
+	}
+	return scores
 }

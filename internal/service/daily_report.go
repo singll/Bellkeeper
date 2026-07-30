@@ -547,6 +547,10 @@ func (s *DailyReportService) GenerateBrief(ctx context.Context, opts BriefGenera
 	}
 	data.WindowHours = int(end.Sub(start) / time.Hour)
 
+	// 重要性打分过滤：LLM 给每条资讯打 0-10 分，过阈值才入选、按分取每领域上限（只留重大/关键，
+	// 剔除长尾噪声）。在总结之前做，使「今日总结/看点」基于过滤后的重要资讯。
+	s.scoreAndFilterGroups(ctx, data)
+
 	if data.Total > 0 {
 		summary, aiErr := s.generateNewsSummary(ctx, data)
 		if aiErr != nil {

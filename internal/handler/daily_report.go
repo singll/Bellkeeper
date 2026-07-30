@@ -72,7 +72,8 @@ func (h *DailyReportHandler) GenerateBrief(c *gin.Context) {
 		return
 	}
 
-	ctx, cancel := context.WithTimeout(c.Request.Context(), 180*time.Second)
+	// 早报含多组 LLM 重要性打分（并行）+ 今日总结，给足预算避免慢日 LLM 拖超时。
+	ctx, cancel := context.WithTimeout(c.Request.Context(), 300*time.Second)
 	defer cancel()
 
 	result, err := h.svc.GenerateBrief(ctx, opts)

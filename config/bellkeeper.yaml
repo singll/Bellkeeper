@@ -292,6 +292,12 @@ daily_report:
   timezone: Asia/Shanghai
   report_channel: daily
   alert_channel: alerts
+  # 资讯早报重要性打分过滤：LLM 给每条资讯打 0-10 分，过阈值才入早报/资讯库，按分取每领域上限。
+  news_brief:
+    importance_scoring: true        # 关=退回按时间倒序取每组上限（不做语义过滤）
+    importance_threshold: 6.0       # 入选阈值（0-10）；调低=更宽松、调高=更精选
+    per_group_cap: 30               # 每领域展示上限（打分过滤后的安全兜底）
+    score_candidates_cap: 80        # 每组喂 LLM 打分的候选上限（按时间倒序，控 token）
 
 # 日志中心（LogCenter）配置
 log_center:

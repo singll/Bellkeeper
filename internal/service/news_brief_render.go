@@ -38,19 +38,14 @@ func RenderNewsBrief(data *NewsBriefData) string {
 			icon = "•"
 		}
 		sb.WriteString(fmt.Sprintf("\n### %s %s（%d）\n", icon, g.Category, len(g.Items)))
-		shown := g.Items
-		if len(shown) > newsBriefPerGroupCap {
-			shown = shown[:newsBriefPerGroupCap]
-		}
-		for _, it := range shown {
+		// 条目已由重要性打分过滤 + 每组上限收敛，此处整组列出（不再折叠「还有 N 条」——
+		// 看不到被省的条目，折叠提示无意义）。
+		for _, it := range g.Items {
 			if it.Domain != "" {
 				sb.WriteString(fmt.Sprintf("- [%s](%s) · %s\n", newsEscape(it.Title), it.URL, it.Domain))
 			} else {
 				sb.WriteString(fmt.Sprintf("- [%s](%s)\n", newsEscape(it.Title), it.URL))
 			}
-		}
-		if len(g.Items) > newsBriefPerGroupCap {
-			sb.WriteString(fmt.Sprintf("- …还有 %d 条\n", len(g.Items)-newsBriefPerGroupCap))
 		}
 	}
 
