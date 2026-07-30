@@ -1,6 +1,8 @@
 package service
 
 import (
+	"os"
+	"path/filepath"
 	"strings"
 	"testing"
 	"time"
@@ -144,32 +146,74 @@ func TestComputeBriefWindow(t *testing.T) {
 	// 模拟每日 08:00 推送时刻触发。
 	now := time.Date(2026, 6, 12, 8, 0, 0, 0, loc)
 
-	t.Run("默认滚动24h：昨08:00→今08:00", func(t *testing.T) {
+	t.Run("6-6闭合窗：昨06:00→今06:00", func(t *testing.T) {
 		start, end, err := computeBriefWindow(BriefGenerateOptions{}, now, loc)
 		assert.NoError(t, err)
-		assert.Equal(t, now, end)
-		assert.Equal(t, time.Date(2026, 6, 11, 8, 0, 0, 0, loc), start)
+		assert.Equal(t, time.Date(2026, 6, 12, 6, 0, 0, 0, loc), end)
+		assert.Equal(t, time.Date(2026, 6, 11, 6, 0, 0, 0, loc), start)
 		assert.Equal(t, 24*time.Hour, end.Sub(start))
 	})
 
-	t.Run("自定义窗口小时数", func(t *testing.T) {
+	t.Run("自定义窗口小时数（右界仍卡06:00）", func(t *testing.T) {
 		start, end, err := computeBriefWindow(BriefGenerateOptions{WindowHours: 6}, now, loc)
 		assert.NoError(t, err)
-		assert.Equal(t, now, end)
-		assert.Equal(t, time.Date(2026, 6, 12, 2, 0, 0, 0, loc), start)
+		assert.Equal(t, time.Date(2026, 6, 12, 6, 0, 0, 0, loc), end)
+		assert.Equal(t, time.Date(2026, 6, 12, 0, 0, 0, 0, loc), start)
 	})
 
-	t.Run("指定历史日期→右界该日08:00", func(t *testing.T) {
+	t.Run("指定历史日期→右界该日06:00", func(t *testing.T) {
 		start, end, err := computeBriefWindow(BriefGenerateOptions{Date: "2026-06-10"}, now, loc)
 		assert.NoError(t, err)
-		assert.Equal(t, time.Date(2026, 6, 10, 8, 0, 0, 0, loc), end)
-		assert.Equal(t, time.Date(2026, 6, 9, 8, 0, 0, 0, loc), start)
+		assert.Equal(t, time.Date(2026, 6, 10, 6, 0, 0, 0, loc), end)
+		assert.Equal(t, time.Date(2026, 6, 9, 6, 0, 0, 0, loc), start)
+	})
+
+	t.Run("触发时刻早于06:00→右界退到昨日06:00", func(t *testing.T) {
+		early := time.Date(2026, 6, 12, 3, 0, 0, 0, loc)
+		start, end, err := computeBriefWindow(BriefGenerateOptions{}, early, loc)
+		assert.NoError(t, err)
+		assert.Equal(t, time.Date(2026, 6, 11, 6, 0, 0, 0, loc), end)
+		assert.Equal(t, time.Date(2026, 6, 10, 6, 0, 0, 0, loc), start)
 	})
 
 	t.Run("非法日期返回错误", func(t *testing.T) {
 		_, _, err := computeBriefWindow(BriefGenerateOptions{Date: "not-a-date"}, now, loc)
 		assert.Error(t, err)
 	})
+}
+
+func TestWriteBriefArchive(t *testing.T) {
+	tmp := t.TempDir()
+	s := &DailyReportService{knowledgeBasePath: tmp}
+
+	markdown := "## ☀️ 每日资讯早报 · 2026-07-30\n> 🕗 汇总时段 07-29 06:00 → 07-30 06:00（近 24h）· 共 3 条\n\n### 💻 编程（1）\n- [x](https://example.com) · example.com\n"
+	dst, err := s.writeBriefArchive("2026-07-30", markdown, 3)
+	assert.NoError(t, err)
+
+	// 落地路径须锚定 knowledgeBasePath 下 vault/资讯/<date>.md（与 PKBReportService 读取同一根）。
+	assert.Equal(t, filepath.Join(tmp, "vault", "资讯", "2026-07-30.md"), dst)
+
+	raw, err := os.ReadFile(dst)
+	assert.NoError(t, err)
+	content := string(raw)
+	assert.Contains(t, content, "type: pkb_feed")            // 兼容资讯库识别/时间线浏览
+	assert.Contains(t, content, "item_count: 3")             // 条目数写入 frontmatter
+	assert.Contains(t, content, "source: news_brief")        // 标记来源=早报
+	assert.Contains(t, content, "## ☀️ 每日资讯早报 · 2026-07-30") // 整份早报正文原样落地
+	assert.Contains(t, content, "汇总时段 07-29 06:00 → 07-30 06:00")
+
+	// 幂等：同日重跑整份覆盖（不追加、不报错）。
+	dst2, err := s.writeBriefArchive("2026-07-30", markdown, 3)
+	assert.NoError(t, err)
+	assert.Equal(t, dst, dst2)
+	raw2, _ := os.ReadFile(dst2)
+	assert.Equal(t, content, string(raw2))
+}
+
+func TestWriteBriefArchive_NoBasePath(t *testing.T) {
+	s := &DailyReportService{knowledgeBasePath: ""}
+	_, err := s.writeBriefArchive("2026-07-30", "x", 1)
+	assert.Error(t, err) // 未配置 knowledge 根须显式报错，不静默吞掉
 }
 
 func TestCategoryForArticle(t *testing.T) {

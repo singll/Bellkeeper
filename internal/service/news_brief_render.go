@@ -19,7 +19,7 @@ func RenderNewsBrief(data *NewsBriefData) string {
 	var sb strings.Builder
 
 	sb.WriteString(fmt.Sprintf("## ☀️ 每日资讯早报 · %s\n", data.Date))
-	sb.WriteString(fmt.Sprintf("> 🕗 覆盖 %s → %s（滚动 %dh）· 共 %d 条\n",
+	sb.WriteString(fmt.Sprintf("> 🕗 汇总时段 %s → %s（近 %dh）· 共 %d 条\n",
 		data.WindowStart, data.WindowEnd, data.WindowHours, data.Total))
 
 	if data.Total == 0 {

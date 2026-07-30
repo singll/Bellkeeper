@@ -1,8 +1,8 @@
 package service
 
 import (
-	"github.com/singll/bellkeeper/internal/llmgateway"
 	"github.com/singll/bellkeeper/internal/config"
+	"github.com/singll/bellkeeper/internal/llmgateway"
 	"github.com/singll/bellkeeper/internal/repository"
 )
 
@@ -125,7 +125,7 @@ func NewServices(repos *repository.Repositories, cfg *config.Config, version str
 	}
 
 	// Create pricing service — pricing 与 LLM Gateway 已在前文构造（llmGateway 复用），
-// 此处仅保留 reportSvc/pkbReportSvc/dashboardSvc/healthSvc 的构造顺序。
+	// 此处仅保留 reportSvc/pkbReportSvc/dashboardSvc/healthSvc 的构造顺序。
 
 	reportSvc := NewReportService(cfg.FileIngestion.BasePath)
 	reportSvc.SetDailyReportPath(cfg.DailyReport.Path)
@@ -153,6 +153,7 @@ func NewServices(repos *repository.Repositories, cfg *config.Config, version str
 		cfg.DailyReport,
 		llmGateway,
 		dailyReportLLMJobs,
+		cfg.Knowledge.BasePath,
 	)
 
 	return &Services{
