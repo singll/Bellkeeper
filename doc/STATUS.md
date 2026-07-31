@@ -81,7 +81,7 @@ RSS(rsshub + 官方直连) ─→ 后端 RSSFetcherService(fetch+enqueue)
 | Meilisearch 检索 | ✅ 1.0 | `/api/files/search\|ask`；入库即触发索引；问答 rerank 精排 |
 | Matrix 控制平面 | ✅ 稳定 | Gateway + Command Router + Agent + 通知聚合去重 + 权限两层 + Admin API |
 | Agent 系统 | ✅ MVP | 回合循环 + 9 工具 + Redis 房间会话 + 限速 + 权限分级；进程内直调 Gateway |
-| 日报系统 | ✅ 稳定 | 资讯早报(08:00·6-6周期·域字典归类·LLM总结·技术为主·**同源落资讯库 vault/资讯/<date>.md**) + 系统日报(21:00·内嵌今日资讯速览) 早晚分离；后端驱动+并行采集+n8n 仅触发 |
+| 日报系统 | ✅ 稳定 | 资讯早报(08:00·6-6周期·域字典归类·**LLM重要性打分过滤**·LLM总结·**同源落资讯库 vault/资讯/<date>.md**) + 系统日报(21:00·内嵌今日资讯速览) 早晚分离；后端驱动+并行采集+n8n 仅触发 |
 | n8n 工作流治理 | ✅ 落地 | 8 活跃工作流（源真相 `internal/n8n_workflows/`）；10 已退役归档 |
 | 日志中心 | ✅ 1.0 | threshold + pattern 告警 + 归档调度 + trace_id 全链路；**Loki/Grafana 已外挂（M6）** |
 | 可观测性 | ✅ **M6 上线** | Prometheus + Loki + Grafana@silkdata + 三机 cAdvisor/Promtail |
