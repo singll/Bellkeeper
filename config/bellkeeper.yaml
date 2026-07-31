@@ -297,7 +297,7 @@ daily_report:
     importance_scoring: true        # 关=退回按时间倒序取每组上限（不做语义过滤）
     importance_threshold: 6.0       # 入选阈值（0-10）；调低=更宽松、调高=更精选
     per_group_cap: 30               # 每领域展示上限（打分过滤后的安全兜底）
-    score_candidates_cap: 80        # 每组喂 LLM 打分的候选上限（按时间倒序，控 token）
+    score_candidates_cap: 40        # 每组喂 LLM 打分的候选上限（按时间倒序，控 token/输出行数=控延迟）
     score_model: pool-chat-free     # 打分用快模型池（分类任务；勿用慢的 pool-summary，会超时回退）
 
 # 日志中心（LogCenter）配置

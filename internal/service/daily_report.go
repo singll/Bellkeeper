@@ -547,15 +547,27 @@ func (s *DailyReportService) GenerateBrief(ctx context.Context, opts BriefGenera
 	}
 	data.WindowHours = int(end.Sub(start) / time.Hour)
 
-	// 重要性打分过滤：LLM 给每条资讯打 0-10 分，过阈值才入选、按分取每领域上限（只留重大/关键，
-	// 剔除长尾噪声）。在总结之前做，使「今日总结/看点」基于过滤后的重要资讯。
-	s.scoreAndFilterGroups(ctx, data)
-
 	if data.Total > 0 {
-		summary, aiErr := s.generateNewsSummary(ctx, data)
-		if aiErr != nil {
-			log.Printf("[NewsBrief] AI summary failed: %v", aiErr)
-			data.Errors = append(data.Errors, CollectError{Source: "ai_summary", Error: aiErr.Error()})
+		// 总结（pool-summary，质量优先但慢 ~140s）与 重要性打分（pool-chat-free，快）并行、互不阻塞：
+		// 总结用「打分前分组」的 prompt 字符串快照（避免与打分改写 data.Groups 竞态），总耗时≈max 而非 sum。
+		summaryPrompt := buildNewsSummaryPrompt(data)
+		var wg sync.WaitGroup
+		var summary string
+		var summaryErr error
+		wg.Add(1)
+		go func() {
+			defer wg.Done()
+			summary, summaryErr = s.chatPool(ctx, "pool-summary", "news-brief-service",
+				llmgateway.LLMJobIdempotencyKey("news-brief-summary", data.Date), summaryPrompt, 0.4)
+		}()
+		// 重要性打分过滤：LLM 给每条资讯打 0-10 分，过阈值才入选、按分取每领域上限（只留重大/关键，
+		// 剔除长尾噪声），失败/关闭时优雅回退按时间取前 N。就地改写 data.Groups + 重算 Total。
+		s.scoreAndFilterGroups(ctx, data)
+		wg.Wait()
+
+		if summaryErr != nil {
+			log.Printf("[NewsBrief] AI summary failed: %v", summaryErr)
+			data.Errors = append(data.Errors, CollectError{Source: "ai_summary", Error: summaryErr.Error()})
 			data.AISummary = "(AI 总结暂不可用)"
 		} else {
 			data.AISummary = summary

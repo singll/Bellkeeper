@@ -247,13 +247,9 @@ func topNews(data *NewsBriefData, n int) []NewsItem {
 	return all
 }
 
-// generateNewsSummary 让 LLM 基于当日分领域头条产出「全局概述 + 看点」，作为早报开篇。
-// 返回一段可直接渲染的中文 markdown 文本（概述段 + 若干「看点」要点）。
-func (s *DailyReportService) generateNewsSummary(ctx context.Context, data *NewsBriefData) (string, error) {
-	if data.Total == 0 {
-		return "", nil
-	}
-
+// buildNewsSummaryPrompt 构建早报「今日总结」的 LLM 提示词（分领域头条快照）。抽为纯函数：GenerateBrief
+// 先构建 prompt 字符串快照、再让总结 LLM 调用与打分并行（避免与打分改写 data.Groups 竞态；总耗时≈max）。
+func buildNewsSummaryPrompt(data *NewsBriefData) string {
 	var sb strings.Builder
 	for _, g := range data.Groups {
 		sb.WriteString(fmt.Sprintf("【%s】\n", g.Category))
@@ -270,7 +266,7 @@ func (s *DailyReportService) generateNewsSummary(ctx context.Context, data *News
 		}
 	}
 
-	prompt := fmt.Sprintf(`你是一名资深技术情报编辑。下面是过去约 24 小时（截至今晨）入库的技术资讯标题，已按领域分组。
+	return fmt.Sprintf(`你是一名资深技术情报编辑。下面是过去约 24 小时（截至今晨）入库的技术资讯标题，已按领域分组。
 请据此写一段简洁的中文「今日总结」，用于每日资讯早报开篇。要求：
 
 1. 先写 2-4 句总体概述，点出今天技术圈（编程/AI/网络安全为主）最值得关注的动向或主线；
@@ -288,9 +284,6 @@ func (s *DailyReportService) generateNewsSummary(ctx context.Context, data *News
 
 今日资讯标题（按领域）：
 %s`, sb.String())
-
-	return s.chatPool(ctx, "pool-summary", "news-brief-service",
-		llmgateway.LLMJobIdempotencyKey("news-brief-summary", data.Date), prompt, 0.4)
 }
 
 // chatPool 用指定模型池跑一次补全：优先走 llm_jobs 持久队列，无队列时直调 Gateway 兜底。
@@ -314,7 +307,7 @@ func (s *DailyReportService) chatPool(ctx context.Context, poolModel, callerID, 
 		if err != nil {
 			return "", fmt.Errorf("enqueue llm job: %w", err)
 		}
-		waitCtx, cancel := context.WithTimeout(ctx, 120*time.Second)
+		waitCtx, cancel := context.WithTimeout(ctx, 180*time.Second)
 		defer cancel()
 		done, err := s.llmJobs.Wait(waitCtx, job.ID, time.Second)
 		if err != nil {
@@ -329,7 +322,7 @@ func (s *DailyReportService) chatPool(ctx context.Context, poolModel, callerID, 
 	if s.llm == nil {
 		return "", fmt.Errorf("llm client not available")
 	}
-	callCtx, cancel := context.WithTimeout(ctx, 120*time.Second)
+	callCtx, cancel := context.WithTimeout(ctx, 180*time.Second)
 	defer cancel()
 	resp, err := s.llm.Chat(callCtx, llmclient.ChatRequest{
 		Model:       poolModel,
@@ -457,8 +450,13 @@ func (s *DailyReportService) scoreNewsImportance(ctx context.Context, category s
 - 0-2：软文/营销/标题党/招聘/纯八卦/与技术关系很弱/重复边角料。
 判据是「对关注技术的读者是否重大、关键、值得知道」。请充分使用整个 0-10 区间，不要给所有条目打相近的分。
 
-只输出打分，每行一条，格式严格（不要理由、不要寒暄、不要遗漏任何序号）：
+只输出打分，每行一条，格式严格（不要理由、不要寒暄、不要复述标题、不要遗漏任何序号）：
 <序号>: <0-10 整数>
+
+例如：
+1: 8
+2: 3
+3: 9
 
 资讯列表：
 %s`, category, sb.String())
