@@ -655,7 +655,7 @@ func setDefaults(v *viper.Viper) {
 	v.SetDefault("daily_report.news_brief.importance_threshold", 6.0)
 	v.SetDefault("daily_report.news_brief.per_group_cap", 30)
 	v.SetDefault("daily_report.news_brief.score_candidates_cap", 40)
-	v.SetDefault("daily_report.news_brief.score_model", "pool-chat-free")
+	v.SetDefault("daily_report.news_brief.score_model", "pool-chat-balanced")
 
 	// Health check probes (keeper host service bundle)
 	v.SetDefault("health.services", []map[string]interface{}{

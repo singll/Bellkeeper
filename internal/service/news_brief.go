@@ -466,7 +466,7 @@ func (s *DailyReportService) scoreNewsImportance(ctx context.Context, category s
 	// 旧分数按下标错配到新列表（总结是整体性的、不敏感，故其幂等键保留）。
 	scoreModel := s.cfg.NewsBrief.ScoreModel
 	if scoreModel == "" {
-		scoreModel = "pool-chat-free"
+		scoreModel = "pool-chat-balanced"
 	}
 	out, err := s.chatPool(ctx, scoreModel, "news-importance-service", "", prompt, 0.2)
 	if err != nil {
