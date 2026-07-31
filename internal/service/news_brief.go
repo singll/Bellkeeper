@@ -289,20 +289,20 @@ func (s *DailyReportService) generateNewsSummary(ctx context.Context, data *News
 今日资讯标题（按领域）：
 %s`, sb.String())
 
-	return s.chatPoolSummary(ctx, "news-brief-service",
+	return s.chatPool(ctx, "pool-summary", "news-brief-service",
 		llmgateway.LLMJobIdempotencyKey("news-brief-summary", data.Date), prompt, 0.4)
 }
 
-// chatPoolSummary 用 pool-summary 模型跑一次补全：优先走 llm_jobs 持久队列，无队列时直调 Gateway 兜底。
-// 抽出供早报「今日总结」与资讯「重要性打分」复用（两处 LLM 调用样板一致）。
-func (s *DailyReportService) chatPoolSummary(ctx context.Context, callerID, idempotencyKey, prompt string, temperature float64) (string, error) {
+// chatPool 用指定模型池跑一次补全：优先走 llm_jobs 持久队列，无队列时直调 Gateway 兜底。
+// 抽出供早报「今日总结」(pool-summary，质量优先) 与资讯「重要性打分」(pool-chat-free，快，分类任务)复用。
+func (s *DailyReportService) chatPool(ctx context.Context, poolModel, callerID, idempotencyKey, prompt string, temperature float64) (string, error) {
 	messages := []llmclient.ChatMessage{{Role: "user", Content: prompt}}
 
 	if s.llmJobs != nil {
 		opts := llmgateway.EnqueueLLMChatOptions{
 			TaskType:    "summary",
 			CallerID:    callerID,
-			Model:       "pool-summary",
+			Model:       poolModel,
 			Messages:    messages,
 			Temperature: temperature,
 			Priority:    30,
@@ -332,7 +332,7 @@ func (s *DailyReportService) chatPoolSummary(ctx context.Context, callerID, idem
 	callCtx, cancel := context.WithTimeout(ctx, 120*time.Second)
 	defer cancel()
 	resp, err := s.llm.Chat(callCtx, llmclient.ChatRequest{
-		Model:       "pool-summary",
+		Model:       poolModel,
 		Messages:    messages,
 		Temperature: temperature,
 	}, llmclient.ChatOptions{
@@ -463,9 +463,14 @@ func (s *DailyReportService) scoreNewsImportance(ctx context.Context, category s
 资讯列表：
 %s`, category, sb.String())
 
-	// 打分按候选「下标」映射，对候选集敏感：不设幂等键，每次新鲜打分，避免同日候选集变化时
-	// 幂等复用旧分数按下标错配到新列表（总结是整体性的、不敏感，故其幂等键保留）。
-	out, err := s.chatPoolSummary(ctx, "news-importance-service", "", prompt, 0.2)
+	// 打分是「分类」任务：用快模型池（默认 pool-chat-free），避免慢的 pool-summary(~100s+) 拖超时回退。
+	// 打分按候选「下标」映射，对候选集敏感：不设幂等键，每次新鲜打分，避免同日候选集变化时幂等复用
+	// 旧分数按下标错配到新列表（总结是整体性的、不敏感，故其幂等键保留）。
+	scoreModel := s.cfg.NewsBrief.ScoreModel
+	if scoreModel == "" {
+		scoreModel = "pool-chat-free"
+	}
+	out, err := s.chatPool(ctx, scoreModel, "news-importance-service", "", prompt, 0.2)
 	if err != nil {
 		return nil, err
 	}

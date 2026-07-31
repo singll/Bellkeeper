@@ -332,6 +332,7 @@ type NewsBriefConfig struct {
 	ImportanceThreshold float64 `mapstructure:"importance_threshold"` // 入选阈值（0-10），低于此分不进早报/资讯库
 	PerGroupCap         int     `mapstructure:"per_group_cap"`        // 每领域展示上限（打分过滤后的安全兜底）
 	ScoreCandidatesCap  int     `mapstructure:"score_candidates_cap"` // 每组喂 LLM 打分的候选上限（按时间倒序，控 token）
+	ScoreModel          string  `mapstructure:"score_model"`          // 打分用的模型池（分类任务用快池 pool-chat-free，勿用慢的 pool-summary）
 }
 
 // HealthConfig controls which services are probed by the health check endpoint.
@@ -654,6 +655,7 @@ func setDefaults(v *viper.Viper) {
 	v.SetDefault("daily_report.news_brief.importance_threshold", 6.0)
 	v.SetDefault("daily_report.news_brief.per_group_cap", 30)
 	v.SetDefault("daily_report.news_brief.score_candidates_cap", 80)
+	v.SetDefault("daily_report.news_brief.score_model", "pool-chat-free")
 
 	// Health check probes (keeper host service bundle)
 	v.SetDefault("health.services", []map[string]interface{}{
