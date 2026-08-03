@@ -307,8 +307,16 @@ func (s *DailyReportService) chatPool(ctx context.Context, poolModel, callerID, 
 		if err != nil {
 			return "", fmt.Errorf("enqueue llm job: %w", err)
 		}
-		waitCtx, cancel := context.WithTimeout(ctx, 180*time.Second)
-		defer cancel()
+		// Wait 跟随调用方 ctx 的截止时间（GenerateBrief Handler 给 300s 预算）。此前内层固定 180s
+		// 比 Handler 预算还短：worker=1 早高峰（08:00 早报 1 总结+4 打分 + pkb-curate cron 抢单 worker）
+		// 排队可能 >180s，job 实际已成功却因内层 Wait 提前 context deadline exceeded 回退（AI 总结暂不可用）。
+		// 仅当 ctx 无截止时兜底 290s 上限，避免无预算调用方永久阻塞。
+		waitCtx := ctx
+		if _, ok := ctx.Deadline(); !ok {
+			var cancel context.CancelFunc
+			waitCtx, cancel = context.WithTimeout(ctx, 290*time.Second)
+			defer cancel()
+		}
 		done, err := s.llmJobs.Wait(waitCtx, job.ID, time.Second)
 		if err != nil {
 			return "", fmt.Errorf("wait llm job: %w", err)
