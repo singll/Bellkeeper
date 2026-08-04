@@ -94,6 +94,9 @@ func (s *RuleOptimizerService) loop(ctx context.Context, interval time.Duration)
 }
 
 func (s *RuleOptimizerService) runOnce(ctx context.Context) {
+	// 先复核并撤销"已固化但 fetch 现已够用"的 waitFor override（治"override 永不撤销"缺陷）。
+	s.revokeStaleWaitFor(ctx)
+
 	domains, err := s.findOptimizableDomains(ctx)
 	if err != nil {
 		log.Printf("[RuleOptimizer] find domains error: %v", err)
@@ -176,8 +179,12 @@ func defaultOverridesFor(errType string) (*RequestOverrides, string) {
 		}, "403 Forbidden → spoof a real browser User-Agent plus Referer/Accept-Language headers"
 	case "timeout", "network": // slow or JS-heavy site
 		return &RequestOverrides{Strategy: "firecrawl", TimeoutSeconds: 120}, "timeout/network error → switch to firecrawl with a longer timeout"
-	case "empty_content": // content rendered client-side
-		return &RequestOverrides{Strategy: "firecrawl", FirecrawlWaitFor: 3000}, "empty content → likely JS-rendered; use firecrawl and wait for the DOM"
+	case "empty_content":
+		// 不再无脑开 waitFor 强制 playwright（浏览器渲染拖整页 JS/CSS/XHR，是机场流量大头）。
+		// empty_content 多为 trafilatura 抽取不良，firecrawl 的 fetch 引擎(纯 HTTP)+onlyMainContent
+		// 通常已能兜住；真需 JS 渲染的站交 LLM 分析产出 waitFor，再经 gateWaitFor 验证闸严格把关
+		// （fetch 够用则剥离、playwright 确有增益才保留）。故此处返回 nil，走 LLM 分支。
+		return nil, ""
 	case "rate_limited", "server_error": // transient — handled by job/domain backoff, not overrides
 		return nil, ""
 	default:
@@ -224,6 +231,7 @@ func (s *RuleOptimizerService) AnalyzeDomain(ctx context.Context, domain string)
 	// 1) Deterministic rules table first — covers most failures without an LLM call.
 	errType := dominantErrorType(samples)
 	if overrides, analysis := defaultOverridesFor(errType); overrides != nil {
+		overrides = s.gateWaitFor(ctx, domain, overrides, samples)
 		if err := s.persistOverrides(domain, overrides, analysis); err != nil {
 			return err
 		}
@@ -251,6 +259,7 @@ func (s *RuleOptimizerService) AnalyzeDomain(ctx context.Context, domain string)
 		return nil
 	}
 
+	overrides = s.gateWaitFor(ctx, domain, overrides, samples)
 	if err := s.persistOverrides(domain, overrides, analysis); err != nil {
 		return err
 	}
@@ -272,6 +281,11 @@ func (s *RuleOptimizerService) persistOverrides(domain string, overrides *Reques
 	if err != nil {
 		return fmt.Errorf("marshal overrides: %w", err)
 	}
+	// 空 override（如 gateWaitFor 剥离 waitFor 后无其它字段）等价于"无 override"：写 null 而非
+	// "{}"，否则 FindCoolingWithoutOverrides 会把它当作"待分析"反复重新纳入，形成分析循环。
+	if string(overridesJSON) == "{}" {
+		overridesJSON = []byte("null")
+	}
 	if err := s.domainRepo.UpdateOverrides(domain, datatypes.JSON(overridesJSON), analysis); err != nil {
 		return fmt.Errorf("update overrides for %s: %w", domain, err)
 	}
@@ -284,6 +298,157 @@ func (s *RuleOptimizerService) persistAnalysisOnly(domain, analysis string) erro
 		return nil
 	}
 	return s.domainRepo.UpdateOverrides(domain, datatypes.JSON("null"), analysis)
+}
+
+// stripWaitFor 返回 override 副本，去掉强制 playwright 的 firecrawl_wait_for，并把
+// strategy=="firecrawl" 清空（strategy 仅用于强制走 firecrawl，去掉后回到 trafilatura→fetch
+// 默认链）。UA/Header/Timeout 等反 403 伪装原样保留。
+func stripWaitFor(ov *RequestOverrides) *RequestOverrides {
+	if ov == nil {
+		return nil
+	}
+	cp := *ov
+	cp.FirecrawlWaitFor = 0
+	if cp.Strategy == "firecrawl" {
+		cp.Strategy = ""
+	}
+	return &cp
+}
+
+// decideKeepWaitFor 判定是否值得为域名保留 firecrawl_wait_for（强制 playwright 浏览器渲染）。
+// 规则：fetch 纯 HTTP 已能抽到合格正文(score>=pass)就不保留；只有 fetch 不合格、而带 waitFor
+// 的 playwright 明显更好(合格且高于 fetch)才保留。
+func decideKeepWaitFor(fetchScore, waitForScore, pass float64) bool {
+	if fetchScore >= pass {
+		return false
+	}
+	return waitForScore >= pass && waitForScore > fetchScore
+}
+
+// firstSampleURL 取样本里第一个非空 URL。
+func firstSampleURL(samples []repository.DomainFailureSample) string {
+	for _, sample := range samples {
+		if sample.URL != "" {
+			return sample.URL
+		}
+	}
+	return ""
+}
+
+// probeScore 用给定 override 抓一次 testURL 并按 scoreContent 打分；失败返回 0。
+func (s *RuleOptimizerService) probeScore(testURL string, ov *RequestOverrides, minChars int) float64 {
+	res, err := s.extractor.Extract(&ExtractionRequest{URL: testURL, Overrides: ov})
+	if err != nil || res == nil || !res.Success {
+		return 0
+	}
+	return s.scoreContent(res.Content, minChars)
+}
+
+// gateWaitFor 是 waitFor 验证闸：对"候选含 firecrawl_wait_for"的 override 做 A/B 实测，
+// 只有确证"fetch 抽不到、playwright 能抽到"时才保留 waitFor，否则剥离——杜绝把无谓的浏览器
+// 渲染固化进 domain profile（playwright 拖整页资源，是机场流量大头）。无 waitFor 的候选原样
+// 返回（零额外抓取）。
+func (s *RuleOptimizerService) gateWaitFor(ctx context.Context, domain string, ov *RequestOverrides, samples []repository.DomainFailureSample) *RequestOverrides {
+	if ov == nil || ov.FirecrawlWaitFor <= 0 {
+		return ov
+	}
+	// 无法实测时保守剥离：绝不放行未经验证的 playwright 强制。
+	if s.extractor == nil {
+		return stripWaitFor(ov)
+	}
+	testURL := firstSampleURL(samples)
+	if testURL == "" {
+		return stripWaitFor(ov)
+	}
+	if ctx.Err() != nil {
+		return stripWaitFor(ov)
+	}
+
+	const pass = 0.6
+	minChars := s.cfg.RuleQualityMinChars
+	if minChars <= 0 {
+		minChars = 200
+	}
+
+	// A：fetch-only（去掉 waitFor 的副本）
+	ovFetch := stripWaitFor(ov)
+	fetchScore := s.probeScore(testURL, ovFetch, minChars)
+	if fetchScore >= pass {
+		s.logActivity("gate_waitfor", "cooling",
+			fmt.Sprintf("gate: fetch 已够(score=%.2f)，剥离 waitFor 省流量 for %s", fetchScore, domain))
+		return ovFetch
+	}
+
+	// B：带 waitFor（playwright）——仅在 fetch 不合格时才付出这次浏览器渲染的验证代价
+	waitForScore := s.probeScore(testURL, ov, minChars)
+	if decideKeepWaitFor(fetchScore, waitForScore, pass) {
+		s.logActivity("gate_waitfor", "cooling",
+			fmt.Sprintf("gate: waitFor 确有增益(fetch=%.2f<pw=%.2f)，保留 for %s", fetchScore, waitForScore, domain))
+		return ov
+	}
+	s.logActivity("gate_waitfor", "cooling",
+		fmt.Sprintf("gate: waitFor 无增益(fetch=%.2f pw=%.2f)，剥离 for %s", fetchScore, waitForScore, domain))
+	return ovFetch
+}
+
+// revokeStaleWaitFor 复核已固化 firecrawl_wait_for 的域名：这些 override 一旦写入便不再被
+// findOptimizableDomains(只挑无 override 者)重新评估，若站点改版不再需要 JS 渲染，waitFor 会
+// 永久固化、持续烧 playwright 流量。这里每轮抽查少量：若 fetch 现已够用则撤销 waitFor。
+func (s *RuleOptimizerService) revokeStaleWaitFor(ctx context.Context) {
+	if s.domainRepo == nil || s.extractor == nil || s.ruleRepo == nil {
+		return
+	}
+	domains, err := s.domainRepo.FindDomainsWithWaitForOverride(10)
+	if err != nil {
+		log.Printf("[RuleOptimizer] find waitFor domains error: %v", err)
+		return
+	}
+	const pass = 0.6
+	minChars := s.cfg.RuleQualityMinChars
+	if minChars <= 0 {
+		minChars = 200
+	}
+	since := time.Now().Add(-7 * 24 * time.Hour)
+	for _, domain := range domains {
+		if ctx.Err() != nil {
+			return
+		}
+		profile, err := s.domainRepo.FindByDomain(domain)
+		if err != nil || profile == nil || len(profile.RequestOverrides) == 0 {
+			continue
+		}
+		var ov RequestOverrides
+		if err := json.Unmarshal(profile.RequestOverrides, &ov); err != nil || ov.FirecrawlWaitFor <= 0 {
+			continue
+		}
+		samples, err := s.ruleRepo.CollectFailureSamples(domain, 1, since)
+		if err != nil {
+			continue
+		}
+		testURL := firstSampleURL(samples)
+		if testURL == "" {
+			continue
+		}
+		ovFetch := stripWaitFor(&ov)
+		if s.probeScore(testURL, ovFetch, minChars) < pass {
+			continue
+		}
+		stripped, err := json.Marshal(ovFetch)
+		if err != nil {
+			continue
+		}
+		if string(stripped) == "{}" {
+			stripped = []byte("null")
+		}
+		if err := s.domainRepo.UpdateOverrides(domain, datatypes.JSON(stripped),
+			"revoked stale firecrawl_wait_for: fetch now sufficient"); err != nil {
+			log.Printf("[RuleOptimizer] revoke waitFor for %s failed: %v", domain, err)
+			continue
+		}
+		log.Printf("[RuleOptimizer] revoked stale waitFor for %s (fetch sufficient)", domain)
+		s.logActivity("waitfor_revoked", "cooling",
+			fmt.Sprintf("撤销固化 waitFor：fetch 已够 for %s", domain))
+	}
 }
 
 type llmOverridesOutput struct {

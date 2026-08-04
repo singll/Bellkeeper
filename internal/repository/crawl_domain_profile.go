@@ -183,6 +183,23 @@ func (r *CrawlDomainProfileRepository) FindCoolingWithoutOverrides(limit int) ([
 	return domains, err
 }
 
+// FindDomainsWithWaitForOverride 返回 request_overrides 里带 firecrawl_wait_for 的域名，供
+// 规则优化器周期复核、撤销"已固化但 fetch 现已够用"的 waitFor（playwright 浏览器渲染强制是
+// 机场流量大头）。用 jsonb_exists 而非 jsonb `?` 操作符——后者与 gorm 的 `?` 参数占位冲突。
+// 按 updated_at 升序：最久没复核的最先处理。
+func (r *CrawlDomainProfileRepository) FindDomainsWithWaitForOverride(limit int) ([]string, error) {
+	if limit <= 0 {
+		limit = 10
+	}
+	var domains []string
+	err := r.db.Model(&model.CrawlDomainProfile{}).
+		Where("jsonb_exists(request_overrides, 'firecrawl_wait_for')").
+		Order("updated_at ASC").
+		Limit(limit).
+		Pluck("domain", &domains).Error
+	return domains, err
+}
+
 // EnterCooling marks a domain as cooling: increments failure_count and pushes
 // next_allowed_at out by exponential backoff (base*2^(n-1), capped at max).
 //

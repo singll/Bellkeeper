@@ -261,3 +261,26 @@ func TestHalfOpenRecoverDomains(t *testing.T) {
 	pf, _ := repo.FindOrCreate("fresh.com", 0, 0)
 	assertEqual(t, pf.IsPaused, true) // 未过冷静期，保持暂停
 }
+
+func TestCrawlDomainProfileRepository_FindDomainsWithWaitForOverride(t *testing.T) {
+	db := setupTestDB(t)
+	repo := NewCrawlDomainProfileRepository(db)
+
+	for _, d := range []string{"waitfor.com", "plainua.com", "noovr.com"} {
+		_, err := repo.FindOrCreate(d, 30, 1)
+		assertNoError(t, err, "FindOrCreate "+d)
+	}
+	// 带 firecrawl_wait_for → 应被选中
+	assertNoError(t, repo.UpdateOverrides("waitfor.com",
+		datatypes.JSON(`{"strategy":"firecrawl","firecrawl_wait_for":3000}`), "test"), "update waitfor")
+	// 只有 UA、无 waitFor → 不应被选中
+	assertNoError(t, repo.UpdateOverrides("plainua.com",
+		datatypes.JSON(`{"user_agent":"Mozilla"}`), "test"), "update plainua")
+	// noovr.com 无 override（request_overrides 为 NULL）→ 不应被选中
+
+	domains, err := repo.FindDomainsWithWaitForOverride(10)
+	assertNoError(t, err, "FindDomainsWithWaitForOverride")
+	if len(domains) != 1 || domains[0] != "waitfor.com" {
+		t.Fatalf("expected [waitfor.com], got %v", domains)
+	}
+}
