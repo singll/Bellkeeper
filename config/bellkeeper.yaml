@@ -126,6 +126,21 @@ llm_proxy:
           model: "kimi-k2.6"
           weight: 2
 
+    - name: "pool-secagent"
+      description: "SilkSecAgent 漏洞/侦察任务专用池：SenseNova 主力 -> DeepSeek 官方 -> OpenCode Go 兜底"
+      strategy: "priority-health"
+      sticky_ttl_seconds: 300
+      members:
+        - channel: "sensenova-secagent"
+          model: "glm-5.2"
+          weight: 5
+        - channel: "deepseek-secagent"
+          model: "deepseek-v4-flash"
+          weight: 3
+        - channel: "opencode-go-secagent"
+          model: "deepseek-v4-flash"
+          weight: 1
+
   channels:
     - name: siliconflow-qwen3-8b
       base_url: https://api.siliconflow.cn
@@ -176,6 +191,39 @@ llm_proxy:
       models:
         - deepseek-v4-flash
         - deepseek-v4-pro
+      is_enabled: true
+    - name: sensenova-secagent
+      base_url: https://token.sensenova.cn
+      api_key: ${LLM_SENSENOVA_API_KEY}
+      rpm: 120
+      rpd: 20000
+      priority: 1
+      models:
+        - deepseek-v4-flash
+        - glm-5.2
+        - glm-5.1
+      is_enabled: true
+    - name: deepseek-secagent
+      base_url: https://api.deepseek.com
+      api_key: ${LLM_DEEPSEEK_API_KEY}
+      rpm: 10
+      rpd: 500
+      priority: 2
+      models:
+        - deepseek-v4-flash
+        - deepseek-v4-pro
+      is_enabled: true
+    - name: opencode-go-secagent
+      base_url: https://opencode.ai/zen/go
+      api_key: ${LLM_OPENCODE_GO_API_KEY}
+      rpm: 120
+      rpd: 20000
+      priority: 3
+      models:
+        - deepseek-v4-flash
+        - glm-5.2
+        - glm-5.1
+        - kimi-k2.7-code
       is_enabled: true
     - name: glm-flash-via-newapi
       base_url: ${LLM_NEWAPI_BASE_URL}
