@@ -127,13 +127,16 @@ llm_proxy:
           weight: 2
 
     - name: "pool-secagent"
-      description: "SilkSecAgent 漏洞/侦察任务专用池：SenseNova 主力 -> DeepSeek 官方 -> OpenCode Go 兜底"
+      description: "SilkSecAgent 漏洞/侦察任务专用池：SenseNova glm-5.2 -> SenseNova deepseek-v4-flash -> DeepSeek 官方 -> OpenCode Go 兜底"
       strategy: "priority-health"
       sticky_ttl_seconds: 300
       members:
         - channel: "sensenova-secagent"
           model: "glm-5.2"
           weight: 5
+        - channel: "sensenova-secagent"
+          model: "deepseek-v4-flash"
+          weight: 4
         - channel: "deepseek-secagent"
           model: "deepseek-v4-flash"
           weight: 3

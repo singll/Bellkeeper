@@ -119,6 +119,23 @@ func (t *StickyBindingTable) Count() int {
 	return count
 }
 
+// memberKey uniquely identifies a model-group member by (channel, model).
+// This allows the same physical channel to appear multiple times in a group
+// with different upstream models (e.g. sensenova/glm-5.2 and sensenova/deepseek-v4-flash).
+func memberKey(channel, model string) string { return channel + ":" + model }
+
+// memberExcluded reports whether a (channel, model) pair is in the tried set.
+// For backward compatibility it also accepts a bare channel name as an exclusion key.
+func memberExcluded(exclude map[string]bool, channel, model string) bool {
+	if exclude == nil {
+		return false
+	}
+	if exclude[memberKey(channel, model)] {
+		return true
+	}
+	return exclude[channel]
+}
+
 // --- Model Group ---
 
 // ModelGroupMemberRuntime holds the resolved runtime state for a group member.
@@ -212,13 +229,15 @@ func NewModelGroup(cfg config.ModelGroupConfig, channels map[string]*Channel) (*
 
 // SelectChannel picks a channel for the given task key, respecting sticky bindings,
 // health, task-type eligibility, and (for coding) tier ordering. `exclude` holds
-// channel names already tried this request so retries advance deterministically.
+// member keys (channel:model) already tried this request so retries advance
+// deterministically and the same physical channel can be reused with a different
+// model. For backward compatibility a bare channel name is also accepted.
 // `balances` (channel→remaining USD) feeds the balance_aware strategy.
 func (g *ModelGroup) SelectChannel(taskKey string, taskType TaskType, codingPref string, balances map[string]float64, exclude map[string]bool) (*Channel, string) {
 	// 1. Check sticky binding (skip if excluded/unhealthy)
 	if taskKey != "" && g.Sticky != nil {
 		if binding := g.Sticky.Get(taskKey); binding != nil {
-			if !exclude[binding.Channel.Config.Name] && binding.Channel.Health.IsAvailable() {
+			if !memberExcluded(exclude, binding.Channel.Config.Name, binding.Model) && binding.Channel.Health.IsAvailable() {
 				return binding.Channel, binding.Model
 			}
 			// Bound channel is unhealthy or already tried — clear binding and re-select
@@ -259,7 +278,7 @@ func (g *ModelGroup) SelectChannel(taskKey string, taskType TaskType, codingPref
 func (g *ModelGroup) eligibleMembers(taskType TaskType, exclude map[string]bool) []*ModelGroupMemberRuntime {
 	var available []*ModelGroupMemberRuntime
 	for _, m := range g.Members {
-		if exclude[m.Channel.Config.Name] {
+		if memberExcluded(exclude, m.Channel.Config.Name, m.Config.Model) {
 			continue
 		}
 		if m.Channel.Health.IsAvailable() {

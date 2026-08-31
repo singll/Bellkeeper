@@ -1299,7 +1299,7 @@ func (s *LLMProxyService) proxyViaGroup(
 		if ch == nil {
 			break
 		}
-		tried[ch.Config.Name] = true
+		tried[memberKey(ch.Config.Name, realModel)] = true
 
 		// Rewrite the model name in request body to the real model name
 		rewrittenBody := rewriteModel(body, realModel)
@@ -1863,6 +1863,10 @@ func (s *LLMProxyService) IsStreamRequest(body []byte) bool {
 }
 
 // ProxyStreamRequest forwards an OpenAI-compatible streaming request.
+// For virtual model groups and direct channels it implements the same
+// (channel, model)-level failover as the non-streaming path: a non-2xx
+// response received before the stream starts is treated as a retryable
+// failure and the next member is attempted.
 // Returns a StreamResult with an open BodyReader that the caller must close.
 func (s *LLMProxyService) ProxyStreamRequest(
 	method, path string,
@@ -1883,15 +1887,18 @@ func (s *LLMProxyService) ProxyStreamRequest(
 		taskKey = callerID + ":" + modelName
 	}
 
-	// --- Conversation binding (sticky session) ---
 	headerMap := headerToMap(headers)
 	taskType := s.taskRouter.DetectTaskType(headerMap, modelName, body, estimateTokens(body))
 	convID := s.convMgr.ImplicitConversationID(headerMap, body)
 	allowSwitch := headers.Get("X-Allow-Channel-Switch") == "true"
 
+	// --- Conversation binding (sticky session) ---
+	// If the bound channel/model fails, clear the binding and fall through to
+	// normal group/direct selection so we still get failover.
 	if convID != "" && !allowSwitch {
 		binding := s.convMgr.Get(convID)
 		if binding != nil {
+			boundOK := false
 			if err := s.validateBinding(binding); err == nil {
 				s.mu.RLock()
 				ch := s.channels[binding.ChannelName]
@@ -1899,43 +1906,123 @@ func (s *LLMProxyService) ProxyStreamRequest(
 				if ch != nil {
 					rewrittenBody := rewriteModel(body, binding.Model)
 					result, err := s.tryChannelStream(ch, method, path, headers, rewrittenBody, callerID)
-					if err == nil {
+					if err == nil && result.StatusCode < 400 {
 						result.ModelName = binding.Model
 						s.convMgr.Touch(convID, 0, 0)
+						return result, nil
 					}
-					return result, err
+					if err == nil {
+						s.recordStreamFailure(ch, binding.Model, binding.Model, result, path, callerID, tokenID)
+					} else {
+						s.recordStreamFailure(ch, binding.Model, binding.Model, nil, path, callerID, tokenID)
+					}
 				}
 			}
-			return nil, fmt.Errorf("bound channel unavailable for conversation %s", convID)
+			if !boundOK {
+				s.convMgr.Remove(convID)
+			}
 		}
 	}
 
-	// Check virtual model group
+	// Virtual model group with (channel, model)-level failover.
 	if group, ok := modelGroups[modelName]; ok {
-		codingPref := ""
-		if taskType == TaskCoding {
-			codingPref = s.codingPref(body)
-		}
-		ch, realModel := group.SelectChannel(taskKey, taskType, codingPref, s.balanceSnapshot(), nil)
+		return s.proxyStreamViaGroup(group, taskKey, method, path, headers, body, callerID, tokenID, taskType, convID)
+	}
+
+	// Direct channel matching with failover across healthy channels.
+	return s.proxyStreamDirect(modelMap, modelName, method, path, headers, body, callerID, tokenID, convID)
+}
+
+// proxyStreamViaGroup routes a streaming request through a virtual model group,
+// trying each (channel, model) member until one returns a <400 status.
+func (s *LLMProxyService) proxyStreamViaGroup(
+	group *ModelGroup,
+	taskKey, method, path string,
+	headers http.Header,
+	body []byte,
+	callerID string,
+	tokenID uint,
+	taskType TaskType,
+	convID string,
+) (*StreamResult, error) {
+	modelName := extractModelFromBody(body)
+	maxAttempts := len(group.Members)
+	tried := make(map[string]bool, maxAttempts)
+
+	codingPref := ""
+	if taskType == TaskCoding {
+		codingPref = s.codingPref(body)
+	}
+	balances := s.balanceSnapshot()
+
+	var lastResult *StreamResult
+	var lastErr error
+
+	for attempt := 0; attempt < maxAttempts; attempt++ {
+		ch, realModel := group.SelectChannel(taskKey, taskType, codingPref, balances, tried)
 		if ch == nil {
-			return nil, fmt.Errorf("no available channel in group %s", modelName)
+			break
 		}
+		tried[memberKey(ch.Config.Name, realModel)] = true
+
 		rewrittenBody := rewriteModel(body, realModel)
 		result, err := s.tryChannelStream(ch, method, path, headers, rewrittenBody, callerID)
-		if err == nil {
-			result.ModelName = modelName + "→" + realModel
-			if convID != "" {
-				if taskKey != "" && group.Sticky != nil {
-					if stickyCh, stickyModel := group.GetStickyBinding(taskKey); stickyCh != nil {
-						s.convMgr.Set(convID, stickyCh.Config.ID, stickyCh.Config.Name, stickyModel, "")
-					}
-				}
+		if err != nil {
+			s.recordStreamFailure(ch, modelName, realModel, nil, path, callerID, tokenID)
+			lastErr = err
+			if taskKey != "" && group.Sticky != nil {
+				group.Sticky.Remove(taskKey)
 			}
+			continue
 		}
-		return result, err
+
+		if result.StatusCode < 400 {
+			result.ModelName = modelName + "→" + realModel
+			ch.Health.RecordSuccess()
+			if s.rateLimitLearner != nil && ch.Config.ID != 0 {
+				s.rateLimitLearner.RecordSuccess(ch.Config.ID, realModel, false)
+			}
+			if taskKey != "" && group.Sticky != nil {
+				group.Sticky.Renew(taskKey, group.Config.StickyTTLSeconds)
+			}
+			if convID != "" {
+				s.convMgr.Set(convID, ch.Config.ID, ch.Config.Name, realModel, "")
+			}
+			return result, nil
+		}
+
+		s.recordStreamFailure(ch, modelName, realModel, result, path, callerID, tokenID)
+		lastResult = result
+		if taskKey != "" && group.Sticky != nil {
+			group.Sticky.Remove(taskKey)
+		}
+		middleware.GetLogger().Warn("stream group member failed, trying next",
+			zap.String("group", group.Config.Name),
+			zap.String("channel", ch.Config.Name),
+			zap.String("model", realModel),
+			zap.Int("status", result.StatusCode))
 	}
 
-	// Direct channel matching
+	if lastResult != nil {
+		return lastResult, nil
+	}
+	if lastErr != nil {
+		return nil, lastErr
+	}
+	return nil, fmt.Errorf("all group members exhausted for: %s", modelName)
+}
+
+// proxyStreamDirect routes a streaming request through all healthy channels
+// serving the requested model, in priority order.
+func (s *LLMProxyService) proxyStreamDirect(
+	modelMap map[string][]*Channel,
+	modelName, method, path string,
+	headers http.Header,
+	body []byte,
+	callerID string,
+	tokenID uint,
+	convID string,
+) (*StreamResult, error) {
 	channels := findChannelsInMap(modelMap, modelName)
 	if len(channels) == 0 {
 		return nil, fmt.Errorf("no channel available for model: %s", modelName)
@@ -1946,19 +2033,74 @@ func (s *LLMProxyService) ProxyStreamRequest(
 		return nil, fmt.Errorf("all channels circuit-broken for model: %s", modelName)
 	}
 
-	// Try first healthy channel (no retry for streaming)
-	ch := healthy[0]
-	result, err := s.tryChannelStream(ch, method, path, headers, body, callerID)
-	if err == nil {
-		result.ModelName = modelName
-		if convID != "" {
-			s.convMgr.Set(convID, ch.Config.ID, ch.Config.Name, modelName, "")
+	var lastResult *StreamResult
+	for _, ch := range healthy {
+		result, err := s.tryChannelStream(ch, method, path, headers, body, callerID)
+		if err != nil {
+			s.recordStreamFailure(ch, "", modelName, nil, path, callerID, tokenID)
+			continue
+		}
+		if result.StatusCode < 400 {
+			result.ModelName = modelName
+			if convID != "" {
+				s.convMgr.Set(convID, ch.Config.ID, ch.Config.Name, modelName, "")
+			}
+			return result, nil
+		}
+		s.recordStreamFailure(ch, "", modelName, result, path, callerID, tokenID)
+		lastResult = result
+	}
+
+	if lastResult != nil {
+		return lastResult, nil
+	}
+	return nil, fmt.Errorf("all channels exhausted for model: %s", modelName)
+}
+
+// recordStreamFailure logs a failed streaming attempt, updates channel health,
+// records rate-limit learning data, and re-wraps the response body so the
+// caller can still return it if this was the last attempt.
+func (s *LLMProxyService) recordStreamFailure(
+	ch *Channel,
+	virtualModel, realModel string,
+	result *StreamResult,
+	path string,
+	callerID string,
+	tokenID uint,
+) {
+	statusCode := 0
+	errBody := ""
+	if result != nil {
+		statusCode = result.StatusCode
+		if result.BodyReader != nil {
+			buf, _ := io.ReadAll(result.BodyReader)
+			errBody = string(buf)
+			result.BodyReader = io.NopCloser(bytes.NewReader(buf))
 		}
 	}
-	return result, err
+
+	cls := llmerrors.Classify(statusCode, errBody, ch.Config.ProviderType)
+	duration := llmerrors.BreakdownDuration(cls.BreakdownUntil)
+	ch.Health.RecordClassifiedFailure(classifyError(statusCode, nil), string(cls.Class), duration)
+	s.alertForClass(ch.Config.Name, cls.Class)
+	if !ch.Health.IsAvailable() {
+		s.recordAlert("circuit_open", "warning", ch.Config.Name,
+			fmt.Sprintf("channel %s circuit opened (%s)", ch.Config.Name, cls.Class))
+	}
+	if statusCode == 429 && s.rateLimitLearner != nil && ch.Config.ID != 0 {
+		s.rateLimitLearner.Record429(ch.Config.ID, realModel, ch.Config.RPM)
+	}
+
+	if virtualModel != "" {
+		s.logGroupRequest(ch.Config.Name, virtualModel, realModel, path, statusCode, nil, callerID, tokenID)
+	} else {
+		s.logRequest(ch.Config.Name, realModel, path, statusCode, statusCode == 429,
+			0, 0, 0, 0, 0, errBody, callerID, tokenID)
+	}
 }
 
 // tryChannelStream sends a streaming request to a single channel.
+// No retries — once a stream starts, you can't retry.
 // No retries — once a stream starts, you can't retry.
 func (s *LLMProxyService) tryChannelStream(
 	ch *Channel,
