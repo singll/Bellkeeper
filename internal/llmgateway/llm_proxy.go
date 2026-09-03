@@ -1309,7 +1309,13 @@ func (s *LLMProxyService) proxyViaGroup(
 		)
 
 		// Log with original virtual model name for traceability
-		s.logGroupRequest(ch.Config.Name, modelName, realModel, path, statusCode, err, callerID, tokenID)
+		logErr := ""
+		if err != nil {
+			logErr = err.Error()
+		} else if statusCode >= 400 {
+			logErr = truncateForLog(string(respBody))
+		}
+		s.logGroupRequest(ch.Config.Name, modelName, realModel, path, statusCode, logErr, callerID, tokenID)
 
 		if err == nil && statusCode < 500 && statusCode != 429 {
 			ch.Health.RecordSuccess()
@@ -1825,12 +1831,10 @@ func (s *LLMProxyService) persistProxyLog(e proxyLogEntry) {
 }
 
 // logGroupRequest logs a model group proxy attempt for traceability.
+// errMsg 携带失败摘要（非流式路径为 error 字符串；流式路径为截断的上游响应体——
+// 2026-09-03 排查 deepseek-secagent 400 时因响应体不落库而无从定位，自此必须可见）。
 func (s *LLMProxyService) logGroupRequest(channelName, virtualModel, realModel, path string,
-	statusCode int, err error, callerID string, tokenID uint) {
-	errMsg := ""
-	if err != nil {
-		errMsg = err.Error()
-	}
+	statusCode int, errMsg string, callerID string, tokenID uint) {
 	isRateLimit := statusCode == 429
 	// Log with virtual model name so operators can trace group requests
 	s.logRequest(channelName, virtualModel+"→"+realModel, path, statusCode, isRateLimit,
@@ -2092,11 +2096,20 @@ func (s *LLMProxyService) recordStreamFailure(
 	}
 
 	if virtualModel != "" {
-		s.logGroupRequest(ch.Config.Name, virtualModel, realModel, path, statusCode, nil, callerID, tokenID)
+		s.logGroupRequest(ch.Config.Name, virtualModel, realModel, path, statusCode, truncateForLog(errBody), callerID, tokenID)
 	} else {
 		s.logRequest(ch.Config.Name, realModel, path, statusCode, statusCode == 429,
-			0, 0, 0, 0, 0, errBody, callerID, tokenID)
+			0, 0, 0, 0, 0, truncateForLog(errBody), callerID, tokenID)
 	}
+}
+
+// truncateForLog clamps an upstream error body to a log-safe length (first 300 chars, single line).
+func truncateForLog(s string) string {
+	s = strings.ReplaceAll(s, "\n", " ")
+	if len(s) > 300 {
+		return s[:300]
+	}
+	return s
 }
 
 // tryChannelStream sends a streaming request to a single channel.

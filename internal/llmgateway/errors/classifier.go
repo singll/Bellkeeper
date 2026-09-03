@@ -52,8 +52,19 @@ func Classify(statusCode int, body string, providerType string) Result {
 
 	// Generic fallback
 	if statusCode == 429 {
-		if strings.Contains(lowerBody, "quota") || strings.Contains(lowerBody, "limit") {
+		// 先判"瞬时限流"（rate limit / QPS / TPM / RPM 字样，几十秒即恢复），
+		// 再判"额度已耗尽"：月额度/余额耗尽类错误（如 OpenCode Go 的 GoUsageLimitError
+		// "Monthly usage limit reached. Resets in N days"）再重试也无意义，判 QuotaExhausted
+		// 长熔断（24h）让渠道退出轮换——否则死的兜底渠道每 30s 复活，全池失败时把它的
+		// 月额度 429 原样透传给客户端（2026-09-03 secagent 任务中断根因之一）。
+		if strings.Contains(lowerBody, "rate limit") || strings.Contains(lowerBody, "rate_limit") ||
+			strings.Contains(lowerBody, "qps") || strings.Contains(lowerBody, "tpm") || strings.Contains(lowerBody, "rpm") {
 			return Result{Class: RateLimitedRetry, BreakdownUntil: "30s", CanRetry: true}
+		}
+		if strings.Contains(lowerBody, "monthly usage") || strings.Contains(lowerBody, "resets in") ||
+			strings.Contains(lowerBody, "gousagelimit") || strings.Contains(lowerBody, "usage limit") ||
+			strings.Contains(lowerBody, "insufficient") || strings.Contains(lowerBody, "exhausted") {
+			return Result{Class: QuotaExhausted, BreakdownUntil: "long", CanRetry: false}
 		}
 		return Result{Class: RateLimitedRetry, BreakdownUntil: "30s", CanRetry: true}
 	}
