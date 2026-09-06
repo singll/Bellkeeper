@@ -936,9 +936,10 @@ func dbGroupToConfig(g model.LLMModelGroup) config.ModelGroupConfig {
 	members := make([]config.ModelGroupMember, len(g.Members))
 	for i, m := range g.Members {
 		members[i] = config.ModelGroupMember{
-			Channel: m.ChannelName,
-			Model:   m.Model,
-			Weight:  m.Weight,
+			Channel:          m.ChannelName,
+			Model:            m.Model,
+			Weight:           m.Weight,
+			MaxContextTokens: m.MaxContextTokens,
 		}
 	}
 	return config.ModelGroupConfig{
@@ -1103,7 +1104,7 @@ func (s *LLMProxyService) ProxyRequest(
 				if ch != nil {
 					rewrittenBody := rewriteModel(body, binding.Model)
 					statusCode, respBody, respHeaders, err := s.tryChannel(ch, method, path, headers, rewrittenBody, callerID, tokenID)
-					if err == nil && statusCode < 500 && statusCode != 429 {
+					if err == nil && statusCode >= 200 && statusCode < 300 {
 						ch.Health.RecordSuccess()
 						if s.rateLimitLearner != nil && ch.Config.ID != 0 {
 							s.rateLimitLearner.RecordSuccess(ch.Config.ID, modelName, false)
@@ -1111,8 +1112,12 @@ func (s *LLMProxyService) ProxyRequest(
 						s.convMgr.Touch(convID, 0, 0)
 						return statusCode, respBody, respHeaders, nil
 					}
+					// Bound channel failed: record it for health/circuit, drop
+					// the binding, and fall through to group/direct selection
+					// so the request still gets served (don't fail the task).
+					s.recordChannelFailure(ch, statusCode, respBody, err)
+					s.convMgr.Remove(convID)
 				}
-				return 503, []byte(`{"error":"bound channel unavailable for conversation ` + convID + `"}`), nil, nil
 			}
 		}
 	}
@@ -1120,7 +1125,7 @@ func (s *LLMProxyService) ProxyRequest(
 	// Check if model matches a virtual model group
 	if group, ok := modelGroups[modelName]; ok {
 		statusCode, respBody, respHeaders, err = s.proxyViaGroup(group, taskKey, method, path, headers, body, callerID, tokenID, taskType)
-		if err == nil && statusCode < 500 && statusCode != 429 {
+		if err == nil && statusCode >= 200 && statusCode < 300 {
 			// Record conversation binding on success
 			if convID != "" {
 				// Find which channel was actually used (from sticky binding)
@@ -1150,7 +1155,10 @@ func (s *LLMProxyService) ProxyRequest(
 	var lastErr error
 	for _, ch := range healthy {
 		statusCode, respBody, respHeaders, err = s.tryChannel(ch, method, path, headers, body, callerID, tokenID)
-		if err == nil && statusCode < 500 && statusCode != 429 {
+		// Only a true 2xx is a success — 4xx from one channel is often
+		// channel-specific (model unsupported there, per-channel quota), so try
+		// the next channel instead of failing the caller's task outright.
+		if err == nil && statusCode >= 200 && statusCode < 300 {
 			ch.Health.RecordSuccess()
 			if s.rateLimitLearner != nil && ch.Config.ID != 0 {
 				s.rateLimitLearner.RecordSuccess(ch.Config.ID, modelName, false)
@@ -1167,6 +1175,7 @@ func (s *LLMProxyService) ProxyRequest(
 			zap.String("model", modelName), zap.String("class", string(result.Class)))
 	}
 
+	// All channels failed — return the last real upstream response.
 	return statusCode, respBody, respHeaders, lastErr
 }
 
@@ -1287,6 +1296,15 @@ func (s *LLMProxyService) proxyViaGroup(
 	maxAttempts := len(group.Members)
 	tried := map[string]bool{}
 
+	// Context-aware pre-filter: skip members whose declared window is smaller
+	// than the estimated request budget (prompt + output). Dropped entirely if
+	// it would exclude every member — never fail a request purely on estimation;
+	// a misestimate is caught reactively by context_too_long failover.
+	ctxExclude := group.contextExcluded(estimatePromptTokens(body))
+	if len(ctxExclude) >= maxAttempts {
+		ctxExclude = nil
+	}
+
 	// Resolve coding sub-strategy + balance snapshot once (task-aware tiered routing).
 	codingPref := ""
 	if taskType == TaskCoding {
@@ -1294,8 +1312,12 @@ func (s *LLMProxyService) proxyViaGroup(
 	}
 	balances := s.balanceSnapshot()
 
+	var lastStatus int
+	var lastBody []byte
+	var lastHeaders http.Header
+
 	for attempt := 0; attempt < maxAttempts; attempt++ {
-		ch, realModel := group.SelectChannel(taskKey, taskType, codingPref, balances, tried)
+		ch, realModel := group.SelectChannel(taskKey, taskType, codingPref, balances, mergeExcludes(tried, ctxExclude))
 		if ch == nil {
 			break
 		}
@@ -1317,8 +1339,15 @@ func (s *LLMProxyService) proxyViaGroup(
 		}
 		s.logGroupRequest(ch.Config.Name, modelName, realModel, path, statusCode, logErr, callerID, tokenID)
 
-		if err == nil && statusCode < 500 && statusCode != 429 {
+		// Only a true 2xx is a success. Anything else — including 4xx, which
+		// used to be passed straight through to the caller — advances to the
+		// next member so the task survives per-member/per-channel quirks
+		// (context too long, per-model quota, provider-specific rejections).
+		if err == nil && statusCode >= 200 && statusCode < 300 {
 			ch.Health.RecordSuccess()
+			if member := group.findMember(ch.Config.Name, realModel); member != nil {
+				member.RecordMemberSuccess()
+			}
 			if s.rateLimitLearner != nil && ch.Config.ID != 0 {
 				s.rateLimitLearner.RecordSuccess(ch.Config.ID, realModel, false)
 			}
@@ -1328,28 +1357,26 @@ func (s *LLMProxyService) proxyViaGroup(
 			return statusCode, respBody, respHeaders, nil
 		}
 
-		// Failure: classify error, update health with semantic breakdown, clear sticky binding, try next
-		errBody := ""
-		if statusCode != 0 {
-			errBody = string(respBody)
-		}
-		result := llmerrors.Classify(statusCode, errBody, ch.Config.ProviderType)
-		duration := llmerrors.BreakdownDuration(result.BreakdownUntil)
-		ch.Health.RecordClassifiedFailure(classifyError(statusCode, err), string(result.Class), duration)
-		s.alertForClass(ch.Config.Name, result.Class)
-		if !ch.Health.IsAvailable() {
-			s.recordAlert("circuit_open", "warning", ch.Config.Name,
-				fmt.Sprintf("channel %s circuit opened (%s)", ch.Config.Name, result.Class))
-		}
+		// Failure: classify at the right scope (member vs channel), clear
+		// sticky binding, try next member.
+		result := s.recordRoutedFailure(ch, group.findMember(ch.Config.Name, realModel), statusCode, respBody, err)
 		if taskKey != "" && group.Sticky != nil {
 			group.Sticky.Remove(taskKey)
 		}
-		middleware.GetLogger().Warn("group channel failed, trying next member",
+		if statusCode != 0 || respBody != nil {
+			lastStatus, lastBody, lastHeaders = statusCode, respBody, respHeaders
+		}
+		middleware.GetLogger().Warn("group member failed, trying next",
 			zap.String("group", group.Config.Name), zap.String("channel", ch.Config.Name),
 			zap.String("model", realModel), zap.Int("status", statusCode),
-			zap.String("class", string(result.Class)))
+			zap.String("class", string(result.Class)), zap.NamedError("err", err))
 	}
 
+	// All members failed: pass through the last real upstream response so the
+	// caller still sees a genuine error (not a synthetic 503 that masks it).
+	if lastBody != nil || lastStatus != 0 {
+		return lastStatus, lastBody, lastHeaders, nil
+	}
 	return 503, []byte(`{"error":"all group members exhausted for: ` + modelName + `"}`), nil, nil
 }
 
@@ -1953,6 +1980,12 @@ func (s *LLMProxyService) proxyStreamViaGroup(
 	maxAttempts := len(group.Members)
 	tried := make(map[string]bool, maxAttempts)
 
+	// Context-aware pre-filter, same as the buffered path.
+	ctxExclude := group.contextExcluded(estimatePromptTokens(body))
+	if len(ctxExclude) >= maxAttempts {
+		ctxExclude = nil
+	}
+
 	codingPref := ""
 	if taskType == TaskCoding {
 		codingPref = s.codingPref(body)
@@ -1963,7 +1996,7 @@ func (s *LLMProxyService) proxyStreamViaGroup(
 	var lastErr error
 
 	for attempt := 0; attempt < maxAttempts; attempt++ {
-		ch, realModel := group.SelectChannel(taskKey, taskType, codingPref, balances, tried)
+		ch, realModel := group.SelectChannel(taskKey, taskType, codingPref, balances, mergeExcludes(tried, ctxExclude))
 		if ch == nil {
 			break
 		}
@@ -1980,9 +2013,12 @@ func (s *LLMProxyService) proxyStreamViaGroup(
 			continue
 		}
 
-		if result.StatusCode < 400 {
+		if result.StatusCode >= 200 && result.StatusCode < 300 {
 			result.ModelName = modelName + "→" + realModel
 			ch.Health.RecordSuccess()
+			if member := group.findMember(ch.Config.Name, realModel); member != nil {
+				member.RecordMemberSuccess()
+			}
 			if s.rateLimitLearner != nil && ch.Config.ID != 0 {
 				s.rateLimitLearner.RecordSuccess(ch.Config.ID, realModel, false)
 			}
@@ -1995,7 +2031,7 @@ func (s *LLMProxyService) proxyStreamViaGroup(
 			return result, nil
 		}
 
-		s.recordStreamFailure(ch, modelName, realModel, result, path, callerID, tokenID)
+		s.recordStreamFailureScoped(ch, group.findMember(ch.Config.Name, realModel), modelName, realModel, result, path, callerID, tokenID)
 		lastResult = result
 		if taskKey != "" && group.Sticky != nil {
 			group.Sticky.Remove(taskKey)
@@ -2072,6 +2108,22 @@ func (s *LLMProxyService) recordStreamFailure(
 	callerID string,
 	tokenID uint,
 ) {
+	s.recordStreamFailureScoped(ch, nil, virtualModel, realModel, result, path, callerID, tokenID)
+}
+
+// recordStreamFailureScoped is recordStreamFailure with member-scoped failure
+// semantics: member != nil routes per-model quota/balance/subscription classes
+// to a member-level cooldown (sibling models on the same channel stay in
+// rotation) and skips health impact entirely for context_too_long.
+func (s *LLMProxyService) recordStreamFailureScoped(
+	ch *Channel,
+	member *ModelGroupMemberRuntime,
+	virtualModel, realModel string,
+	result *StreamResult,
+	path string,
+	callerID string,
+	tokenID uint,
+) {
 	statusCode := 0
 	errBody := ""
 	if result != nil {
@@ -2084,12 +2136,20 @@ func (s *LLMProxyService) recordStreamFailure(
 	}
 
 	cls := llmerrors.Classify(statusCode, errBody, ch.Config.ProviderType)
-	duration := llmerrors.BreakdownDuration(cls.BreakdownUntil)
-	ch.Health.RecordClassifiedFailure(classifyError(statusCode, nil), string(cls.Class), duration)
-	s.alertForClass(ch.Config.Name, cls.Class)
-	if !ch.Health.IsAvailable() {
-		s.recordAlert("circuit_open", "warning", ch.Config.Name,
-			fmt.Sprintf("channel %s circuit opened (%s)", ch.Config.Name, cls.Class))
+	switch {
+	case cls.Class == llmerrors.ContextTooLong:
+		// Request exceeds this member's window — a routing input, not a fault.
+	case member != nil && isMemberScopedClass(cls.Class):
+		member.RecordMemberBreakdown(string(cls.Class), llmerrors.BreakdownDuration(cls.BreakdownUntil))
+		s.alertForClass(ch.Config.Name, cls.Class)
+	default:
+		duration := llmerrors.BreakdownDuration(cls.BreakdownUntil)
+		ch.Health.RecordClassifiedFailure(classifyError(statusCode, nil), string(cls.Class), duration)
+		s.alertForClass(ch.Config.Name, cls.Class)
+		if !ch.Health.IsAvailable() {
+			s.recordAlert("circuit_open", "warning", ch.Config.Name,
+				fmt.Sprintf("channel %s circuit opened (%s)", ch.Config.Name, cls.Class))
+		}
 	}
 	if statusCode == 429 && s.rateLimitLearner != nil && ch.Config.ID != 0 {
 		s.rateLimitLearner.Record429(ch.Config.ID, realModel, ch.Config.RPM)
@@ -2621,4 +2681,146 @@ func estimateTokens(body []byte) int {
 		return runes * 2
 	}
 	return byteLen / 4
+}
+
+// estimatePromptTokens estimates the token budget a chat request needs from a
+// member model: message content (CJK-aware heuristic — 1 token per CJK rune,
+// 1 token per 4 bytes otherwise, ~1024 per image block) plus the requested
+// output budget (max_tokens / max_completion_tokens, defaulting to 4096 when
+// unset). Used for context-aware member selection; a misestimate is caught
+// reactively by context_too_long failover, so it only needs to be roughly right.
+func estimatePromptTokens(body []byte) int {
+	var req struct {
+		Messages []struct {
+			Content json.RawMessage `json:"content"`
+		} `json:"messages"`
+		MaxTokens           int `json:"max_tokens"`
+		MaxCompletionTokens int `json:"max_completion_tokens"`
+	}
+	if err := json.Unmarshal(body, &req); err != nil {
+		return 0
+	}
+	total := 0
+	for _, m := range req.Messages {
+		total += estimateContentTokens(m.Content)
+	}
+	outBudget := req.MaxTokens
+	if req.MaxCompletionTokens > outBudget {
+		outBudget = req.MaxCompletionTokens
+	}
+	if outBudget <= 0 {
+		outBudget = 4096
+	}
+	return total + outBudget
+}
+
+// estimateContentTokens estimates tokens in one message content, which may be a
+// plain string or an array of content blocks (text / image_url / ...).
+func estimateContentTokens(raw json.RawMessage) int {
+	if len(raw) == 0 {
+		return 0
+	}
+	var s string
+	if err := json.Unmarshal(raw, &s); err == nil {
+		return estimateTextTokens(s)
+	}
+	var blocks []struct {
+		Type     string `json:"type"`
+		Text     string `json:"text"`
+		ImageURL *struct {
+			URL string `json:"url"`
+		} `json:"image_url"`
+	}
+	if err := json.Unmarshal(raw, &blocks); err != nil {
+		// Unknown shape — fall back to a whole-payload estimate.
+		return estimateTextTokens(string(raw))
+	}
+	n := 0
+	for _, b := range blocks {
+		if b.Text != "" {
+			n += estimateTextTokens(b.Text)
+		}
+		if b.ImageURL != nil {
+			n += 1024
+		}
+	}
+	return n
+}
+
+// estimateTextTokens estimates tokens for a text string: CJK runes count as one
+// token each (a safe upper bound for common tokenizers), everything else as
+// one token per 4 bytes.
+func estimateTextTokens(s string) int {
+	cjk := 0
+	otherBytes := 0
+	for _, r := range s {
+		switch {
+		case r >= 0x2E80 && r <= 0x9FFF, // CJK radicals..Han
+			r >= 0xF900 && r <= 0xFAFF, // CJK compat ideographs
+			r >= 0xFF00 && r <= 0xFFEF, // fullwidth forms
+			r >= 0x3000 && r <= 0x303F: // CJK punctuation
+			cjk++
+		default:
+			otherBytes += len(string(r))
+		}
+	}
+	return cjk + otherBytes/4
+}
+
+// isMemberScopedClass reports whether an error class describes a specific
+// (channel, model) member rather than the whole channel. Per-model credit
+// pools (e.g. SenseNova: glm-5.2 and flash-lite have independent quotas) must
+// only take their own member out of rotation, not sibling models.
+func isMemberScopedClass(c llmerrors.Class) bool {
+	switch c {
+	case llmerrors.QuotaExhausted, llmerrors.BalanceZero, llmerrors.SubscriptionInvalid:
+		return true
+	}
+	return false
+}
+
+// recordRoutedFailure records a failed group-routing attempt with the right
+// scope:
+//   - context_too_long: not a fault at all — no health impact;
+//   - member-scoped classes (per-model quota/balance/subscription): member-level
+//     cooldown, so sibling models on the same channel stay in rotation;
+//   - everything else: channel-level circuit-breaker failure (existing behavior).
+func (s *LLMProxyService) recordRoutedFailure(ch *Channel, member *ModelGroupMemberRuntime, statusCode int, respBody []byte, err error) llmerrors.Result {
+	errBody := ""
+	if statusCode != 0 {
+		errBody = string(respBody)
+	}
+	result := llmerrors.Classify(statusCode, errBody, ch.Config.ProviderType)
+	switch {
+	case result.Class == llmerrors.ContextTooLong:
+		// Request exceeds this member's window — a routing input, not a fault.
+	case member != nil && isMemberScopedClass(result.Class):
+		member.RecordMemberBreakdown(string(result.Class), llmerrors.BreakdownDuration(result.BreakdownUntil))
+		s.alertForClass(ch.Config.Name, result.Class)
+	default:
+		duration := llmerrors.BreakdownDuration(result.BreakdownUntil)
+		ch.Health.RecordClassifiedFailure(classifyError(statusCode, err), string(result.Class), duration)
+		s.alertForClass(ch.Config.Name, result.Class)
+		if !ch.Health.IsAvailable() {
+			s.recordAlert("circuit_open", "warning", ch.Config.Name,
+				fmt.Sprintf("channel %s circuit opened (%s)", ch.Config.Name, result.Class))
+		}
+	}
+	return result
+}
+
+// mergeExcludes returns a fresh exclude set combining tried members and
+// context-excluded members for this request.
+func mergeExcludes(tried, ctxExclude map[string]bool) map[string]bool {
+	if len(ctxExclude) == 0 {
+		return tried
+	}
+	merged := make(map[string]bool, len(tried)+len(ctxExclude))
+	for k := range tried {
+		merged[k] = true
+	}
+	for k := range ctxExclude {
+		merged[k] = true
+	}
+	return merged
 }

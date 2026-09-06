@@ -88,6 +88,12 @@ type ModelGroupMember struct {
 	Channel string `mapstructure:"channel"`
 	Model   string `mapstructure:"model"`
 	Weight  int    `mapstructure:"weight"`
+	// MaxContextTokens is the member model's context-window size (0 = unknown /
+	// unlimited). The router skips members whose window is smaller than the
+	// estimated request budget (prompt + max_tokens), so e.g. a 256K model never
+	// receives a 300K prompt. Purely an optimization — a misestimate is caught
+	// reactively by context_too_long failover.
+	MaxContextTokens int `mapstructure:"max_context_tokens"`
 }
 
 type ChannelConfig struct {

@@ -17,7 +17,13 @@ const (
 	BalanceZero        Class = "balance_zero"
 	SessionExpired     Class = "session_expired"
 	ServerError        Class = "server_error"
-	Unknown            Class = "unknown"
+	// ContextTooLong marks "this request exceeds the member model's context
+	// window" (HTTP 400 with a context-length message). It is a property of the
+	// (request, model) pair — not a fault of the channel — so it must never
+	// count against channel health; the router should simply pick a member
+	// with a larger window.
+	ContextTooLong Class = "context_too_long"
+	Unknown        Class = "unknown"
 )
 
 // Result holds the classification outcome.
@@ -34,6 +40,13 @@ func Classify(statusCode int, body string, providerType string) Result {
 	// 401 → auth failed (all providers)
 	if statusCode == 401 {
 		return Result{Class: AuthFailed, BreakdownUntil: "permanent", CanRetry: false}
+	}
+
+	// 400 + context-length message → request exceeds the model's context
+	// window. Provider phrasings covered: OpenAI/SenseNova "maximum context
+	// length", Anthropic "prompt is too long", OpenRouter "context_length_exceeded".
+	if statusCode == 400 && isContextTooLong(lowerBody) {
+		return Result{Class: ContextTooLong, BreakdownUntil: "none", CanRetry: true}
 	}
 
 	// Provider-specific classification
@@ -147,14 +160,27 @@ func classifyAliyun(statusCode int, body string) Result {
 	return Classify(statusCode, body, "")
 }
 
+// isContextTooLong matches the common context-window-exceeded phrasings across
+// providers (matched against a lowercased body).
+func isContextTooLong(lowerBody string) bool {
+	return strings.Contains(lowerBody, "maximum context length") ||
+		strings.Contains(lowerBody, "context_length_exceeded") ||
+		strings.Contains(lowerBody, "prompt is too long") ||
+		strings.Contains(lowerBody, "exceeds the context") ||
+		strings.Contains(lowerBody, "context window")
+}
+
 // BreakdownDuration converts a human-readable breakdown hint to a concrete duration.
 // If the hint starts with a number, it's parsed as seconds. Special values:
 //   "permanent" → 0 (never auto-recover)
 //   "long"      → 24h
 //   "5h_or_7d"  → 5h (caller should use probe strategy for longer)
+//   "none"      → 0 (no breakdown at all — not a channel fault)
 func BreakdownDuration(hint string) time.Duration {
 	switch hint {
 	case "permanent":
+		return 0
+	case "none":
 		return 0
 	case "long":
 		return 24 * time.Hour

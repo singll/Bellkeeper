@@ -127,22 +127,30 @@ llm_proxy:
           weight: 2
 
     - name: "pool-secagent"
-      description: "SilkSecAgent 漏洞/侦察任务专用池：SenseNova glm-5.2 -> SenseNova deepseek-v4-flash -> DeepSeek 官方 -> OpenCode Go 兜底"
+      description: "SilkSecAgent 漏洞/侦察任务专用池：SenseNova flash-lite(256K,专属积分) -> SenseNova glm-5.2 -> SenseNova deepseek-v4-flash -> DeepSeek 官方 -> OpenCode Go 兜底；超长请求自动跳过小窗口成员"
       strategy: "priority-health"
       sticky_ttl_seconds: 300
       members:
         - channel: "sensenova-secagent"
+          model: "sensenova-6.8-flash-lite"
+          weight: 6
+          max_context_tokens: 262144
+        - channel: "sensenova-secagent"
           model: "glm-5.2"
           weight: 5
+          max_context_tokens: 1048576
         - channel: "sensenova-secagent"
           model: "deepseek-v4-flash"
           weight: 4
+          max_context_tokens: 1048576
         - channel: "deepseek-secagent"
           model: "deepseek-v4-flash"
           weight: 3
+          max_context_tokens: 1048576
         - channel: "opencode-go-secagent"
           model: "deepseek-v4-flash"
           weight: 1
+          max_context_tokens: 1048576
 
   channels:
     - name: siliconflow-qwen3-8b

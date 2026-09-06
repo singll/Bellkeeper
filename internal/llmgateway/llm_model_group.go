@@ -145,7 +145,52 @@ type ModelGroupMemberRuntime struct {
 	totalReqs   int64
 	totalErrors int64
 	ewmaLatency float64 // milliseconds, exponential weighted moving average
-	mu          sync.Mutex
+	// Member-level breakdown (e.g. per-model credit pools on a shared channel
+	// like SenseNova, where glm-5.2 quota and flash-lite quota are independent).
+	// Set for member-scoped error classes so one model's exhausted quota does
+	// not take its sibling models on the same channel out of rotation.
+	breakdownUntil time.Time
+	breakdownClass string
+	mu             sync.Mutex
+}
+
+// RecordMemberBreakdown puts this member into a cooldown of the given duration.
+// Longer of (existing, new) wins so repeated failures don't shorten it.
+func (m *ModelGroupMemberRuntime) RecordMemberBreakdown(class string, d time.Duration) {
+	m.mu.Lock()
+	defer m.mu.Unlock()
+	until := time.Now().Add(d)
+	if until.After(m.breakdownUntil) {
+		m.breakdownUntil = until
+		m.breakdownClass = class
+	}
+}
+
+// RecordMemberSuccess clears any member-level breakdown (the member served a
+// request, so its credit pool is alive again).
+func (m *ModelGroupMemberRuntime) RecordMemberSuccess() {
+	m.mu.Lock()
+	defer m.mu.Unlock()
+	m.breakdownUntil = time.Time{}
+	m.breakdownClass = ""
+}
+
+// memberBreakdownActive reports whether the member is still in cooldown.
+func (m *ModelGroupMemberRuntime) memberBreakdownActive() bool {
+	m.mu.Lock()
+	defer m.mu.Unlock()
+	return time.Now().Before(m.breakdownUntil)
+}
+
+// MemberBreakdownInfo returns the member-level breakdown class and expiry
+// (zero time = none) for status APIs.
+func (m *ModelGroupMemberRuntime) MemberBreakdownInfo() (string, time.Time) {
+	m.mu.Lock()
+	defer m.mu.Unlock()
+	if time.Now().After(m.breakdownUntil) {
+		return "", time.Time{}
+	}
+	return m.breakdownClass, m.breakdownUntil
 }
 
 // RecordLatency updates the EWMA latency score.
@@ -219,7 +264,12 @@ func NewModelGroup(cfg config.ModelGroupConfig, channels map[string]*Channel) (*
 			weight = 1
 		}
 		g.Members = append(g.Members, &ModelGroupMemberRuntime{
-			Config:  config.ModelGroupMember{Channel: m.Channel, Model: m.Model, Weight: weight},
+			Config: config.ModelGroupMember{
+				Channel:          m.Channel,
+				Model:            m.Model,
+				Weight:           weight,
+				MaxContextTokens: m.MaxContextTokens,
+			},
 			Channel: ch,
 		})
 	}
@@ -234,13 +284,16 @@ func NewModelGroup(cfg config.ModelGroupConfig, channels map[string]*Channel) (*
 // model. For backward compatibility a bare channel name is also accepted.
 // `balances` (channel→remaining USD) feeds the balance_aware strategy.
 func (g *ModelGroup) SelectChannel(taskKey string, taskType TaskType, codingPref string, balances map[string]float64, exclude map[string]bool) (*Channel, string) {
-	// 1. Check sticky binding (skip if excluded/unhealthy)
+	// 1. Check sticky binding (skip if excluded/unhealthy/member-broken)
 	if taskKey != "" && g.Sticky != nil {
 		if binding := g.Sticky.Get(taskKey); binding != nil {
-			if !memberExcluded(exclude, binding.Channel.Config.Name, binding.Model) && binding.Channel.Health.IsAvailable() {
+			if !memberExcluded(exclude, binding.Channel.Config.Name, binding.Model) &&
+				binding.Channel.Health.IsAvailable() &&
+				!g.memberBreakdownActive(binding.Channel.Config.Name, binding.Model) {
 				return binding.Channel, binding.Model
 			}
-			// Bound channel is unhealthy or already tried — clear binding and re-select
+			// Bound channel is unhealthy, in member breakdown, or already tried
+			// — clear binding and re-select
 			g.Sticky.Remove(taskKey)
 		}
 	}
@@ -271,10 +324,14 @@ func (g *ModelGroup) SelectChannel(taskKey string, taskType TaskType, codingPref
 	return selected.Channel, selected.Config.Model
 }
 
-// eligibleMembers returns available, non-excluded members, then applies task-type
-// eligibility: a member whose non-empty TaskTypes excludes taskType is dropped
-// (so e.g. classify/summary never route to a coding-only channel like kimi-code).
-// Falls back to the unfiltered available set if tagging would empty it.
+// eligibleMembers returns available, non-excluded members, then applies two
+// filters, each with a never-fail fallback:
+//  1. task-type eligibility: a member whose non-empty TaskTypes excludes
+//     taskType is dropped (so e.g. classify/summary never route to a coding-only
+//     channel like kimi-code);
+//  2. member-level breakdown: a member whose (per-model) quota pool is in
+//     cooldown is dropped — this is what lets flash-lite stay in rotation on
+//     the SenseNova channel while glm-5.2's separate credit pool is exhausted.
 func (g *ModelGroup) eligibleMembers(taskType TaskType, exclude map[string]bool) []*ModelGroupMemberRuntime {
 	var available []*ModelGroupMemberRuntime
 	for _, m := range g.Members {
@@ -293,9 +350,55 @@ func (g *ModelGroup) eligibleMembers(taskType TaskType, exclude map[string]bool)
 		}
 	}
 	if len(eligible) == 0 {
-		return available // never fail a request purely on task tagging
+		eligible = available // never fail a request purely on task tagging
 	}
-	return eligible
+	var live []*ModelGroupMemberRuntime
+	for _, m := range eligible {
+		if !m.memberBreakdownActive() {
+			live = append(live, m)
+		}
+	}
+	if len(live) == 0 {
+		return eligible // never fail a request purely on member breakdown
+	}
+	return live
+}
+
+// findMember returns the runtime member for a (channel, model) pair, or nil.
+func (g *ModelGroup) findMember(channel, model string) *ModelGroupMemberRuntime {
+	for _, m := range g.Members {
+		if m.Channel.Config.Name == channel && m.Config.Model == model {
+			return m
+		}
+	}
+	return nil
+}
+
+// memberBreakdownActive reports whether the (channel, model) member is in a
+// member-level cooldown. Returns false for unknown pairs.
+func (g *ModelGroup) memberBreakdownActive(channel, model string) bool {
+	m := g.findMember(channel, model)
+	return m != nil && m.memberBreakdownActive()
+}
+
+// contextExcluded returns the set of member keys whose declared context window
+// is smaller than requiredTokens (the estimated prompt + output budget).
+// Returns nil when nothing needs excluding. The caller is expected to drop the
+// filter if it would exclude every member (never fail purely on estimation).
+func (g *ModelGroup) contextExcluded(requiredTokens int) map[string]bool {
+	if requiredTokens <= 0 {
+		return nil
+	}
+	var excluded map[string]bool
+	for _, m := range g.Members {
+		if m.Config.MaxContextTokens > 0 && requiredTokens > m.Config.MaxContextTokens {
+			if excluded == nil {
+				excluded = make(map[string]bool)
+			}
+			excluded[memberKey(m.Channel.Config.Name, m.Config.Model)] = true
+		}
+	}
+	return excluded
 }
 
 // selectByStrategy applies the group's base load-balancing strategy.
@@ -515,11 +618,16 @@ func (g *ModelGroup) Status() map[string]interface{} {
 	members := make([]map[string]interface{}, 0, len(g.Members))
 	for _, m := range g.Members {
 		ms := map[string]interface{}{
-			"channel":   m.Config.Channel,
-			"model":     m.Config.Model,
-			"weight":    m.Config.Weight,
-			"available": m.Channel.Health.IsAvailable(),
-			"health":    m.Channel.Health.Status(),
+			"channel":            m.Config.Channel,
+			"model":              m.Config.Model,
+			"weight":             m.Config.Weight,
+			"max_context_tokens": m.Config.MaxContextTokens,
+			"available":          m.Channel.Health.IsAvailable(),
+			"health":             m.Channel.Health.Status(),
+		}
+		if class, until := m.MemberBreakdownInfo(); class != "" {
+			ms["member_breakdown_class"] = class
+			ms["member_breakdown_until"] = until.Format(time.RFC3339)
 		}
 		members = append(members, ms)
 	}

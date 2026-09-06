@@ -244,6 +244,13 @@ func (c *Client) doWithRetry(req *http.Request) (*http.Response, error) {
 		resp, err = c.client.Do(req)
 
 		if err == nil && c.isRetryableResponse(resp) {
+			// No retries left: return this response with its body INTACT. Draining
+			// here would hand the caller an empty body, and the LLM proxy's error
+			// classifier would see "" instead of the upstream's real error text
+			// (e.g. a quota-exhausted 429 misread as a generic rate limit).
+			if attempt >= c.config.MaxRetries {
+				break
+			}
 			if c.metrics != nil {
 				c.metrics.mu.Lock()
 				c.metrics.RetriedRequests++

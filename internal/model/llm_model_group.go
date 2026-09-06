@@ -31,8 +31,11 @@ type LLMModelGroupMember struct {
 	ChannelName string         `gorm:"size:100;not null" json:"channel_name"`
 	Model       string         `gorm:"size:200;not null" json:"model"`
 	Weight      int            `gorm:"default:1" json:"weight"`
-	CreatedAt   time.Time      `json:"created_at"`
-	DeletedAt   gorm.DeletedAt `gorm:"index" json:"-"`
+	// MaxContextTokens is the member model's context window (0 = unknown).
+	// Used by the router for context-aware member selection.
+	MaxContextTokens int           `gorm:"default:0" json:"max_context_tokens"`
+	CreatedAt        time.Time     `json:"created_at"`
+	DeletedAt        gorm.DeletedAt `gorm:"index" json:"-"`
 }
 
 func (LLMModelGroupMember) TableName() string {
