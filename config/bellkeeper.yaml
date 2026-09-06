@@ -205,6 +205,7 @@ llm_proxy:
         - deepseek-v4-flash
         - glm-5.2
         - glm-5.1
+        - sensenova-6.8-flash-lite   # 专属积分通道（256K ctx，协议实测支持 function calling）
       is_enabled: true
     - name: deepseek-secagent
       base_url: https://api.deepseek.com
