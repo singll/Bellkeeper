@@ -253,12 +253,25 @@ func NewModelGroup(cfg config.ModelGroupConfig, channels map[string]*Channel) (*
 		g.Sticky = NewStickyBindingTable()
 	}
 
+	// Deduplicate members by (channel, model): a group must not carry the same
+	// physical (channel, model) pair twice, otherwise (a) maxAttempts balloons
+	// and (b) duplicate member runtimes keep independent breakdown state, so a
+	// member-scoped cooldown on one copy leaves its siblings selectable and
+	// findMember/eligibleMembers disagree. Keep the first occurrence (config
+	// order = precedence).
+	seen := make(map[string]bool, len(cfg.Members))
 	for _, m := range cfg.Members {
 		ch, ok := channels[m.Channel]
 		if !ok {
 			log.Printf("llm-proxy: warning: model group %q references unknown channel %q, skipping member", cfg.Name, m.Channel)
 			continue
 		}
+		key := memberKey(m.Channel, m.Model)
+		if seen[key] {
+			log.Printf("llm-proxy: warning: model group %q has duplicate member %q, skipping", cfg.Name, key)
+			continue
+		}
+		seen[key] = true
 		weight := m.Weight
 		if weight <= 0 {
 			weight = 1
@@ -269,6 +282,7 @@ func NewModelGroup(cfg config.ModelGroupConfig, channels map[string]*Channel) (*
 				Model:            m.Model,
 				Weight:           weight,
 				MaxContextTokens: m.MaxContextTokens,
+				MaxOutputTokens:  m.MaxOutputTokens,
 			},
 			Channel: ch,
 		})
@@ -382,16 +396,23 @@ func (g *ModelGroup) memberBreakdownActive(channel, model string) bool {
 }
 
 // contextExcluded returns the set of member keys whose declared context window
-// is smaller than requiredTokens (the estimated prompt + output budget).
+// is smaller than the estimated request budget. The budget is computed per
+// member as inputTokens + min(outputBudget, member.MaxOutputTokens), so a
+// member with a lower output cap (e.g. flash-lite 65536) isn't wrongly excluded
+// when the caller requests a larger max_tokens that the proxy will clamp anyway.
 // Returns nil when nothing needs excluding. The caller is expected to drop the
 // filter if it would exclude every member (never fail purely on estimation).
-func (g *ModelGroup) contextExcluded(requiredTokens int) map[string]bool {
-	if requiredTokens <= 0 {
+func (g *ModelGroup) contextExcluded(inputTokens, outputBudget int) map[string]bool {
+	if inputTokens <= 0 && outputBudget <= 0 {
 		return nil
 	}
 	var excluded map[string]bool
 	for _, m := range g.Members {
-		if m.Config.MaxContextTokens > 0 && requiredTokens > m.Config.MaxContextTokens {
+		budget := inputTokens + outputBudget
+		if m.Config.MaxOutputTokens > 0 && outputBudget > m.Config.MaxOutputTokens {
+			budget = inputTokens + m.Config.MaxOutputTokens
+		}
+		if m.Config.MaxContextTokens > 0 && budget > m.Config.MaxContextTokens {
 			if excluded == nil {
 				excluded = make(map[string]bool)
 			}
@@ -622,6 +643,7 @@ func (g *ModelGroup) Status() map[string]interface{} {
 			"model":              m.Config.Model,
 			"weight":             m.Config.Weight,
 			"max_context_tokens": m.Config.MaxContextTokens,
+			"max_output_tokens":  m.Config.MaxOutputTokens,
 			"available":          m.Channel.Health.IsAvailable(),
 			"health":             m.Channel.Health.Status(),
 		}

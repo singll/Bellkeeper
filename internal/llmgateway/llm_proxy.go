@@ -940,6 +940,7 @@ func dbGroupToConfig(g model.LLMModelGroup) config.ModelGroupConfig {
 			Model:            m.Model,
 			Weight:           m.Weight,
 			MaxContextTokens: m.MaxContextTokens,
+			MaxOutputTokens:  m.MaxOutputTokens,
 		}
 	}
 	return config.ModelGroupConfig{
@@ -1297,10 +1298,12 @@ func (s *LLMProxyService) proxyViaGroup(
 	tried := map[string]bool{}
 
 	// Context-aware pre-filter: skip members whose declared window is smaller
-	// than the estimated request budget (prompt + output). Dropped entirely if
-	// it would exclude every member — never fail a request purely on estimation;
-	// a misestimate is caught reactively by context_too_long failover.
-	ctxExclude := group.contextExcluded(estimatePromptTokens(body))
+	// than the estimated request budget (prompt + output). Output budget is
+	// clamped per member to its max_output_tokens so a lower output cap doesn't
+	// wrongly exclude the member. Dropped entirely if it would exclude every
+	// member — never fail a request purely on estimation; a misestimate is
+	// caught reactively by context_too_long failover.
+	ctxExclude := group.contextExcluded(estimateInputTokens(body), estimateOutputBudget(body))
 	if len(ctxExclude) >= maxAttempts {
 		ctxExclude = nil
 	}
@@ -1325,6 +1328,12 @@ func (s *LLMProxyService) proxyViaGroup(
 
 		// Rewrite the model name in request body to the real model name
 		rewrittenBody := rewriteModel(body, realModel)
+		// Clamp an over-large output budget to the member model's maximum so a
+		// low-cap model (e.g. flash-lite 65536) can still serve a caller that
+		// requested 131072 instead of rejecting the request outright.
+		if member := group.findMember(ch.Config.Name, realModel); member != nil && member.Config.MaxOutputTokens > 0 {
+			rewrittenBody = capOutputTokens(rewrittenBody, member.Config.MaxOutputTokens)
+		}
 
 		statusCode, respBody, respHeaders, err := s.tryChannel(
 			ch, method, path, headers, rewrittenBody, callerID, tokenID,
@@ -1981,7 +1990,7 @@ func (s *LLMProxyService) proxyStreamViaGroup(
 	tried := make(map[string]bool, maxAttempts)
 
 	// Context-aware pre-filter, same as the buffered path.
-	ctxExclude := group.contextExcluded(estimatePromptTokens(body))
+	ctxExclude := group.contextExcluded(estimateInputTokens(body), estimateOutputBudget(body))
 	if len(ctxExclude) >= maxAttempts {
 		ctxExclude = nil
 	}
@@ -2003,6 +2012,9 @@ func (s *LLMProxyService) proxyStreamViaGroup(
 		tried[memberKey(ch.Config.Name, realModel)] = true
 
 		rewrittenBody := rewriteModel(body, realModel)
+		if member := group.findMember(ch.Config.Name, realModel); member != nil && member.Config.MaxOutputTokens > 0 {
+			rewrittenBody = capOutputTokens(rewrittenBody, member.Config.MaxOutputTokens)
+		}
 		result, err := s.tryChannelStream(ch, method, path, headers, rewrittenBody, callerID)
 		if err != nil {
 			s.recordStreamFailure(ch, modelName, realModel, nil, path, callerID, tokenID)
@@ -2137,8 +2149,8 @@ func (s *LLMProxyService) recordStreamFailureScoped(
 
 	cls := llmerrors.Classify(statusCode, errBody, ch.Config.ProviderType)
 	switch {
-	case cls.Class == llmerrors.ContextTooLong:
-		// Request exceeds this member's window — a routing input, not a fault.
+	case cls.Class == llmerrors.ContextTooLong || cls.Class == llmerrors.MaxOutputExceeded:
+		// Request exceeds this member's window/output cap — a routing input, not a fault.
 	case member != nil && isMemberScopedClass(cls.Class):
 		member.RecordMemberBreakdown(string(cls.Class), llmerrors.BreakdownDuration(cls.BreakdownUntil))
 		s.alertForClass(ch.Config.Name, cls.Class)
@@ -2581,6 +2593,36 @@ func replaceModelInBody(body []byte, model string) []byte {
 	return b
 }
 
+// capOutputTokens clamps max_tokens / max_completion_tokens in an
+// OpenAI-compatible request body down to the member model's maximum output. No-op
+// when maxOutput <= 0 or the request's budget is already within the limit.
+func capOutputTokens(body []byte, maxOutput int) []byte {
+	if maxOutput <= 0 {
+		return body
+	}
+	var m map[string]interface{}
+	if err := json.Unmarshal(body, &m); err != nil {
+		return body
+	}
+	changed := false
+	if v, ok := m["max_tokens"].(float64); ok && v > float64(maxOutput) {
+		m["max_tokens"] = maxOutput
+		changed = true
+	}
+	if v, ok := m["max_completion_tokens"].(float64); ok && v > float64(maxOutput) {
+		m["max_completion_tokens"] = maxOutput
+		changed = true
+	}
+	if !changed {
+		return body
+	}
+	b, err := json.Marshal(m)
+	if err != nil {
+		return body
+	}
+	return b
+}
+
 // Alias for converter package functions to avoid import cycle.
 func geminiOpenAIToGemini(body []byte) ([]byte, error) {
 	return converter.OpenAIToGemini(body)
@@ -2690,12 +2732,37 @@ func estimateTokens(body []byte) int {
 // unset). Used for context-aware member selection; a misestimate is caught
 // reactively by context_too_long failover, so it only needs to be roughly right.
 func estimatePromptTokens(body []byte) int {
+	return estimateInputTokens(body) + estimateOutputBudget(body)
+}
+
+// estimateOutputBudget returns the requested output token budget
+// (max_tokens / max_completion_tokens), defaulting to 4096 when unset. Returns 0
+// when the body is unparseable.
+func estimateOutputBudget(body []byte) int {
+	var req struct {
+		MaxTokens           int `json:"max_tokens"`
+		MaxCompletionTokens int `json:"max_completion_tokens"`
+	}
+	if err := json.Unmarshal(body, &req); err != nil {
+		return 0
+	}
+	out := req.MaxTokens
+	if req.MaxCompletionTokens > out {
+		out = req.MaxCompletionTokens
+	}
+	if out <= 0 {
+		out = 4096
+	}
+	return out
+}
+
+// estimateInputTokens estimates the input (message content) token budget,
+// excluding the output budget. Returns 0 when the body is unparseable.
+func estimateInputTokens(body []byte) int {
 	var req struct {
 		Messages []struct {
 			Content json.RawMessage `json:"content"`
 		} `json:"messages"`
-		MaxTokens           int `json:"max_tokens"`
-		MaxCompletionTokens int `json:"max_completion_tokens"`
 	}
 	if err := json.Unmarshal(body, &req); err != nil {
 		return 0
@@ -2704,14 +2771,7 @@ func estimatePromptTokens(body []byte) int {
 	for _, m := range req.Messages {
 		total += estimateContentTokens(m.Content)
 	}
-	outBudget := req.MaxTokens
-	if req.MaxCompletionTokens > outBudget {
-		outBudget = req.MaxCompletionTokens
-	}
-	if outBudget <= 0 {
-		outBudget = 4096
-	}
-	return total + outBudget
+	return total
 }
 
 // estimateContentTokens estimates tokens in one message content, which may be a
@@ -2781,7 +2841,8 @@ func isMemberScopedClass(c llmerrors.Class) bool {
 
 // recordRoutedFailure records a failed group-routing attempt with the right
 // scope:
-//   - context_too_long: not a fault at all — no health impact;
+//   - context_too_long / max_output_exceeded: not a fault at all — no health
+//     impact (a (request, model) property the router handles by capping/skipping);
 //   - member-scoped classes (per-model quota/balance/subscription): member-level
 //     cooldown, so sibling models on the same channel stay in rotation;
 //   - everything else: channel-level circuit-breaker failure (existing behavior).
@@ -2792,8 +2853,8 @@ func (s *LLMProxyService) recordRoutedFailure(ch *Channel, member *ModelGroupMem
 	}
 	result := llmerrors.Classify(statusCode, errBody, ch.Config.ProviderType)
 	switch {
-	case result.Class == llmerrors.ContextTooLong:
-		// Request exceeds this member's window — a routing input, not a fault.
+	case result.Class == llmerrors.ContextTooLong || result.Class == llmerrors.MaxOutputExceeded:
+		// Request exceeds this member's window/output cap — a routing input, not a fault.
 	case member != nil && isMemberScopedClass(result.Class):
 		member.RecordMemberBreakdown(string(result.Class), llmerrors.BreakdownDuration(result.BreakdownUntil))
 		s.alertForClass(ch.Config.Name, result.Class)

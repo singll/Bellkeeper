@@ -10,35 +10,50 @@ import (
 type Class string
 
 const (
-	QuotaExhausted     Class = "quota_exhausted"
-	AuthFailed         Class = "auth_failed"
+	QuotaExhausted      Class = "quota_exhausted"
+	AuthFailed          Class = "auth_failed"
 	SubscriptionInvalid Class = "subscription_invalid"
-	RateLimitedRetry   Class = "rate_limited_retry"
-	BalanceZero        Class = "balance_zero"
-	SessionExpired     Class = "session_expired"
-	ServerError        Class = "server_error"
+	RateLimitedRetry    Class = "rate_limited_retry"
+	BalanceZero         Class = "balance_zero"
+	SessionExpired      Class = "session_expired"
+	ServerError         Class = "server_error"
 	// ContextTooLong marks "this request exceeds the member model's context
 	// window" (HTTP 400 with a context-length message). It is a property of the
 	// (request, model) pair — not a fault of the channel — so it must never
 	// count against channel health; the router should simply pick a member
 	// with a larger window.
 	ContextTooLong Class = "context_too_long"
-	Unknown        Class = "unknown"
+	// MaxOutputExceeded marks "this request asks for more output tokens than
+	// the member model supports" (HTTP 400 with a max_tokens out-of-range
+	// message, e.g. SenseNova flash-lite caps max_tokens at 65536). Like
+	// context_too_long it is a (request, model) property, not a channel fault:
+	// the router should cap the output budget to the member's limit and retry,
+	// or skip to the next member without any channel-health impact.
+	MaxOutputExceeded Class = "max_output_exceeded"
+	Unknown           Class = "unknown"
 )
 
 // Result holds the classification outcome.
 type Result struct {
-	Class      Class
+	Class          Class
 	BreakdownUntil string // human-readable duration or timestamp hint
-	CanRetry   bool
+	CanRetry       bool
 }
 
 // Classify maps status code + body + provider type to a semantic error class.
 func Classify(statusCode int, body string, providerType string) Result {
 	lowerBody := strings.ToLower(body)
 
-	// 401 → auth failed (all providers)
+	// 401 → auth failed (all providers), BUT some providers (e.g. OpenCode Go)
+	// return 401 with a "CreditsError / Insufficient balance" body when the
+	// account's credit balance is depleted. That is a member-scoped balance
+	// problem, not an invalid API key — misclassifying it as auth_failed would
+	// (a) trip the whole channel and (b) show a misleading "API key invalid"
+	// critical alert when the real issue is "please top up".
 	if statusCode == 401 {
+		if isBalanceExhausted(lowerBody) {
+			return Result{Class: BalanceZero, BreakdownUntil: "long", CanRetry: false}
+		}
 		return Result{Class: AuthFailed, BreakdownUntil: "permanent", CanRetry: false}
 	}
 
@@ -47,6 +62,13 @@ func Classify(statusCode int, body string, providerType string) Result {
 	// length", Anthropic "prompt is too long", OpenRouter "context_length_exceeded".
 	if statusCode == 400 && isContextTooLong(lowerBody) {
 		return Result{Class: ContextTooLong, BreakdownUntil: "none", CanRetry: true}
+	}
+
+	// 400 + max_tokens out-of-range message → request asks for more output
+	// tokens than the model supports (e.g. "field MaxTokens invalid, should be
+	// in [1, 65536]"). A (request, model) property, not a channel fault.
+	if statusCode == 400 && isMaxTokensTooLarge(lowerBody) {
+		return Result{Class: MaxOutputExceeded, BreakdownUntil: "none", CanRetry: true}
 	}
 
 	// Provider-specific classification
@@ -170,12 +192,41 @@ func isContextTooLong(lowerBody string) bool {
 		strings.Contains(lowerBody, "context window")
 }
 
+// isMaxTokensTooLarge matches max_tokens out-of-range rejections (matched against
+// a lowercased body). SenseNova: "field MaxTokens invalid, should be in [1, 65536]".
+func isMaxTokensTooLarge(lowerBody string) bool {
+	if !strings.Contains(lowerBody, "max_tokens") && !strings.Contains(lowerBody, "maxtokens") {
+		return false
+	}
+	return strings.Contains(lowerBody, "invalid") ||
+		strings.Contains(lowerBody, "should be") ||
+		strings.Contains(lowerBody, "too large") ||
+		strings.Contains(lowerBody, "exceed") ||
+		strings.Contains(lowerBody, "range") ||
+		strings.Contains(lowerBody, "maximum")
+}
+
+// isBalanceExhausted matches balance/credit-depletion phrasings that some
+// providers return with HTTP 401 (matched against a lowercased body).
+// OpenCode Go: `{"error":{"type":"CreditsError","message":"Insufficient balance..."}}`.
+func isBalanceExhausted(lowerBody string) bool {
+	return strings.Contains(lowerBody, "insufficient balance") ||
+		strings.Contains(lowerBody, "insufficient credits") ||
+		strings.Contains(lowerBody, "out of credits") ||
+		strings.Contains(lowerBody, "creditserror") ||
+		strings.Contains(lowerBody, "not enough credits") ||
+		strings.Contains(lowerBody, "credit balance") ||
+		strings.Contains(lowerBody, "low balance") ||
+		(strings.Contains(lowerBody, "balance") && strings.Contains(lowerBody, "billing"))
+}
+
 // BreakdownDuration converts a human-readable breakdown hint to a concrete duration.
 // If the hint starts with a number, it's parsed as seconds. Special values:
-//   "permanent" → 0 (never auto-recover)
-//   "long"      → 24h
-//   "5h_or_7d"  → 5h (caller should use probe strategy for longer)
-//   "none"      → 0 (no breakdown at all — not a channel fault)
+//
+//	"permanent" → 0 (never auto-recover)
+//	"long"      → 24h
+//	"5h_or_7d"  → 5h (caller should use probe strategy for longer)
+//	"none"      → 0 (no breakdown at all — not a channel fault)
 func BreakdownDuration(hint string) time.Duration {
 	switch hint {
 	case "permanent":

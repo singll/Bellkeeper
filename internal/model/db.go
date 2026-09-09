@@ -204,9 +204,11 @@ func SeedLLMProxyConfig(db *gorm.DB, cfg config.LLMProxyConfig) error {
 				weight = 1
 			}
 			group.Members = append(group.Members, LLMModelGroupMember{
-				ChannelName: m.Channel,
-				Model:       m.Model,
-				Weight:      weight,
+				ChannelName:      m.Channel,
+				Model:            m.Model,
+				Weight:           weight,
+				MaxContextTokens: m.MaxContextTokens,
+				MaxOutputTokens:  m.MaxOutputTokens,
 			})
 		}
 		if err := db.Create(&group).Error; err != nil {

@@ -26,16 +26,19 @@ func (LLMModelGroup) TableName() string {
 
 // LLMModelGroupMember represents a member channel within a model group.
 type LLMModelGroupMember struct {
-	ID          uint           `gorm:"primaryKey" json:"id"`
-	GroupID     uint           `gorm:"index;not null" json:"group_id"`
-	ChannelName string         `gorm:"size:100;not null" json:"channel_name"`
-	Model       string         `gorm:"size:200;not null" json:"model"`
-	Weight      int            `gorm:"default:1" json:"weight"`
+	ID          uint   `gorm:"primaryKey" json:"id"`
+	GroupID     uint   `gorm:"index;not null" json:"group_id"`
+	ChannelName string `gorm:"size:100;not null" json:"channel_name"`
+	Model       string `gorm:"size:200;not null" json:"model"`
+	Weight      int    `gorm:"default:1" json:"weight"`
 	// MaxContextTokens is the member model's context window (0 = unknown).
 	// Used by the router for context-aware member selection.
-	MaxContextTokens int           `gorm:"default:0" json:"max_context_tokens"`
-	CreatedAt        time.Time     `json:"created_at"`
-	DeletedAt        gorm.DeletedAt `gorm:"index" json:"-"`
+	MaxContextTokens int `gorm:"default:0" json:"max_context_tokens"`
+	// MaxOutputTokens is the member model's maximum generation length (0 =
+	// unknown). Used to clamp an over-large max_tokens request before routing.
+	MaxOutputTokens int            `gorm:"default:0" json:"max_output_tokens"`
+	CreatedAt       time.Time      `json:"created_at"`
+	DeletedAt       gorm.DeletedAt `gorm:"index" json:"-"`
 }
 
 func (LLMModelGroupMember) TableName() string {

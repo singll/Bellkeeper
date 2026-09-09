@@ -1,6 +1,7 @@
 package llmgateway
 
 import (
+	"encoding/json"
 	"fmt"
 	"net/http"
 	"net/http/httptest"
@@ -11,8 +12,8 @@ import (
 	"github.com/stretchr/testify/assert"
 
 	"github.com/singll/bellkeeper/internal/config"
-	"github.com/singll/bellkeeper/internal/pkg/httpclient"
 	llmerrors "github.com/singll/bellkeeper/internal/llmgateway/errors"
+	"github.com/singll/bellkeeper/internal/pkg/httpclient"
 )
 
 // --- classifier ---
@@ -38,6 +39,67 @@ func TestClassifyContextTooLong(t *testing.T) {
 
 	// No breakdown duration for a non-fault
 	assert.Equal(t, time.Duration(0), llmerrors.BreakdownDuration("none"))
+}
+
+func TestClassifyMaxOutputExceeded(t *testing.T) {
+	// SenseNova flash-lite: max_tokens capped at 65536.
+	r := llmerrors.Classify(400, `{"error":{"message":"field MaxTokens invalid, should be in [1, 65536]","type":"invalid_request_error","param":"max_tokens","code":"3"}}`, "openai")
+	assert.Equal(t, llmerrors.MaxOutputExceeded, r.Class)
+	assert.True(t, r.CanRetry)
+	assert.Equal(t, time.Duration(0), llmerrors.BreakdownDuration(r.BreakdownUntil))
+
+	// A generic max_tokens-free 400 must stay Unknown.
+	r = llmerrors.Classify(400, `{"error":{"message":"invalid parameter: foo"}}`, "openai")
+	assert.Equal(t, llmerrors.Unknown, r.Class)
+}
+
+func TestClassify401BalanceExhausted(t *testing.T) {
+	// OpenCode Go: 401 with a CreditsError body is a balance problem, not auth.
+	r := llmerrors.Classify(401, `{"type":"error","error":{"type":"CreditsError","message":"Insufficient balance. Manage your billing here: https://opencode.ai/workspace/x/billing"}}`, "openai")
+	assert.Equal(t, llmerrors.BalanceZero, r.Class)
+	assert.False(t, r.CanRetry)
+
+	// A plain 401 with no balance hint is still auth_failed.
+	r = llmerrors.Classify(401, `{"error":{"message":"invalid api key"}}`, "openai")
+	assert.Equal(t, llmerrors.AuthFailed, r.Class)
+}
+
+func TestCapOutputTokens(t *testing.T) {
+	// max_tokens over the cap is clamped.
+	body := []byte(`{"model":"m","max_tokens":131072,"messages":[]}`)
+	out := capOutputTokens(body, 65536)
+	assert.JSONEq(t, `{"model":"m","max_tokens":65536,"messages":[]}`, string(out))
+
+	// max_completion_tokens is clamped too.
+	body = []byte(`{"model":"m","max_completion_tokens":131072}`)
+	out = capOutputTokens(body, 65536)
+	assert.JSONEq(t, `{"model":"m","max_completion_tokens":65536}`, string(out))
+
+	// Within the cap → unchanged (same bytes).
+	body = []byte(`{"model":"m","max_tokens":100}`)
+	assert.Equal(t, body, capOutputTokens(body, 65536))
+
+	// No cap declared → unchanged.
+	body = []byte(`{"model":"m","max_tokens":131072}`)
+	assert.Equal(t, body, capOutputTokens(body, 0))
+}
+
+func TestNewModelGroup_DeduplicatesMembers(t *testing.T) {
+	ch := newTestChannel("sense", "", false, nil)
+	cfg := config.ModelGroupConfig{
+		Name: "g",
+		Members: []config.ModelGroupMember{
+			{Channel: "sense", Model: "glm-5.2", Weight: 5},
+			{Channel: "sense", Model: "glm-5.2", Weight: 1},
+			{Channel: "sense", Model: "flash-lite", Weight: 6},
+		},
+	}
+	g, err := NewModelGroup(cfg, map[string]*Channel{"sense": ch})
+	assert.NoError(t, err)
+	assert.Len(t, g.Members, 2)
+	assert.Equal(t, "glm-5.2", g.Members[0].Config.Model)
+	assert.Equal(t, 5, g.Members[0].Config.Weight, "first occurrence wins")
+	assert.Equal(t, "flash-lite", g.Members[1].Config.Model)
 }
 
 // --- token estimation ---
@@ -72,14 +134,29 @@ func TestContextExcluded(t *testing.T) {
 	g := newTestGroup(memberCtx(ch, "flash-lite", 262144), memberCtx(ch, "glm-5.2", 0))
 
 	// Budget over the flash-lite window → only flash-lite excluded.
-	ex := g.contextExcluded(300000)
+	ex := g.contextExcluded(0, 300000)
 	assert.Equal(t, map[string]bool{"sense:flash-lite": true}, ex)
 
 	// Small budget → nothing excluded.
-	assert.Nil(t, g.contextExcluded(1000))
+	assert.Nil(t, g.contextExcluded(0, 1000))
 
 	// Zero budget (unparseable) → nothing excluded.
-	assert.Nil(t, g.contextExcluded(0))
+	assert.Nil(t, g.contextExcluded(0, 0))
+}
+
+func TestContextExcluded_MemberOutputCap(t *testing.T) {
+	ch := newTestChannel("sense", "", false, nil)
+	flash := memberCtx(ch, "flash-lite", 262144)
+	flash.Config.MaxOutputTokens = 65536
+	glm := memberCtx(ch, "glm-5.2", 1048576)
+	glm.Config.MaxOutputTokens = 131072
+	g := newTestGroup(flash, glm)
+
+	// 185K input + 131072 output = 316K. flash-lite's 262144 window is exceeded
+	// only if we DON'T clamp its output cap: with cap 65536 the budget is
+	// 250K < 262144, so flash-lite stays eligible while glm-5.2 remains too.
+	ex := g.contextExcluded(185000, 131072)
+	assert.Nil(t, ex)
 }
 
 func TestSelectChannel_SkipsContextExcludedMember(t *testing.T) {
@@ -87,7 +164,7 @@ func TestSelectChannel_SkipsContextExcludedMember(t *testing.T) {
 	g := newTestGroup(memberCtx(ch, "flash-lite", 262144), member(ch, "glm-5.2"))
 
 	// Huge budget excludes flash-lite even though it is declared first.
-	chSel, model := g.SelectChannel("", TaskClassify, "", nil, g.contextExcluded(300000))
+	chSel, model := g.SelectChannel("", TaskClassify, "", nil, g.contextExcluded(0, 300000))
 	assert.Equal(t, "glm-5.2", model)
 	assert.Same(t, ch, chSel)
 }
@@ -235,6 +312,38 @@ func TestProxyViaGroup_ContextAwarePreFilter(t *testing.T) {
 	assert.Equal(t, 200, status)
 	assert.Equal(t, int32(0), atomic.LoadInt32(hits["flash-lite"]), "oversized prompt must never reach the small-window member")
 	assert.Equal(t, int32(1), atomic.LoadInt32(hits["glm-5.2"]))
+}
+
+// A member with a declared max_output_tokens must have the caller's over-large
+// max_tokens clamped before forwarding, so a low-cap model (flash-lite) serves
+// the request instead of rejecting it.
+func TestProxyViaGroup_CapsOutputTokens(t *testing.T) {
+	var gotMaxTokens int
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		var req struct {
+			Model     string `json:"model"`
+			MaxTokens int    `json:"max_tokens"`
+		}
+		_ = json.Unmarshal(readBody(t, r), &req)
+		gotMaxTokens = req.MaxTokens
+		w.WriteHeader(200)
+		w.Write([]byte(`{"id":"x","choices":[{"index":0,"message":{"role":"assistant","content":"ok"},"finish_reason":"stop"}]}`)) //nolint:errcheck
+	}))
+	t.Cleanup(srv.Close)
+
+	ch := newUpstreamChannel("sense", srv.URL, 1)
+	flash := member(ch, "flash-lite")
+	flash.Config.MaxContextTokens = 262144
+	flash.Config.MaxOutputTokens = 65536
+	g := newTestGroup(flash)
+
+	// Caller requests 131072; flash-lite caps at 65536 and must serve it.
+	status, _, _, err := newTestService().proxyViaGroup(g, "", "POST", "/v1/chat/completions",
+		http.Header{}, []byte(`{"model":"pool","messages":[{"role":"user","content":"hi"}],"max_tokens":131072}`), "t", 0, TaskClassify)
+
+	assert.NoError(t, err)
+	assert.Equal(t, 200, status)
+	assert.Equal(t, 65536, gotMaxTokens, "flash-lite must receive a capped max_tokens")
 }
 
 // Per-model quota exhaustion must only take that member out of rotation — the

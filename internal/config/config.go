@@ -94,6 +94,11 @@ type ModelGroupMember struct {
 	// receives a 300K prompt. Purely an optimization — a misestimate is caught
 	// reactively by context_too_long failover.
 	MaxContextTokens int `mapstructure:"max_context_tokens"`
+	// MaxOutputTokens is the member model's maximum generation length (0 =
+	// unknown / don't cap). When set and the caller requests a larger
+	// max_tokens / max_completion_tokens, the proxy clamps it down so the model
+	// doesn't reject the request (e.g. SenseNova flash-lite caps at 65536).
+	MaxOutputTokens int `mapstructure:"max_output_tokens"`
 }
 
 type ChannelConfig struct {
