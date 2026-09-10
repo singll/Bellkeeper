@@ -1505,6 +1505,9 @@ func (s *LLMProxyService) tryChannel(
 			req.Header.Set("Authorization", "Bearer "+ch.Config.APIKey)
 			req.Header.Set("Content-Type", "application/json")
 		}
+		if isOpenCodeGo(ch) {
+			req.Header.Set("x-opencode-session", HashCachedPrefix(body))
+		}
 
 		// Track half-open inflight requests for circuit breaker concurrency control
 		ch.Health.TrackHalfOpenRequest()
@@ -2251,6 +2254,9 @@ func (s *LLMProxyService) tryChannelStream(
 		req.Header.Set("Authorization", "Bearer "+ch.Config.APIKey)
 	}
 	req.Header.Set("Content-Type", "application/json")
+	if isOpenCodeGo(ch) {
+		req.Header.Set("x-opencode-session", HashCachedPrefix(body))
+	}
 
 	// Use the underlying http.Client without timeout for streaming
 	// (the httpclient.Client has an overall Timeout which kills long streams)
@@ -2605,6 +2611,13 @@ func replaceModelInBody(body []byte, model string) []byte {
 // upstream channel's own field name, e.g. SenseNova's "reasoning").
 func isDeepSeekOfficial(ch *Channel) bool {
 	return strings.Contains(ch.Config.BaseURL, "deepseek.com")
+}
+
+// isOpenCodeGo reports whether the channel forwards to OpenCode Go
+// (opencode.ai/zen/go). Its API requires a stable x-opencode-session header per
+// conversation for routing and prompt-cache optimization.
+func isOpenCodeGo(ch *Channel) bool {
+	return strings.Contains(ch.Config.BaseURL, "opencode.ai")
 }
 
 // stripReasoningForDeepSeek disables thinking mode before forwarding to

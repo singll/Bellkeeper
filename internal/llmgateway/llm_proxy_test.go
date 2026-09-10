@@ -218,14 +218,17 @@ func TestIsDeepSeekOfficial(t *testing.T) {
 	ds := newTestChannel("deepseek-secagent", "standard", false, nil)
 	ds.Config.BaseURL = "https://api.deepseek.com"
 	assert.True(t, isDeepSeekOfficial(ds))
+	assert.False(t, isOpenCodeGo(ds))
 
 	ss := newTestChannel("sensenova-secagent", "standard", false, nil)
 	ss.Config.BaseURL = "https://token.sensenova.cn"
 	assert.False(t, isDeepSeekOfficial(ss))
+	assert.False(t, isOpenCodeGo(ss))
 
 	oc := newTestChannel("opencode-go-secagent", "standard", false, nil)
 	oc.Config.BaseURL = "https://opencode.ai/zen/go"
 	assert.False(t, isDeepSeekOfficial(oc))
+	assert.True(t, isOpenCodeGo(oc))
 }
 
 func TestStripReasoningForDeepSeek(t *testing.T) {
