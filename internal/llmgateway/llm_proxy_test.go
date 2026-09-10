@@ -1,6 +1,7 @@
 package llmgateway
 
 import (
+	"encoding/json"
 	"net/http"
 	"testing"
 	"time"
@@ -211,4 +212,48 @@ func TestProxyRerank_RequiresRerankProvider(t *testing.T) {
 	assert.Equal(t, 400, status)
 	assert.Error(t, err)
 	assert.Contains(t, string(body), "no rerank channel")
+}
+
+func TestIsDeepSeekOfficial(t *testing.T) {
+	ds := newTestChannel("deepseek-secagent", "standard", false, nil)
+	ds.Config.BaseURL = "https://api.deepseek.com"
+	assert.True(t, isDeepSeekOfficial(ds))
+
+	ss := newTestChannel("sensenova-secagent", "standard", false, nil)
+	ss.Config.BaseURL = "https://token.sensenova.cn"
+	assert.False(t, isDeepSeekOfficial(ss))
+
+	oc := newTestChannel("opencode-go-secagent", "standard", false, nil)
+	oc.Config.BaseURL = "https://opencode.ai/zen/go"
+	assert.False(t, isDeepSeekOfficial(oc))
+}
+
+func TestStripReasoningForDeepSeek(t *testing.T) {
+	in := []byte(`{"model":"deepseek-v4-flash","reasoning_effort":"high","max_tokens":8,` +
+		`"messages":[{"role":"system","content":"sys"},` +
+		`{"role":"assistant","content":"answer","reasoning_content":"thought","reasoning":"legacy"},` +
+		`{"role":"user","content":"hi"}]}`)
+
+	out := stripReasoningForDeepSeek(in)
+
+	var m map[string]interface{}
+	assert.NoError(t, json.Unmarshal(out, &m))
+	assert.NotContains(t, m, "reasoning_effort", "top-level reasoning_effort must be stripped")
+	assert.Equal(t, "deepseek-v4-flash", m["model"], "model must be preserved")
+	assert.Equal(t, float64(8), m["max_tokens"], "unrelated fields must be preserved")
+
+	msgs := m["messages"].([]interface{})
+	assistant := msgs[1].(map[string]interface{})
+	assert.Equal(t, "answer", assistant["content"], "assistant content must be preserved")
+	assert.NotContains(t, assistant, "reasoning_content", "assistant reasoning_content must be stripped")
+	assert.NotContains(t, assistant, "reasoning", "assistant reasoning field must be stripped")
+
+	sys := msgs[0].(map[string]interface{})
+	assert.Equal(t, "sys", sys["content"], "system message must be preserved")
+}
+
+func TestStripReasoningForDeepSeek_Noop(t *testing.T) {
+	in := []byte(`{"model":"deepseek-v4-flash","messages":[{"role":"user","content":"hi"}]}`)
+	out := stripReasoningForDeepSeek(in)
+	assert.JSONEq(t, string(in), string(out), "body without reasoning fields must be returned unchanged")
 }

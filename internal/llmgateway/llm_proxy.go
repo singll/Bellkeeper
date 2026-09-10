@@ -1468,6 +1468,9 @@ func (s *LLMProxyService) tryChannel(
 			parsedBody, parsedModel := s.parseModelSuffixes(body)
 			realModel = parsedModel
 			forwardBody = parsedBody
+			if isDeepSeekOfficial(ch) {
+				forwardBody = stripReasoningForDeepSeek(forwardBody)
+			}
 		}
 
 		// Forward request upstream
@@ -2222,6 +2225,8 @@ func (s *LLMProxyService) tryChannelStream(
 		if path == "/v1/chat/completions" {
 			forwardPath = "/v1/messages"
 		}
+	} else if isDeepSeekOfficial(ch) {
+		forwardBody = stripReasoningForDeepSeek(forwardBody)
 	}
 
 	targetURL := strings.TrimRight(ch.Config.BaseURL, "/") + forwardPath
@@ -2586,6 +2591,59 @@ func replaceModelInBody(body []byte, model string) []byte {
 		return body
 	}
 	m["model"] = model
+	b, err := json.Marshal(m)
+	if err != nil {
+		return body
+	}
+	return b
+}
+
+// isDeepSeekOfficial reports whether the channel forwards to DeepSeek's
+// official API (api.deepseek.com). Its thinking mode requires reasoning_content
+// to be passed back on assistant messages, which the gateway path does not
+// reliably forward (the DSH gateway provider serializes reasoning under the
+// upstream channel's own field name, e.g. SenseNova's "reasoning").
+func isDeepSeekOfficial(ch *Channel) bool {
+	return strings.Contains(ch.Config.BaseURL, "deepseek.com")
+}
+
+// stripReasoningForDeepSeek disables thinking mode before forwarding to
+// DeepSeek official. DeepSeek returns 400 "reasoning_content in the thinking
+// mode must be passed back" when a request carries reasoning_effort but the
+// conversation's assistant messages lack DeepSeek's reasoning_content field.
+// Dropping reasoning_effort and any carried reasoning fields turns the official
+// channel into a plain non-thinking fallback, which is the intended last-resort
+// role of deepseek-secagent in pool-secagent.
+func stripReasoningForDeepSeek(body []byte) []byte {
+	var m map[string]interface{}
+	if err := json.Unmarshal(body, &m); err != nil {
+		return body
+	}
+	changed := false
+	if _, ok := m["reasoning_effort"]; ok {
+		delete(m, "reasoning_effort")
+		changed = true
+	}
+	if msgs, ok := m["messages"].([]interface{}); ok {
+		for _, mi := range msgs {
+			msg, ok := mi.(map[string]interface{})
+			if !ok {
+				continue
+			}
+			if role, _ := msg["role"].(string); role != "assistant" {
+				continue
+			}
+			for _, k := range []string{"reasoning_content", "reasoning"} {
+				if _, ok := msg[k]; ok {
+					delete(msg, k)
+					changed = true
+				}
+			}
+		}
+	}
+	if !changed {
+		return body
+	}
 	b, err := json.Marshal(m)
 	if err != nil {
 		return body
