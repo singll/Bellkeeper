@@ -195,6 +195,44 @@ func (tb *TokenBucket) Resize(rpm, defaultBucketRPM int) {
 	}
 }
 
+// SetQuotaWindow switches the long-window counter between calendar-day and
+// rolling-window mode, preserving the current count: calendar→rolling seeds
+// synthetic events spread over the last window (approximate, avoids both
+// over- and under-counting); rolling→calendar just adopts the live count.
+func (tb *TokenBucket) SetQuotaWindow(d time.Duration) {
+	tb.mu.Lock()
+	defer tb.mu.Unlock()
+	if d == tb.quotaWindow {
+		return
+	}
+	if tb.quotaWindow == 0 && d > 0 {
+		// Calendar → rolling: synthesize the last min(dailyCount, dailyLimit)
+		// events evenly across the tail half of the window.
+		n := tb.dailyCount
+		if tb.dailyLimit > 0 && n > tb.dailyLimit {
+			n = tb.dailyLimit
+		}
+		tb.windowEvents = tb.windowEvents[:0]
+		now := time.Now()
+		for i := 0; i < n; i++ {
+			offset := time.Duration(int64(d) / 2 * int64(i+1) / int64(n+1))
+			tb.windowEvents = append(tb.windowEvents, now.Add(-offset))
+		}
+	} else if tb.quotaWindow > 0 && d == 0 {
+		// Rolling → calendar: adopt the in-window count; next midnight resets.
+		cutoff := time.Now().Add(-tb.quotaWindow)
+		n := 0
+		for _, t := range tb.windowEvents {
+			if t.After(cutoff) {
+				n++
+			}
+		}
+		tb.dailyCount = n
+		tb.windowEvents = nil
+	}
+	tb.quotaWindow = d
+}
+
 // --- Channel ---
 
 // Channel represents a single upstream LLM API endpoint with its own rate limiter
@@ -914,6 +952,9 @@ func (s *LLMProxyService) Reload() error {
 	for name, newCh := range s.channels {
 		if oldCh, ok := oldChannels[name]; ok {
 			newCh.Health = oldCh.Health
+			// Quota-window mode changes migrate the counter in place instead of
+			// dropping it (calendar↔rolling, 2026-09-24 29 号方案).
+			oldCh.Bucket.SetQuotaWindow(time.Duration(newCh.Config.QuotaWindowSeconds) * time.Second)
 			oldCh.Bucket.Resize(s.effectiveBucketRPM(newCh.Config), s.cfg.DefaultBucketRPM)
 			newCh.Bucket = oldCh.Bucket
 		}

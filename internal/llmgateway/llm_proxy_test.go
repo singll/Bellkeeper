@@ -97,6 +97,30 @@ func TestTokenBucket_RollingWindow(t *testing.T) {
 	assert.Equal(t, 3, st["daily_used"]) // 3 live events (one expired + one new)
 }
 
+func TestTokenBucket_SetQuotaWindowMigration(t *testing.T) {
+	// Calendar-day bucket with usage, migrated to rolling: count preserved
+	// (synthesized events), window enforced.
+	tb := NewTokenBucket(1000, 5, 60)
+	for i := 0; i < 4; i++ {
+		ok, _ := tb.TryAcquire()
+		assert.True(t, ok)
+	}
+	tb.SetQuotaWindow(5 * time.Hour)
+	st := tb.Status()
+	assert.Equal(t, 4, st["daily_used"], "calendar→rolling preserves count")
+	assert.Equal(t, int(5*60*60), st["window_seconds"])
+	ok, _ := tb.TryAcquire()
+	assert.True(t, ok, "5th request still allowed (limit 5)")
+	ok, _ = tb.TryAcquire()
+	assert.False(t, ok, "6th blocked by rolling window limit")
+
+	// Rolling → calendar: in-window count adopted.
+	tb.SetQuotaWindow(0)
+	st = tb.Status()
+	assert.Equal(t, 5, st["daily_used"])
+	assert.Equal(t, 0, st["window_seconds"])
+}
+
 func TestComputeMicroCents(t *testing.T) {
 	// DeepSeek V3: 14¢/1M input, 28¢/1M output. 1000 prompt tokens of input alone
 	// is 0.014¢ — old integer-cent math truncated this to 0 (audit #13). Micro-cents
