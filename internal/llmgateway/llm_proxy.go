@@ -2527,6 +2527,18 @@ func (s *LLMProxyService) GetChannelsStatus() []map[string]interface{} {
 		status["rpd_limit"] = ch.Config.RPD
 		status["is_free"] = ch.Config.IsFree
 		status["health"] = ch.Health.Status()
+		// 真实额度观测（29 号方案）：balance provider 已配置时暴露窗口余量
+		// （OpenCode Go：rolling/weekly/monthly 最紧窗口剩余比例；货币单位
+		// window_ratio 表示非美元）。dsh 供给哨兵优先用该比值做降速判断，
+		// 无数据时回退本地令牌桶口径。
+		if info := s.GetChannelBalance(name); info != nil && info.Error == "" {
+			status["quota_ratio_remaining"] = info.Balance
+			status["quota_currency"] = info.Currency
+			if info.ExpiresAt != nil {
+				status["quota_window_resets_at"] = info.ExpiresAt.Format(time.RFC3339)
+			}
+			status["quota_fetched_at"] = info.FetchedAt.Format(time.RFC3339)
+		}
 		result = append(result, status)
 	}
 	return result

@@ -40,6 +40,7 @@ func NewFactory() *Factory {
 			"moonshot":  newMoonshotProvider,
 			"newapi":    newNewAPIProvider,
 			"aliyun":    newAliyunProvider,
+			"opencodego": newOpenCodeGoProvider,
 		},
 	}
 }

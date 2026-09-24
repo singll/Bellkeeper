@@ -58,6 +58,7 @@ llm_proxy:
   enabled: true
   default_timeout: 60
   max_retries: 3
+  balance_sync_interval: 300   # 余额/额度窗口同步间隔（秒）；OpenCode Go 用量 API 等
   # max_wait_seconds: 30       # 令牌桶等待上限（秒）
   # backoff_cap_seconds: 60    # 指数退避上限（秒）
   # backoff_jitter: 0.5        # 退避抖动因子
@@ -303,6 +304,7 @@ llm_proxy:
     - name: opencode-go-secagent
       base_url: https://opencode.ai/zen/go
       api_key: ${LLM_OPENCODE_GO_API_KEY}
+      balance_provider_type: opencodego   # 官方 /v1/usage：rolling 5h/weekly/monthly 窗口余量
       rpm: 120
       rpd: 20000
       quota_window_seconds: 18000  # $12/5h 滚动窗口（官方口径；周/月窗由动态 "resets in" 分类兜底）
