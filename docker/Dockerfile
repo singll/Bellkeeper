@@ -10,8 +10,13 @@ FROM node:20-alpine AS frontend-builder
 
 WORKDIR /app/web
 
-# Install pnpm (pin version to avoid re-download)
+# Install pnpm (pin version to avoid re-download); 走 npmmirror（构建网络访问
+# registry.npmjs.org 不稳定，2026-09-24 keeper 实测 corepack 拉取失败）
+ENV COREPACK_NPM_REGISTRY=https://registry.npmmirror.com
 RUN corepack enable && corepack prepare pnpm@10 --activate
+
+# pnpm 同样走 npmmirror，避免 install 阶段再次撞 npmjs
+RUN pnpm config set registry https://registry.npmmirror.com
 
 # Copy package files first for layer cache
 COPY web/package.json web/pnpm-lock.yaml* ./
