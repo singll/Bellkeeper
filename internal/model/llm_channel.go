@@ -19,6 +19,10 @@ type LLMChannel struct {
 	ProviderType string         `gorm:"size:50;default:'openai'" json:"provider_type"`
 	RPM          int            `gorm:"default:500" json:"rpm"`
 	RPD       int            `gorm:"default:50000" json:"rpd"`
+	// QuotaWindowSeconds switches the rpd counter from calendar-day reset to a
+	// rolling window (e.g. 18000 = 5h for SenseNova / OpenCode Go rolling quota
+	// windows). 0 = calendar-day (default).
+	QuotaWindowSeconds int `gorm:"default:0" json:"quota_window_seconds"`
 	Priority  int            `gorm:"default:1" json:"priority"`
 	IsFree    bool           `gorm:"default:false" json:"is_free"`
 	IsEnabled bool           `gorm:"default:true" json:"is_enabled"`

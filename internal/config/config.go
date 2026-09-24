@@ -74,6 +74,10 @@ type CircuitBreakerConfig struct {
 	CooldownSeconds    int `mapstructure:"cooldown_seconds"`
 	HalfOpenMax        int `mapstructure:"half_open_max"`
 	ErrorWindowSeconds int `mapstructure:"error_window_seconds"`
+	// ProbeIntervalMinutes is how often the quota-exhausted recovery probe runs
+	// (channel- and member-level). Floor is 10 minutes — probing more often
+	// wastes quota on dead windows. Default 10.
+	ProbeIntervalMinutes int `mapstructure:"probe_interval_minutes"`
 }
 
 type ModelGroupConfig struct {
@@ -113,6 +117,10 @@ type ChannelConfig struct {
 	BalanceConfigJSON   string   `mapstructure:"balance_config_json"`
 	ModelRPMOverrides   string   `mapstructure:"model_rpm_overrides"`
 	RPD                 int      `mapstructure:"rpd"`
+	// QuotaWindowSeconds switches the rpd counter from calendar-day reset to a
+	// rolling window of this many seconds (e.g. 18000 = 5h for SenseNova /
+	// OpenCode Go rolling quota windows). 0 = calendar-day (default).
+	QuotaWindowSeconds  int      `mapstructure:"quota_window_seconds"`
 	Priority            int      `mapstructure:"priority"`
 	Models              []string `mapstructure:"models"`
 	IsEnabled           bool     `mapstructure:"is_enabled"`

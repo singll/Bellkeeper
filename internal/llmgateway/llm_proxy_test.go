@@ -72,6 +72,31 @@ func TestTokenBucket_DailyLimit(t *testing.T) {
 	assert.True(t, wait > 0, "should suggest wait time")
 }
 
+func TestTokenBucket_RollingWindow(t *testing.T) {
+	// 5h rolling window (SenseNova / OpenCode Go quota): quota frees up as old
+	// events age out, rather than at calendar midnight.
+	tb := NewTokenBucket(1000, 3, 60, 5*time.Hour)
+
+	for i := 0; i < 3; i++ {
+		ok, _ := tb.TryAcquire()
+		assert.True(t, ok, "request %d should be allowed", i+1)
+	}
+	ok, wait := tb.TryAcquire()
+	assert.False(t, ok, "should be blocked at window limit")
+	// Oldest event is "now", so wait ≈ full window (allow small slack).
+	assert.True(t, wait > 4*time.Hour && wait <= 5*time.Hour, "wait should approach the full window, got %v", wait)
+
+	// Age out one event by rewinding its timestamp beyond the window.
+	tb.windowEvents[0] = time.Now().Add(-6 * time.Hour)
+	ok, _ = tb.TryAcquire()
+	assert.True(t, ok, "should allow after the oldest event expired from the window")
+
+	// Status reflects the rolling window.
+	st := tb.Status()
+	assert.Equal(t, int(5*60*60), st["window_seconds"])
+	assert.Equal(t, 3, st["daily_used"]) // 3 live events (one expired + one new)
+}
+
 func TestComputeMicroCents(t *testing.T) {
 	// DeepSeek V3: 14¢/1M input, 28¢/1M output. 1000 prompt tokens of input alone
 	// is 0.014¢ — old integer-cent math truncated this to 0 (audit #13). Micro-cents

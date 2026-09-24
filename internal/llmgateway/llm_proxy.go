@@ -45,16 +45,23 @@ type TokenBucket struct {
 	dailyCount int
 	dailyLimit int
 	dayStart   time.Time
+
+	// quotaWindow, when > 0, switches the long-window counter from
+	// calendar-day reset to a rolling window of this length (e.g. 5h for
+	// SenseNova / OpenCode Go rolling quota windows). Events are kept in a
+	// timestamp ring and expired lazily on access. 0 = calendar-day behavior.
+	quotaWindow  time.Duration
+	windowEvents []time.Time
 }
 
-func NewTokenBucket(rpm, rpd, defaultBucketRPM int) *TokenBucket {
+func NewTokenBucket(rpm, rpd, defaultBucketRPM int, quotaWindow ...time.Duration) *TokenBucket {
 	maxTokens := float64(rpm)
 	if maxTokens == 0 {
 		maxTokens = float64(defaultBucketRPM)
 	}
 	refillRate := maxTokens / 60.0
 
-	return &TokenBucket{
+	tb := &TokenBucket{
 		tokens:     maxTokens,
 		maxTokens:  maxTokens,
 		refillRate: refillRate,
@@ -62,6 +69,10 @@ func NewTokenBucket(rpm, rpd, defaultBucketRPM int) *TokenBucket {
 		dailyLimit: rpd,
 		dayStart:   startOfDay(time.Now()),
 	}
+	if len(quotaWindow) > 0 && quotaWindow[0] > 0 {
+		tb.quotaWindow = quotaWindow[0]
+	}
+	return tb
 }
 
 func startOfDay(t time.Time) time.Time {
@@ -76,15 +87,38 @@ func (tb *TokenBucket) TryAcquire() (bool, time.Duration) {
 
 	now := time.Now()
 
-	// Reset daily counter at midnight
-	today := startOfDay(now)
-	if today.After(tb.dayStart) {
-		tb.dailyCount = 0
-		tb.dayStart = today
+	// Reset daily counter at midnight / expire rolling-window events
+	if tb.quotaWindow > 0 {
+		cutoff := now.Add(-tb.quotaWindow)
+		kept := tb.windowEvents[:0]
+		for _, t := range tb.windowEvents {
+			if t.After(cutoff) {
+				kept = append(kept, t)
+			}
+		}
+		tb.windowEvents = kept
+		tb.dailyCount = len(tb.windowEvents)
+	} else {
+		today := startOfDay(now)
+		if today.After(tb.dayStart) {
+			tb.dailyCount = 0
+			tb.dayStart = today
+		}
 	}
 
 	// Check daily limit
 	if tb.dailyLimit > 0 && tb.dailyCount >= tb.dailyLimit {
+		if tb.quotaWindow > 0 {
+			// Rolling window: wait until the oldest in-window event expires.
+			if len(tb.windowEvents) > 0 {
+				wait := tb.windowEvents[0].Add(tb.quotaWindow).Sub(now)
+				if wait < 0 {
+					wait = 0
+				}
+				return false, wait
+			}
+			return false, 0
+		}
 		nextDay := tb.dayStart.Add(24 * time.Hour)
 		return false, nextDay.Sub(now)
 	}
@@ -100,6 +134,9 @@ func (tb *TokenBucket) TryAcquire() (bool, time.Duration) {
 	if tb.tokens >= 1.0 {
 		tb.tokens -= 1.0
 		tb.dailyCount++
+		if tb.quotaWindow > 0 {
+			tb.windowEvents = append(tb.windowEvents, now)
+		}
 		return true, 0
 	}
 
@@ -119,12 +156,25 @@ func (tb *TokenBucket) Status() map[string]interface{} {
 		currentTokens = tb.maxTokens
 	}
 
+	dailyCount := tb.dailyCount
+	if tb.quotaWindow > 0 {
+		cutoff := now.Add(-tb.quotaWindow)
+		n := 0
+		for _, t := range tb.windowEvents {
+			if t.After(cutoff) {
+				n++
+			}
+		}
+		dailyCount = n
+	}
+
 	return map[string]interface{}{
 		"available_tokens":  int(currentTokens),
 		"max_tokens":        int(tb.maxTokens),
-		"daily_used":        tb.dailyCount,
+		"daily_used":        dailyCount,
 		"daily_limit":       tb.dailyLimit,
 		"refill_rate_per_s": fmt.Sprintf("%.2f", tb.refillRate),
+		"window_seconds":    int(tb.quotaWindow / time.Second),
 	}
 }
 
@@ -421,13 +471,20 @@ func (s *LLMProxyService) snapshotBalances(lastSnapped map[string]time.Time) {
 // minimal 1-token probe checks whether the upstream quota actually recovered; on
 // success the circuit is reset, otherwise the breakdown is re-armed so probes stay
 // ~5h apart rather than firing every tick. Long-lived → registered in bgStopChans.
-func (s *LLMProxyService) kimiCodeProbeLoop(stopCh <-chan struct{}) {
-	ticker := time.NewTicker(30 * time.Minute)
+//
+// 2026-09-24: also probes member-level quota breakdowns (per-model credit pools,
+// e.g. SenseNova flash-lite vs deepseek-flash on one channel). Previously only
+// channel-level breakdowns were probed, so a member whose 5h rolling window had
+// recovered stayed out of rotation until its full cooldown elapsed. Interval is
+// configurable via circuit_breaker.probe_interval_minutes (floor 10min).
+func (s *LLMProxyService) kimiCodeProbeLoop(stopCh <-chan struct{}, interval time.Duration) {
+	ticker := time.NewTicker(interval)
 	defer ticker.Stop()
 	for {
 		select {
 		case <-ticker.C:
 			s.probeQuotaExhausted()
+			s.probeMemberQuotaExhausted()
 		case <-stopCh:
 			return
 		}
@@ -480,6 +537,74 @@ func (s *LLMProxyService) probeChannel(ch *Channel) (int, []byte, http.Header, e
 	}
 	body := []byte(fmt.Sprintf(`{"model":%q,"messages":[{"role":"user","content":"ping"}],"max_tokens":1}`, model))
 	return s.tryChannel(ch, "POST", "/v1/chat/completions", http.Header{}, body, "kimi-code-probe", 0)
+}
+
+// probeMemberQuotaExhausted sends a 1-token probe for each (channel, model)
+// group member whose member-level quota_exhausted cooldown has elapsed. On
+// success the member breakdown is cleared (RecordMemberSuccess) so the model
+// re-enters rotation without waiting out the full cooldown; on failure the
+// cooldown is re-armed from the fresh classification.
+func (s *LLMProxyService) probeMemberQuotaExhausted() {
+	s.mu.RLock()
+	groups := make([]*ModelGroup, 0, len(s.modelGroups))
+	for _, g := range s.modelGroups {
+		groups = append(groups, g)
+	}
+	s.mu.RUnlock()
+
+	now := time.Now()
+	seen := make(map[string]bool) // (channel:model) probed once even if in several groups
+	for _, g := range groups {
+		for _, m := range g.Members {
+			class, until := m.MemberBreakdownInfo()
+			if class != string(llmerrors.QuotaExhausted) {
+				continue
+			}
+			if until.IsZero() || now.Before(until) {
+				continue // still within cooldown
+			}
+			key := memberKey(m.Config.Channel, m.Config.Model)
+			if seen[key] {
+				continue
+			}
+			seen[key] = true
+			ch := m.Channel
+			if !ch.Health.IsAvailable() {
+				continue // channel circuit open — channel-level probe handles it
+			}
+			body := []byte(fmt.Sprintf(`{"model":%q,"messages":[{"role":"user","content":"ping"}],"max_tokens":1}`, m.Config.Model))
+			statusCode, respBody, _, err := s.tryChannel(ch, "POST", "/v1/chat/completions", http.Header{}, body, "member-quota-probe", 0)
+			if err == nil && statusCode >= 200 && statusCode < 400 {
+				// Clear the member breakdown in every group that carries this pair.
+				for _, gg := range groups {
+					if mm := gg.findMember(m.Config.Channel, m.Config.Model); mm != nil {
+						mm.RecordMemberSuccess()
+					}
+				}
+				middleware.GetLogger().Info("quota-exhausted member recovered via probe",
+					zap.String("channel", m.Config.Channel), zap.String("model", m.Config.Model),
+					zap.Int("status", statusCode))
+				continue
+			}
+			// Still down — re-arm from the fresh classification (dynamic reset
+			// windows keep this tight instead of re-blind 24h).
+			result := llmerrors.Classify(statusCode, string(respBody), ch.Config.ProviderType)
+			if isMemberScopedClass(result.Class) {
+				for _, gg := range groups {
+					if mm := gg.findMember(m.Config.Channel, m.Config.Model); mm != nil {
+						mm.RecordMemberBreakdown(string(result.Class), llmerrors.BreakdownDuration(result.BreakdownUntil))
+					}
+				}
+			} else {
+				// 探针撞上的是非配额类故障（限流/5xx/超时）——归渠道健康，不延长成员配额熔断。
+				ch.Health.RecordClassifiedFailure(classifyError(statusCode, err), string(result.Class),
+					llmerrors.BreakdownDuration(result.BreakdownUntil))
+			}
+			middleware.GetLogger().Info("quota-exhausted member still down after probe",
+				zap.String("channel", m.Config.Channel), zap.String("model", m.Config.Model),
+				zap.Int("status", statusCode), zap.String("class", string(result.Class)))
+		}
+	}
 }
 
 // Stop halts background services (balance manager, learner, aggregator, loops).
@@ -693,7 +818,8 @@ func (s *LLMProxyService) loadFromDB(startCleanupLoops bool) error {
 		chCfg := s.dbChannelToConfig(dbCh)
 		ch := &Channel{
 			Config: chCfg,
-			Bucket: NewTokenBucket(s.effectiveBucketRPM(chCfg), chCfg.RPD, s.cfg.DefaultBucketRPM),
+			Bucket: NewTokenBucket(s.effectiveBucketRPM(chCfg), chCfg.RPD, s.cfg.DefaultBucketRPM,
+				time.Duration(chCfg.QuotaWindowSeconds)*time.Second),
 			Client: httpclient.NewClientWithTimeout(time.Duration(s.cfg.DefaultTimeout) * time.Second),
 			Health: NewChannelHealth(s.cfg.CircuitBreaker),
 		}
@@ -837,7 +963,12 @@ func (s *LLMProxyService) startBackgroundLoops() {
 
 	probeStop := make(chan struct{})
 	s.bgStopChans = append(s.bgStopChans, probeStop)
-	go s.kimiCodeProbeLoop(probeStop)
+	probeInterval := time.Duration(s.cfg.CircuitBreaker.ProbeIntervalMinutes) * time.Minute
+	if probeInterval < 10*time.Minute {
+		// 下限 10min：更密的探测只是给仍在窗口内的死渠道白烧额度。
+		probeInterval = 10 * time.Minute
+	}
+	go s.kimiCodeProbeLoop(probeStop, probeInterval)
 }
 
 // resolveChannelKey returns the effective API key for a channel and its source:
@@ -890,6 +1021,7 @@ func (s *LLMProxyService) dbChannelToConfig(ch model.LLMChannel) config.ChannelC
 		ProviderType:        providerType,
 		RPM:                 ch.RPM,
 		RPD:                 ch.RPD,
+		QuotaWindowSeconds:  ch.QuotaWindowSeconds,
 		Priority:            ch.Priority,
 		Models:              ch.GetModels(),
 		IsEnabled:           ch.IsEnabled,

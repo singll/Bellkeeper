@@ -176,6 +176,7 @@ func SeedLLMProxyConfig(db *gorm.DB, cfg config.LLMProxyConfig) error {
 			APIKeyEnv: apiKeyEnv,
 			RPM:       ch.RPM,
 			RPD:       ch.RPD,
+			QuotaWindowSeconds: ch.QuotaWindowSeconds,
 			Priority:  ch.Priority,
 			IsFree:    ch.IsFree,
 			IsEnabled: ch.IsEnabled,

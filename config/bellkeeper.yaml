@@ -69,6 +69,7 @@ llm_proxy:
     cooldown_seconds: 120      # 熔断冷却时间（秒）
     half_open_max: 1           # 半开状态最多放行请求数
     error_window_seconds: 300  # 错误统计滑动窗口（秒）
+    probe_interval_minutes: 10 # quota_exhausted 恢复探测间隔（渠道+成员级；下限 10min）
 
   # 虚拟模型组
   model_groups:
@@ -127,12 +128,12 @@ llm_proxy:
           weight: 2
 
     - name: "pool-secagent"
-      description: "SilkSecAgent 漏洞/侦察任务专用池：SenseNova ds-v4.1-flash(主力) -> glm-5.2(重任务) -> flash-lite(轻任务,专属积分) -> ds-v4-flash -> DeepSeek 官方 -> OpenCode Go 兜底；超长请求自动跳过小窗口成员"
+      description: "SilkSecAgent 漏洞/侦察任务专用池：SenseNova 免费优先（deepseek-flash 主力 -> glm-5.2 -> flash-lite 专属积分 -> ds-v4-flash）-> OpenCode Go v4.1-flash -> DeepSeek 官方 v4-flash 付费托底；超长请求自动跳过小窗口成员"
       strategy: "priority-health"
       sticky_ttl_seconds: 300
       members:
         - channel: "sensenova-secagent"
-          model: "deepseek-v4.1-flash"
+          model: "deepseek-flash"
           weight: 7
           max_context_tokens: 1048576
           max_output_tokens: 131072
@@ -151,17 +152,17 @@ llm_proxy:
           weight: 4
           max_context_tokens: 1048576
           max_output_tokens: 65536
-        - channel: "deepseek-secagent"
-          model: "deepseek-v4-flash"
+        - channel: "opencode-go-secagent"
+          model: "deepseek-v4.1-flash"
           weight: 3
           max_context_tokens: 1048576
           max_output_tokens: 65536
         - channel: "opencode-go-secagent"
-          model: "deepseek-v4.1-flash"
+          model: "deepseek-v4-flash"
           weight: 2
           max_context_tokens: 1048576
           max_output_tokens: 65536
-        - channel: "opencode-go-secagent"
+        - channel: "deepseek-secagent"
           model: "deepseek-v4-flash"
           weight: 1
           max_context_tokens: 1048576
@@ -195,7 +196,7 @@ llm_proxy:
           max_output_tokens: 65536
 
     - name: "pool-secagent-heavy"
-      description: "SilkSecAgent 重任务池（23 号方案）：长上下文/多源关联/高失败代价；glm-5.2 + v4.1-flash 主力"
+      description: "SilkSecAgent 重任务池（23 号方案）：长上下文/多源关联/高失败代价；SenseNova glm-5.2 + deepseek-flash 主力，OpenCode Go 次选，DeepSeek 官方托底"
       strategy: "priority-health"
       sticky_ttl_seconds: 300
       members:
@@ -205,7 +206,7 @@ llm_proxy:
           max_context_tokens: 1048576
           max_output_tokens: 131072
         - channel: "sensenova-secagent"
-          model: "deepseek-v4.1-flash"
+          model: "deepseek-flash"
           weight: 5
           max_context_tokens: 1048576
           max_output_tokens: 131072
@@ -216,7 +217,12 @@ llm_proxy:
           max_output_tokens: 65536
         - channel: "opencode-go-secagent"
           model: "deepseek-v4.1-flash"
-          weight: 2
+          weight: 3
+          max_context_tokens: 1048576
+          max_output_tokens: 65536
+        - channel: "deepseek-secagent"
+          model: "deepseek-v4-flash"
+          weight: 1
           max_context_tokens: 1048576
           max_output_tokens: 65536
 
@@ -276,12 +282,12 @@ llm_proxy:
       api_key: ${LLM_SENSENOVA_API_KEY}
       rpm: 120
       rpd: 20000
+      quota_window_seconds: 18000  # 5h 滚动积分窗（SenseNova 公测 5h/周双积分池）
       priority: 1
       models:
-        - deepseek-v4.1-flash        # v3 主力（SenseNova 系，与 OpenCode Go 同步支持）
+        - deepseek-flash             # 主力（28 号补丁更正：v4.1 真实 ID 是 deepseek-flash）
         - deepseek-v4-flash
         - glm-5.2
-        - glm-5.1
         - sensenova-6.8-flash-lite   # 专属积分通道（256K ctx，协议实测支持 function calling）
       is_enabled: true
     - name: deepseek-secagent
@@ -299,6 +305,7 @@ llm_proxy:
       api_key: ${LLM_OPENCODE_GO_API_KEY}
       rpm: 120
       rpd: 20000
+      quota_window_seconds: 18000  # $12/5h 滚动窗口（官方口径；周/月窗由动态 "resets in" 分类兜底）
       priority: 3
       models:
         - deepseek-v4.1-flash

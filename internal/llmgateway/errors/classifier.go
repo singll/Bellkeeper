@@ -1,6 +1,7 @@
 package errors
 
 import (
+	"fmt"
 	"strconv"
 	"strings"
 	"time"
@@ -89,8 +90,11 @@ func Classify(statusCode int, body string, providerType string) Result {
 	if statusCode == 429 {
 		// 先判"瞬时限流"（rate limit / QPS / TPM / RPM 字样，几十秒即恢复），
 		// 再判"额度已耗尽"：月额度/余额耗尽类错误（如 OpenCode Go 的 GoUsageLimitError
-		// "Monthly usage limit reached. Resets in N days"）再重试也无意义，判 QuotaExhausted
-		// 长熔断（24h）让渠道退出轮换——否则死的兜底渠道每 30s 复活，全池失败时把它的
+		// "Monthly usage limit reached. Resets in N days"）再重试也无意义，判 QuotaExhausted。
+		// 熔断时长按 body 里的 "resets in ..." 动态解析（2026-09-24：OpenCode Go 的
+		// 5h 滚动窗口错误形如 "usage limit reached, resets in 3 hours"，此前一刀切 24h
+		// 导致窗口恢复后仍空转一天）；解析不到时分钟级（< 天）默认 5h 滚动窗，
+		// 天/月级才用 24h 长熔断——让渠道退出轮换，否则死的兜底渠道每 30s 复活，全池失败时把它的
 		// 月额度 429 原样透传给客户端（2026-09-03 secagent 任务中断根因之一）。
 		if strings.Contains(lowerBody, "rate limit") || strings.Contains(lowerBody, "rate_limit") ||
 			strings.Contains(lowerBody, "qps") || strings.Contains(lowerBody, "tpm") || strings.Contains(lowerBody, "rpm") {
@@ -99,7 +103,7 @@ func Classify(statusCode int, body string, providerType string) Result {
 		if strings.Contains(lowerBody, "monthly usage") || strings.Contains(lowerBody, "resets in") ||
 			strings.Contains(lowerBody, "gousagelimit") || strings.Contains(lowerBody, "usage limit") ||
 			strings.Contains(lowerBody, "insufficient") || strings.Contains(lowerBody, "exhausted") {
-			return Result{Class: QuotaExhausted, BreakdownUntil: "long", CanRetry: false}
+			return Result{Class: QuotaExhausted, BreakdownUntil: quotaBreakdownHint(lowerBody), CanRetry: false}
 		}
 		return Result{Class: RateLimitedRetry, BreakdownUntil: "30s", CanRetry: true}
 	}
@@ -108,7 +112,7 @@ func Classify(statusCode int, body string, providerType string) Result {
 	}
 	if statusCode == 403 {
 		if strings.Contains(lowerBody, "quota") || strings.Contains(lowerBody, "limit") {
-			return Result{Class: QuotaExhausted, BreakdownUntil: "long", CanRetry: false}
+			return Result{Class: QuotaExhausted, BreakdownUntil: quotaBreakdownHint(lowerBody), CanRetry: false}
 		}
 		return Result{Class: AuthFailed, BreakdownUntil: "permanent", CanRetry: false}
 	}
@@ -220,6 +224,74 @@ func isBalanceExhausted(lowerBody string) bool {
 		(strings.Contains(lowerBody, "balance") && strings.Contains(lowerBody, "billing"))
 }
 
+// quotaBreakdownHint derives the breakdown duration hint for a quota_exhausted
+// error from the provider's own reset phrasing (matched against a lowercased
+// body). "resets in N minutes/hours/days" (OpenCode Go 5h/weekly/monthly
+// rolling windows) is parsed into a concrete duration hint with a small safety
+// margin; without a parseable hint, "monthly" stays a long (24h) breakdown and
+// everything else defaults to 5h (the shortest known rolling window).
+func quotaBreakdownHint(lowerBody string) string {
+	if d, ok := parseResetInDuration(lowerBody); ok {
+		// 10% safety margin so we don't re-probe into the still-closed window.
+		d = d + d/10
+		if d > 24*time.Hour {
+			return "long"
+		}
+		return fmt.Sprintf("%ds", int64(d/time.Second))
+	}
+	if strings.Contains(lowerBody, "monthly") || strings.Contains(lowerBody, "month") {
+		return "long"
+	}
+	return "5h"
+}
+
+// parseResetInDuration extracts "resets in N hours/minutes/days" style durations
+// from an error body (lowercased). Also tolerates "reset in" / "retry after"
+// phrasings with integer or fractional magnitudes.
+func parseResetInDuration(lowerBody string) (time.Duration, bool) {
+	idx := strings.Index(lowerBody, "reset")
+	if idx < 0 {
+		idx = strings.Index(lowerBody, "retry after")
+	}
+	if idx < 0 {
+		return 0, false
+	}
+	tail := lowerBody[idx:]
+	// find first number in tail
+	var numStart = -1
+	for i := 0; i < len(tail); i++ {
+		if tail[i] >= '0' && tail[i] <= '9' {
+			numStart = i
+			break
+		}
+	}
+	if numStart < 0 {
+		return 0, false
+	}
+	numEnd := numStart
+	for numEnd < len(tail) && ((tail[numEnd] >= '0' && tail[numEnd] <= '9') || tail[numEnd] == '.') {
+		numEnd++
+	}
+	val, err := strconv.ParseFloat(tail[numStart:numEnd], 64)
+	if err != nil || val <= 0 {
+		return 0, false
+	}
+	unit := tail[numEnd:]
+	switch {
+	case strings.Contains(unit, "minute"):
+		return time.Duration(val * float64(time.Minute)), true
+	case strings.Contains(unit, "hour"):
+		return time.Duration(val * float64(time.Hour)), true
+	case strings.Contains(unit, "day"):
+		return time.Duration(val * float64(24*time.Hour)), true
+	case strings.Contains(unit, "week"):
+		return time.Duration(val * float64(7*24*time.Hour)), true
+	case strings.Contains(unit, "month"):
+		return 30 * 24 * time.Hour, true
+	}
+	return 0, false
+}
+
 // BreakdownDuration converts a human-readable breakdown hint to a concrete duration.
 // If the hint starts with a number, it's parsed as seconds. Special values:
 //
@@ -251,6 +323,12 @@ func BreakdownDuration(hint string) time.Duration {
 		// Try to parse as seconds
 		if s, err := strconv.Atoi(hint); err == nil {
 			return time.Duration(s) * time.Second
+		}
+		// "Ns" suffix form emitted by quotaBreakdownHint (e.g. "2772s")
+		if strings.HasSuffix(hint, "s") {
+			if s, err := strconv.Atoi(strings.TrimSuffix(hint, "s")); err == nil {
+				return time.Duration(s) * time.Second
+			}
 		}
 		return 60 * time.Second
 	}
