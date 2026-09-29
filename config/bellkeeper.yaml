@@ -129,10 +129,20 @@ llm_proxy:
           weight: 2
 
     - name: "pool-secagent"
-      description: "SilkSecAgent 漏洞/侦察任务专用池：SenseNova 免费优先（deepseek-flash 主力 -> glm-5.2 -> flash-lite 专属积分 -> ds-v4-flash）-> OpenCode Go v4.1-flash -> DeepSeek 官方 v4-flash 付费托底；超长请求自动跳过小窗口成员"
-      strategy: "priority-health"
+      description: "SilkSecAgent 漏洞/侦察任务专用池：OpenCode Go 套餐主力（w8，deepseek-v4.1-flash 优先）→ Go 限流/熔断/额度告急时顺延 SenseNova 免费链（deepseek-flash w7 -> glm-5.2 w6 -> flash-lite w5 -> ds-v4-flash w4）；超长请求自动跳过小窗口成员。2026-09-29 用户指示恢复 Go 主力（套餐可用但零消耗）"
+      strategy: "best-weight"
       sticky_ttl_seconds: 300
       members:
+        - channel: "opencode-go-secagent"
+          model: "deepseek-v4.1-flash"
+          weight: 8
+          max_context_tokens: 1048576
+          max_output_tokens: 65536
+        - channel: "opencode-go-secagent"
+          model: "deepseek-v4-flash"
+          weight: 8
+          max_context_tokens: 1048576
+          max_output_tokens: 65536
         - channel: "sensenova-secagent"
           model: "deepseek-flash"
           weight: 7
@@ -153,28 +163,18 @@ llm_proxy:
           weight: 4
           max_context_tokens: 1048576
           max_output_tokens: 65536
-        - channel: "opencode-go-secagent"
-          model: "deepseek-v4.1-flash"
-          weight: 3
-          max_context_tokens: 1048576
-          max_output_tokens: 65536
-        - channel: "opencode-go-secagent"
-          model: "deepseek-v4-flash"
-          weight: 2
-          max_context_tokens: 1048576
-          max_output_tokens: 65536
-        - channel: "deepseek-secagent"
-          model: "deepseek-v4-flash"
-          weight: 1
-          max_context_tokens: 1048576
-          max_output_tokens: 65536
 
     # 23 号方案 §3.7 Path B：按 task_class 分档路由（dsh 派生时按档选组；组内熔断顺延）
     - name: "pool-secagent-lite"
-      description: "SilkSecAgent 轻任务池（23 号方案）：flash-lite 专属积分优先 + 廉价兜底；摘要/归类/字段抽取/爬取富化"
-      strategy: "priority-health"
+      description: "SilkSecAgent 轻任务池（23 号方案）：OpenCode Go 套餐主力（w8，deepseek-v4-flash）→ SenseNova 免费链（flash-lite w6 -> ds-v4-flash w4）；摘要/归类/字段抽取/爬取富化。2026-09-29 用户指示恢复 Go 主力"
+      strategy: "best-weight"
       sticky_ttl_seconds: 300
       members:
+        - channel: "opencode-go-secagent"
+          model: "deepseek-v4-flash"
+          weight: 8
+          max_context_tokens: 1048576
+          max_output_tokens: 65536
         - channel: "sensenova-secagent"
           model: "sensenova-6.8-flash-lite"
           weight: 6
@@ -185,22 +185,17 @@ llm_proxy:
           weight: 4
           max_context_tokens: 1048576
           max_output_tokens: 65536
-        - channel: "opencode-go-secagent"
-          model: "deepseek-v4-flash"
-          weight: 2
-          max_context_tokens: 1048576
-          max_output_tokens: 65536
-        - channel: "deepseek-secagent"
-          model: "deepseek-v4-flash"
-          weight: 1
-          max_context_tokens: 1048576
-          max_output_tokens: 65536
 
     - name: "pool-secagent-heavy"
-      description: "SilkSecAgent 重任务池（23 号方案）：长上下文/多源关联/高失败代价；SenseNova glm-5.2 + deepseek-flash 主力，OpenCode Go 次选，DeepSeek 官方托底"
-      strategy: "priority-health"
+      description: "SilkSecAgent 重任务池（23 号方案）：OpenCode Go 套餐主力（w8，deepseek-v4.1-flash）→ SenseNova 免费链（glm-5.2 w6 -> deepseek-flash w5 -> ds-v4-flash w4）；长上下文/多源关联/高失败代价。2026-09-29 用户指示恢复 Go 主力"
+      strategy: "best-weight"
       sticky_ttl_seconds: 300
       members:
+        - channel: "opencode-go-secagent"
+          model: "deepseek-v4.1-flash"
+          weight: 8
+          max_context_tokens: 1048576
+          max_output_tokens: 65536
         - channel: "sensenova-secagent"
           model: "glm-5.2"
           weight: 6
@@ -214,16 +209,6 @@ llm_proxy:
         - channel: "sensenova-secagent"
           model: "deepseek-v4-flash"
           weight: 4
-          max_context_tokens: 1048576
-          max_output_tokens: 65536
-        - channel: "opencode-go-secagent"
-          model: "deepseek-v4.1-flash"
-          weight: 3
-          max_context_tokens: 1048576
-          max_output_tokens: 65536
-        - channel: "deepseek-secagent"
-          model: "deepseek-v4-flash"
-          weight: 1
           max_context_tokens: 1048576
           max_output_tokens: 65536
 
