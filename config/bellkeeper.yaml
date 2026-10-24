@@ -371,14 +371,14 @@ nats:
 
 # Meilisearch 搜索服务
 meilisearch:
-  url: http://sp-meilisearch:7700
+  url: ${MEILI_URL}
   api_key: ${MEILI_MASTER_KEY}
   index: knowledge_chunks
 
 # RSS 抓取器配置
 rss_fetcher:
   enabled: true
-  rsshub_base_url: "http://sp-rsshub:1200"  # RSSHub 实例地址，以 / 开头的 feed URL 会拼接此地址
+  rsshub_base_url: ${RSSHUB_URL}  # RSSHub 实例地址，以 / 开头的 feed URL 会拼接此地址
 
 # 爬取队列配置
 crawl_queue:
@@ -440,25 +440,25 @@ health:
     - name: n8n
       type: n8n_api
     - name: meilisearch
-      url: http://sp-meilisearch:7700/health
+      url: ${MEILI_HEALTH_URL}
       type: http
     - name: redis
-      url: sp-redis:6379
+      url: ${REDIS_HOSTPORT}
       type: tcp
     - name: memos
-      url: http://sp-memos:5230
+      url: ${MEMOS_URL}
       type: http
     - name: rsshub
-      url: http://sp-rsshub:1200
+      url: ${RSSHUB_URL}
       type: http
     - name: couchdb
-      url: http://sp-couchdb:5984/_up
+      url: ${COUCHDB_URL}
       type: http
     - name: nats
-      url: sp-nats:4222
+      url: ${NATS_HOSTPORT}
       type: tcp
     - name: postgres
-      url: sp-bellkeeper-db:5432
+      url: ${POSTGRES_HOSTPORT}
       type: tcp
     - name: rss_fetcher
       type: internal

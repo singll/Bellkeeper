@@ -1,0 +1,51 @@
+apiVersion: spool/v1alpha1
+kind: Bundle
+metadata:
+  name: bellkeeper
+  class: product
+  version: 2.4.0
+  owner: singll/Bellkeeper
+  labels:
+    io.silkspool.product: bellkeeper
+name: bellkeeper
+type: compose
+templates:
+  - compose.yaml
+services:
+  - bellkeeper
+spec:
+  compatibility:
+    spool: ">=1.2"
+  delivery:
+    driver: compose
+    templates:
+      - compose.yaml
+    artifact:
+      type: image
+      image: ghcr.io/singll/bellkeeper:2.4.0
+      # 发布到 registry 后替换为真实 manifest digest（spool 会在 apply 时固定）。
+      digest: sha256:0000000000000000000000000000000000000000000000000000000000000000
+  outputs:
+    url: "${input.public_url}"
+    health: "${input.public_url}/api/health"
+    internal:
+      kind: endpoint
+      service: bellkeeper
+      port: 8080
+      remote: "${host.magicdns}"
+  lifecycle:
+    health:
+      http: "${outputs.health}"
+      from: container
+      timeout: 120s
+    upgrade:
+      strategy: backup-then-recreate
+      migrate: /app/bellkeeper migrate
+      irreversible: false
+    restore:
+      hook: scripts/restore.sh
+  backup:
+    hook: scripts/backup.sh
+    assets:
+      - type: volume
+        source: kp-bellkeeper-data

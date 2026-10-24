@@ -1,0 +1,23 @@
+name: bellkeeper
+
+services:
+  bellkeeper:
+    image: ghcr.io/singll/bellkeeper:2.4.0
+    restart: unless-stopped
+    ports:
+      - "8090:8080"
+    environment:
+      TZ: Asia/Shanghai
+    volumes:
+      - kp-bellkeeper-data:/app/data
+      - ${BELLKEEPER_KNOWLEDGE_PATH:-/mnt/knowledge}:/mnt/knowledge:rw
+    healthcheck:
+      test: ["CMD-SHELL", "wget -qO- http://127.0.0.1:8080/api/health >/dev/null 2>&1 || exit 1"]
+      interval: 30s
+      timeout: 10s
+      retries: 3
+      start_period: 20s
+
+volumes:
+  kp-bellkeeper-data:
+    name: kp-bellkeeper-data
