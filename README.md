@@ -2,6 +2,7 @@
 
 > **Bellkeeper（钟守者）** 是 SilkSpool 的知识治理中台 + LLM 代理网关 + Matrix 控制平面 + 事件驱动平台。**1.0 已 GA、稳定运行**。
 > 运维一律走 SilkSpool `spool` CLI（禁止裸 ssh/docker/rsync），规则见 [CLAUDE.md](CLAUDE.md) §3。
+> 部署契约与配置示例见 [doc/DEPLOYMENT.md](doc/DEPLOYMENT.md)。
 
 它承担 n8n 工作流做不了的有状态工作：长连接（Matrix sync、LLM 代理）、持久化队列（爬取、解析）、分类与去重、Meilisearch 检索、文件治理。知识真相源是 **Obsidian Vault + Markdown 文件**（`/mnt/knowledge/`），Bellkeeper 从中派生索引、搜索与问答；检索由 Meilisearch 承担，RAGFlow 已完全退役。
 
@@ -164,12 +165,12 @@ bellkeeper/
         Caddy (反向代理, TLS) — 内网 noauth
                     │
    keeper (.230) 应用层                          silkdata (.231) 数据层
-┌───────────────────────────┐   extra_hosts  ┌───────────────────────────────┐
-│  Bellkeeper Backend        │   别名连数据层  │  PgSQL · Meili · NATS · Redis  │
-│  Handler→Service→Repo      │──────────────▶│  CouchDB                       │
-│  + SolidJS 前端（嵌入）     │               │  ──────────────────────────── │
-│  n8n · rsshub · memos      │               │  Prometheus · Loki · Grafana  │
-└─────────────┬─────────────┘               └───────────────────────────────┘
+┌───────────────────────────┐  MagicDNS/endpoint  ┌───────────────────────────────┐
+│  Bellkeeper Backend        │  由 spool wiring    │  PgSQL · Meili · NATS · Redis  │
+│  Handler→Service→Repo      │───────────────────▶│  CouchDB                       │
+│  + SolidJS 前端（嵌入）     │                    │  ──────────────────────────── │
+│  n8n · rsshub · memos      │                    │  Prometheus · Loki · Grafana  │
+└─────────────┬─────────────┘                    └───────────────────────────────┘
               │ firecrawl 端点(3002)
               ▼
    knowledge (.220) firecrawl          /mnt/knowledge（Markdown 知识真相源）
@@ -229,14 +230,29 @@ bellkeeper/
 
 ### 生产 (SilkSpool 集成)
 
+Bellkeeper 以 product bundle 发布（`deploy/bundle.yaml`），由 SilkSpool 的 `knowledge-stack`
+composition 引用；数据层 `silkdata` 是只读 dependency。**不直接 SSH/Docker 操作远程主机。**
+
 ```bash
-# 单服务代码部署（须重建镜像，见 CLAUDE.md §3）
-spool bundle keeper service keeper bellkeeper up
-# 仅重启 / 状态 / 日志
-spool restart keeper bellkeeper
+# 静态校验 / online diff / 可复现部署
+spool plan knowledge-stack keeper --offline
+spool plan knowledge-stack keeper
+spool apply knowledge-stack keeper --locked --yes
+
+# 回滚 / 恢复
+spool rollback knowledge-stack keeper
+spool restore knowledge-stack keeper
+
+# 状态 / 日志 / 单服务重启
+spool inventory --json
 spool service keeper status bellkeeper
-spool logs keeper bellkeeper 100
+spool restart keeper bellkeeper
+spool logs keeper bellkeeper 200
 ```
+
+升级 Bellkeeper：发布新镜像 + 真实 digest → 更新 `bundle_sources` 固定的 commit（或 OCI digest）
+→ `plan --offline` → online plan → `apply --locked --yes`。完整配置见
+[doc/DEPLOYMENT.md](doc/DEPLOYMENT.md)。
 
 线上 Bellkeeper 经 Caddy 暴露：`https://bellkeeper.singll.net`（纯内网解析，noauth 模式）。数据层在 silkdata、观测栈见 [doc/STATUS.md](doc/STATUS.md)。
 
@@ -281,7 +297,7 @@ make docker-build    # Docker 镜像构建
 > **构建产物规范**
 > - 后端二进制：`bin/bellkeeper`（由 Makefile 统一输出，.gitignore 忽略）
 > - 前端静态文件：`web/dist/`（由 Vite 生成，.gitignore 忽略）
-> - 生产镜像：`bellkeeper:latest`
+> - 生产镜像：`ghcr.io/singll/bellkeeper:<version>`（digest 固定在 `deploy/bundle.yaml`）
 
 ### 测试
 
@@ -312,18 +328,21 @@ make swagger         # 生成 Swagger 文档（输出到 api/docs/）
 
 主配置：`config/bellkeeper.yaml`。所有项支持 `BELLKEEPER_` 前缀的环境变量覆盖。运行时配置（API Key、渠道、模型组、Matrix 凭证）统一通过 Web UI 写入 `system_settings` 表 + LLM Proxy 专用表，运行时热重载。
 
-关键环境变量（线上写在 `hosts/keeper/.env`）：
+关键环境变量（线上写在 `hosts/keeper/.env`，由 `knowledge-stack` wiring 注入）：
 
 | 变量 | 用途 |
 |------|------|
-| `DB_PASSWORD` | PostgreSQL 密码 |
+| `BELLKEEPER_DB_PASSWORD` | PostgreSQL 密码（wiring → `BELLKEEPER_DATABASE_PASSWORD`） |
 | `BELLKEEPER_API_KEY` | API 内部调用 Key |
 | `BELLKEEPER_CREDENTIAL_KEY` | 渠道凭证 AES-256-GCM 加密密钥（未设则降级为明文存储并启动告警）|
-| `BELLKEEPER_MATRIX_*` | Matrix Gateway 凭证 |
+| `BELLKEEPER_MATRIX_*` | Matrix Gateway 凭证（或 `MATRIX_*`，按 `config/bellkeeper.yaml`）|
 | `LLM_*_API_KEY` | LLM Proxy 渠道凭证（DashScope、SiliconFlow、DeepSeek、Kimi、Qwen、new-api 等）|
 | `MEILI_MASTER_KEY` | Meilisearch 主密钥 |
+| `REDIS_PASSWORD` | Redis 密码 |
+| `N8N_ENCRYPTION_KEY` / `N8N_API_KEY` | n8n 加密密钥 / API Key |
 
-新增环境变量必须同步在 `bellkeeper-init.sh` 中 `export` 列入运行时上下文。
+> `bellkeeper-init.sh` 只用于本地开发或兼容旧环境；生产环境变量由
+> `hosts/keeper/.env` + `knowledge-stack` wiring 注入，不再挂载 init 脚本。
 
 ## 开发规范
 

@@ -1140,7 +1140,7 @@ server:
 docker compose down
 
 # ✅ 只重启指定服务
-./spool.sh restart bellkeeper
+spool restart keeper bellkeeper
 ```
 
 ---
@@ -1176,9 +1176,9 @@ new_module:
 ### Q2: 如何添加新的环境变量？
 
 1. 在 `.env` 文件中添加变量
-2. 在 `bellkeeper-init.sh` 中添加 `export`
-3. 使用 `spool sync push` 同步到远程
-4. 重启服务
+2. 生产 secret 写入 `hosts/keeper/.env`，并在 `knowledge-stack` wiring 中引用
+3. 本地开发可同步到 `config/bellkeeper-init.sh` 仅作兼容
+4. `spool plan` 校验 → `spool apply knowledge-stack keeper` → 重启/观察
 
 ### Q3: 如何调试 LLM Proxy？
 
@@ -1211,13 +1211,13 @@ curl -X POST http://localhost:8080/api/llm/channels/channel-name/reset \
 cd /home/ubuntu/SilkSpool
 
 # 重启 Bellkeeper
-./spool.sh restart bellkeeper
+spool restart keeper bellkeeper
 
 # 查看日志
-./spool.sh logs bellkeeper 100
+spool logs keeper bellkeeper 200
 
 # 查看状态
-./spool.sh status bellkeeper
+spool service keeper status bellkeeper
 ```
 
 ---
@@ -1335,7 +1335,7 @@ database:
   host: "localhost"
   port: 5432
   user: "bellkeeper"
-  password: "${DB_PASSWORD}"
+  password: "${BELLKEEPER_DATABASE_PASSWORD}"
   dbname: "bellkeeper"
   sslmode: "disable"
 

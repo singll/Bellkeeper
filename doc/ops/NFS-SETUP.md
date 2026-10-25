@@ -10,7 +10,7 @@
 - **数据集**: NAS/data/knowledge
 - **TrueNAS 挂载点**: /mnt/NAS/data/knowledge
 - **宿主机挂载点**: /mnt/NAS/data/knowledge
-- **keeper 宿主机**: 通过 spool.sh exec keeper 访问
+- **keeper 宿主机**: 通过 `spool exec keeper` 访问
 
 ---
 
@@ -64,7 +64,7 @@ python3 lib/core/truenas_rpc.py service.start '"nfs"'
 
 ```bash
 # 在 keeper 宿主机上检查
-./spool.sh exec keeper "showmount -e 192.168.7.121"
+spool exec keeper "showmount -e 192.168.7.121"
 ```
 
 预期输出应包含：
@@ -79,35 +79,35 @@ python3 lib/core/truenas_rpc.py service.start '"nfs"'
 ### 2.1 安装 NFS 客户端
 
 ```bash
-./spool.sh exec keeper "sudo apt-get update && sudo apt-get install -y nfs-common"
+spool exec keeper "sudo apt-get update && sudo apt-get install -y nfs-common"
 ```
 
 ### 2.2 创建挂载点
 
 ```bash
-./spool.sh exec keeper "sudo mkdir -p /mnt/NAS/data/knowledge"
+spool exec keeper "sudo mkdir -p /mnt/NAS/data/knowledge"
 ```
 
 ### 2.3 测试手动挂载
 
 ```bash
-./spool.sh exec keeper "sudo mount -t nfs -o vers=4,rw 192.168.7.121:/mnt/NAS/data/knowledge /mnt/NAS/data/knowledge"
+spool exec keeper "sudo mount -t nfs -o vers=4,rw 192.168.7.121:/mnt/NAS/data/knowledge /mnt/NAS/data/knowledge"
 
 # 验证挂载
-./spool.sh exec keeper "df -h | grep knowledge"
-./spool.sh exec keeper "ls -la /mnt/NAS/data/knowledge"
+spool exec keeper "df -h | grep knowledge"
+spool exec keeper "ls -la /mnt/NAS/data/knowledge"
 ```
 
 ### 2.4 配置自动挂载
 
 ```bash
 # 添加到 /etc/fstab
-./spool.sh exec keeper "echo '192.168.7.121:/mnt/NAS/data/knowledge /mnt/NAS/data/knowledge nfs vers=4,rw,hard,intr,timeo=600,retrans=2,_netdev 0 0' | sudo tee -a /etc/fstab"
+spool exec keeper "echo '192.168.7.121:/mnt/NAS/data/knowledge /mnt/NAS/data/knowledge nfs vers=4,rw,hard,intr,timeo=600,retrans=2,_netdev 0 0' | sudo tee -a /etc/fstab"
 
 # 测试 fstab 配置
-./spool.sh exec keeper "sudo umount /mnt/NAS/data/knowledge"
-./spool.sh exec keeper "sudo mount -a"
-./spool.sh exec keeper "df -h | grep knowledge"
+spool exec keeper "sudo umount /mnt/NAS/data/knowledge"
+spool exec keeper "sudo mount -a"
+spool exec keeper "df -h | grep knowledge"
 ```
 
 **挂载选项说明**:
@@ -123,43 +123,42 @@ python3 lib/core/truenas_rpc.py service.start '"nfs"'
 
 ```bash
 # 检查当前权限
-./spool.sh exec keeper "ls -ld /mnt/NAS/data/knowledge"
+spool exec keeper "ls -ld /mnt/NAS/data/knowledge"
 
 # 如果需要，调整权限（通常 TrueNAS 已设置好）
-# ./spool.sh exec keeper "sudo chown -R 568:568 /mnt/NAS/data/knowledge"
+# spool exec keeper "sudo chown -R 568:568 /mnt/NAS/data/knowledge"
 ```
 
 ---
 
-## 步骤 3: 修改 docker-compose.yaml
+## 步骤 3: 修改 product compose
 
-### 3.1 备份当前配置
+### 3.1 修改 Bellkeeper 仓库
 
-```bash
-./spool.sh exec keeper "cp /opt/silkspool/keeper/docker-compose.yaml /opt/silkspool/keeper/docker-compose.yaml.bak"
-```
-
-### 3.2 添加卷挂载
-
-在 `bellkeeper` 服务的 `volumes` 部分添加：
+在 `deploy/compose.yaml` 的 `bellkeeper` 服务 `volumes` 中保留：
 
 ```yaml
-bellkeeper:
-  # ... 现有配置
-  volumes:
-    - ./bellkeeper-init.sh:/app/scripts/bellkeeper-init.sh:ro
-    - ./.env:/app/config/.env:ro
-    - /mnt/NAS/data/knowledge:/mnt/knowledge:rw  # 新增此行
+volumes:
+  - kp-bellkeeper-data:/app/data
+  - ${BELLKEEPER_KNOWLEDGE_PATH:-/mnt/knowledge}:/mnt/knowledge:rw
 ```
 
-### 3.3 应用配置
+`BELLKEEPER_KNOWLEDGE_PATH` 由 `knowledge-stack` 的 `defaults` / `hosts/keeper/.env` 提供，
+不要把宿主 IP 或 `.env` 路径写进 compose。
+
+### 3.2 发布并应用
+
+1. 提交 Bellkeeper 仓库的 `deploy/` 变更并发布新版本；
+2. 更新 `silkspool.yaml` 中 `bundle_sources.bellkeeper.commit`（或 OCI digest）；
+3. 在 SilkSpool 控制机执行：
 
 ```bash
-# 重建 bellkeeper 容器
-./spool.sh exec keeper "cd /opt/silkspool/keeper && docker compose up -d bellkeeper"
+spool plan knowledge-stack keeper --offline
+spool plan knowledge-stack keeper
+spool apply knowledge-stack keeper --locked --yes
 
 # 验证挂载
-./spool.sh exec keeper "docker exec sp-bellkeeper ls -la /mnt/knowledge"
+spool exec keeper "docker exec sp-bellkeeper ls -la /mnt/knowledge"
 ```
 
 ---
@@ -177,26 +176,26 @@ EOF
 ### 4.2 在宿主机上验证
 
 ```bash
-./spool.sh exec keeper "cat /mnt/NAS/data/knowledge/test.txt"
+spool exec keeper "cat /mnt/NAS/data/knowledge/test.txt"
 ```
 
 ### 4.3 在容器内验证
 
 ```bash
-./spool.sh exec keeper "docker exec sp-bellkeeper cat /mnt/knowledge/test.txt"
+spool exec keeper "docker exec sp-bellkeeper cat /mnt/knowledge/test.txt"
 ```
 
 ### 4.4 测试写入权限
 
 ```bash
-./spool.sh exec keeper "docker exec sp-bellkeeper sh -c 'echo \"Test from container\" > /mnt/knowledge/container-test.txt'"
-./spool.sh exec keeper "cat /mnt/NAS/data/knowledge/container-test.txt"
+spool exec keeper "docker exec sp-bellkeeper sh -c 'echo \"Test from container\" > /mnt/knowledge/container-test.txt'"
+spool exec keeper "cat /mnt/NAS/data/knowledge/container-test.txt"
 ```
 
 ### 4.5 清理测试文件
 
 ```bash
-./spool.sh exec keeper "docker exec sp-bellkeeper rm /mnt/knowledge/test.txt /mnt/knowledge/container-test.txt"
+spool exec keeper "docker exec sp-bellkeeper rm /mnt/knowledge/test.txt /mnt/knowledge/container-test.txt"
 ```
 
 ---
@@ -229,7 +228,7 @@ python3 lib/core/truenas_rpc.py sharing.nfs.query '[]'
 **解决**:
 ```bash
 # 检查容器内用户
-./spool.sh exec keeper "docker exec sp-bellkeeper id"
+spool exec keeper "docker exec sp-bellkeeper id"
 
 # 检查 TrueNAS 文件权限
 python3 lib/core/truenas_rpc.py filesystem.stat '"/mnt/NAS/data/knowledge"'

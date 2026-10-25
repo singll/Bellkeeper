@@ -7,6 +7,7 @@
 
 | 文档 | 内容 |
 |------|------|
+| `doc/DEPLOYMENT.md` | 生产部署契约、knowledge-stack/silkdata、secrets、plan/apply/rollback |
 | `doc/DEVELOPMENT-GUIDE.md` | 完整编码规范、分层职责、禁止事项、验收标准 |
 | `doc/ASSISTANT-GUIDELINES.md` | AI 助手守则（「完成」定义、防死代码/假测试） |
 | `doc/ROADMAP.md` | 演进规划与优先级 |
@@ -38,7 +39,7 @@
 - 异步 goroutine 内 error 必须记录。
 
 ### 2.4 安全
-- **禁止硬编码密钥**，一律从环境变量/配置读取；新增环境变量同步到 `bellkeeper-init.sh`。
+- **禁止硬编码密钥**，一律从环境变量/配置读取；生产 secret 写 `hosts/keeper/.env` 并在 `knowledge-stack` wiring 中引用，不提交。
 - 输入校验 + HTML 清洗（`bluemonday`）；API Key 常量时间比较。
 
 ### 2.5 提交纪律
@@ -53,14 +54,17 @@
 
 | 场景 | 命令 |
 |------|------|
-| 单服务部署 | `spool bundle keeper service keeper bellkeeper up` |
+| 静态校验 | `spool plan knowledge-stack keeper --offline` |
+| online diff | `spool plan knowledge-stack keeper` |
+| 完整部署 | `spool apply knowledge-stack keeper --locked --yes` |
+| 回滚 / 恢复 | `spool rollback knowledge-stack keeper` / `spool restore knowledge-stack keeper` |
 | 仅重启 | `spool restart keeper bellkeeper` |
-| 改配置后重启 | `spool sync push keeper && spool restart keeper bellkeeper` |
-| 状态/日志 | `spool service keeper status bellkeeper` / `spool logs keeper bellkeeper 100` |
-| 完整部署 | `spool bundle keeper up keeper`（耗时~5min，仅代码变更时用） |
+| 状态/日志 | `spool inventory --json` / `spool service keeper status bellkeeper` / `spool logs keeper bellkeeper 200` |
 
-- Bellkeeper 部署在 keeper 主机(`192.168.7.230`)，bundle `keeper`，别名 `bellkeeper`。
-- **禁止** `spool bundle keeper down keeper`——会停全部服务。
+- Bellkeeper 以 product bundle（`deploy/bundle.yaml`）发布，由 `knowledge-stack` composition 部署在 keeper(192.168.7.230)。
+- `silkdata` 是只读 dependency，绝不由 `knowledge-stack apply` 升级/回滚。
+- **禁止** `spool bundle keeper down keeper`——会停全部服务；也禁止直接 `docker compose down -v`。
+- 旧命令 `spool bundle keeper ...` 仅为兼容 alias，已弃用；统一用 `knowledge-stack`。
 
 ## 4. 上下文溢出防护
 

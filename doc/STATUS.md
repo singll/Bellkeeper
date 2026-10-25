@@ -1,6 +1,6 @@
 # Bellkeeper 运行状态
 
-> 最后更新: 2026-07-30 · **1.0 已 GA，系统进入稳定运行状态**
+> 最后更新: 2026-10-24 · **1.0 已 GA；部署已切到 SilkSpool knowledge-stack**
 >
 > 本文档记录**当前线上真实状态**。历史演进见 [TIMELINE.md](TIMELINE.md)；架构细节见 [ARCHITECTURE.md](ARCHITECTURE.md)；待办见 [ROADMAP.md](ROADMAP.md)。
 
@@ -33,7 +33,7 @@
 | **istoreos** | 192.168.7.1 | 路由器 | 网关 | openclash 透明代理、caddy 反代(TLS)、dnsmasq、tailscaled 子网路由（advertise 192.168.7.0/24） |
 | **txhk** | 腾讯云 HK | 2核3.6G | Matrix + VPN 控制面 | **tuwunel**(Matrix)、authelia、**headscale 控制面**、caddy、tailscaled、rdp-gateway（全 systemd 裸进程，无 docker） |
 
-**部署形态**：keeper 只跑无状态应用，靠 `extra_hosts` 别名（`sp-*` + 裸名 → 192.168.7.231）连数据层，连接串零硬编码。发版重建 keeper 镜像不影响数据层；数据层可独立备份/快照。知识文件经 **NFS4 从 TrueNAS(192.168.7.121) 挂载**至 keeper 宿主 `/mnt/NAS/data/knowledge`，再 bind 进容器 `/mnt/knowledge`。运维一律走 SilkSpool `spool` CLI（见根 CLAUDE.md §3）。
+**部署形态**：keeper 只跑无状态应用，由 SilkSpool `knowledge-stack` composition 部署；数据层 `silkdata` 是只读 dependency，通过 endpoint wiring（同机服务名 / 跨机 MagicDNS，缺失时回退 address）连接，连接串零硬编码、无 `extra_hosts` IP。发版重建 keeper 镜像不影响数据层；数据层可独立备份/快照。知识文件经 **NFS4 从 TrueNAS(192.168.7.121) 挂载**至 keeper 宿主 `/mnt/NAS/data/knowledge`，再 bind 进容器 `/mnt/knowledge`。运维一律走 SilkSpool `spool` CLI（见根 CLAUDE.md §3），配置见 [DEPLOYMENT.md](DEPLOYMENT.md)。
 
 ---
 
@@ -123,6 +123,7 @@ RSS(rsshub + 官方直连) ─→ 后端 RSSFetcherService(fetch+enqueue)
 
 ## 文档导航
 
+- [DEPLOYMENT.md](DEPLOYMENT.md) — product bundle、knowledge-stack/silkdata 配置与 plan/apply/rollback
 - [TIMELINE.md](TIMELINE.md) — 演进时间线与技术栈选型（历史）
 - [ARCHITECTURE.md](ARCHITECTURE.md) — 架构、模块职责、数据模型、关键链路
 - [ROADMAP.md](ROADMAP.md) — 演进待办

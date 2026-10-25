@@ -97,7 +97,7 @@ Bellkeeper/
 │   └── service/                # 业务逻辑层(含 kb_* 事件 worker + PromptLoader + SafeGo)
 ├── config/
 │   ├── bellkeeper.yaml         # 默认配置(含 NATS 6 条 stream + 爬取阈值)
-│   ├── bellkeeper-init.sh      # 环境变量初始化清单
+│   ├── bellkeeper-init.sh      # 旧本地/兼容环境变量清单（生产由 wiring 注入）
 │   ├── pkb/                    # PKB 领域配置 + 提示词包 + eval 评估集
 │   ├── prompts/                # **1.0 新增** 非 PKB 专属提示词外置(classify/ask/rule_optimizer + registry)
 │   └── rss-sources.json        # RSS 源配置(数据资产)
@@ -211,12 +211,19 @@ n8n 定时触发 → POST /api/reports/daily/generate
 | 抓取 | knowledge (192.168.7.220) | firecrawl（api/playwright/db/rabbitmq，端点 3002） |
 | 存储 | TrueNAS (192.168.7.121) | 经 NFS4 向 keeper 提供 `/mnt/NAS/data/knowledge`（知识 raw/archive/vault 落盘真源） |
 
-应用靠 `extra_hosts` 别名（`sp-*` + 裸名 → 192.168.7.231）连数据层，连接串零硬编码；发版重建 keeper 镜像不影响数据层。完整主机拓扑见 [STATUS.md](STATUS.md)。
+应用与数据层通过 SilkSpool `knowledge-stack` 的 endpoint wiring 连接：同机服务名 /
+跨机 Headscale MagicDNS（缺失时回退 `address`）；模板不写 IP，也不依赖 `extra_hosts`。
+发版重建 keeper 镜像不影响数据层。完整配置见 [DEPLOYMENT.md](DEPLOYMENT.md)，主机拓扑见 [STATUS.md](STATUS.md)。
 
 ```bash
-spool bundle keeper service keeper bellkeeper up   # 单服务代码部署（须重建镜像，见下）
-spool restart keeper bellkeeper                    # 仅重启
-spool logs keeper bellkeeper 100                   # 日志
+spool plan knowledge-stack keeper --offline   # 静态校验
+spool plan knowledge-stack keeper             # online diff
+spool apply knowledge-stack keeper --locked --yes
+spool rollback knowledge-stack keeper         # 回滚上一 generation
+spool restart keeper bellkeeper               # 仅重启
+spool logs keeper bellkeeper 200              # 日志
 ```
 
-> ⚠️ 代码变更部署须**重建镜像**：`spool bundle keeper up keeper` 若见 `bellkeeper:latest` 已存在会复用旧镜像。可靠路径见根 CLAUDE.md §3 与运维记忆。运维一律走 `spool` CLI，禁止裸 ssh/docker。
+> Bellkeeper 以 product bundle（`deploy/bundle.yaml`）发布；`knowledge-stack` 只 apply keeper 上的
+> components，`silkdata` 只读 dependency。旧 `keeper` bundle 命令仅为兼容 alias，已弃用。
+> 运维一律走 `spool` CLI，禁止裸 ssh/docker。

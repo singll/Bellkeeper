@@ -26,8 +26,11 @@ spec:
       # 发布到 registry 后替换为真实 manifest digest（spool 会在 apply 时固定）。
       digest: sha256:0000000000000000000000000000000000000000000000000000000000000000
   outputs:
+    # 独立 apply 时必须由 host inputs 提供；作为 knowledge-stack component 时
+    # component.outputs 会覆盖本段，不依赖 public_url。
     url: "${input.public_url}"
-    health: "${input.public_url}/api/health"
+    # 容器内健康检查，不依赖公网域名。
+    health: "http://127.0.0.1:8080/api/health"
     internal:
       kind: endpoint
       service: bellkeeper
@@ -39,8 +42,8 @@ spec:
       from: container
       timeout: 120s
     upgrade:
+      # 迁移由 Bellkeeper 启动时 AutoMigrate 负责；spool 只保证升级前备份。
       strategy: backup-then-recreate
-      migrate: /app/bellkeeper migrate
       irreversible: false
     restore:
       hook: scripts/restore.sh
