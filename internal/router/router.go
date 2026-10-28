@@ -199,6 +199,9 @@ func registerLLMProxyRoutes(r *gin.Engine, api *gin.RouterGroup, h *handler.LLMP
 	cfg.POST("/channels", h.CreateChannel)
 	cfg.PUT("/channels/:id", h.UpdateChannel)
 	cfg.DELETE("/channels/:id", h.DeleteChannel)
+	cfg.POST("/channels/:id/test", h.TestChannelConnection)
+	cfg.GET("/channels/:id/models", h.DiscoverChannelModels)
+	cfg.GET("/models", h.ListModelCatalog)
 
 	// Channel credentials (encrypted at rest, Tier 6)
 	cfg.GET("/channels/:id/credentials", h.ListChannelCredentials)

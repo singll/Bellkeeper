@@ -52,7 +52,7 @@ func (ch *Channel) EWMALatency() float64 {
 // prepareUpstreamRequest is the single request-preparation path shared by the
 // buffered and streaming paths, so protocol conversion, vendor hooks and auth
 // headers can never drift between them.
-func (s *LLMProxyService) prepareUpstreamRequest(
+func prepareUpstreamRequest(
 	ch *Channel,
 	method, path string,
 	headers http.Header,
@@ -125,7 +125,7 @@ func (s *LLMProxyService) tryChannel(
 			return 429, []byte(`{"error":"rate limit: bucket exhausted after retries"}`), nil, nil
 		}
 
-		req, prep, adapter, err := s.prepareUpstreamRequest(ch, method, path, headers, body)
+		req, prep, adapter, err := prepareUpstreamRequest(ch, method, path, headers, body)
 		if err != nil {
 			return 400, []byte(`{"error":"upstream request preparation failed"}`), nil, err
 		}
@@ -225,7 +225,7 @@ func (s *LLMProxyService) tryChannelStream(
 		}
 	}
 
-	req, prep, adapter, err := s.prepareUpstreamRequest(ch, method, path, headers, body)
+	req, prep, adapter, err := prepareUpstreamRequest(ch, method, path, headers, body)
 	if err != nil {
 		return nil, fmt.Errorf("prepare stream request: %w", err)
 	}

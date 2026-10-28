@@ -256,6 +256,62 @@ func (h *LLMProxyHandler) ListChannels(c *gin.Context) {
 	response.Success(c, channels)
 }
 
+// ListModelCatalog returns all registered (channel, model) pairs with their
+// protocol/vendor metadata and model-group capability limits. It never exposes
+// credentials.
+func (h *LLMProxyHandler) ListModelCatalog(c *gin.Context) {
+	catalog, err := h.config.ListModelCatalog()
+	if err != nil {
+		response.InternalError(c, err.Error())
+		return
+	}
+	response.Success(c, catalog)
+}
+
+// TestChannelConnection probes a saved channel/model. The request body is
+// optional: {"model":"..."} selects a model, otherwise the first configured
+// model is used. The result is diagnostic only — no billing, usage, bucket or
+// health state is touched.
+func (h *LLMProxyHandler) TestChannelConnection(c *gin.Context) {
+	id, err := strconv.ParseUint(c.Param("id"), 10, 32)
+	if err != nil {
+		response.BadRequest(c, "invalid id")
+		return
+	}
+	var req struct {
+		Model string `json:"model"`
+	}
+	if c.Request.Body != nil {
+		if err := c.ShouldBindJSON(&req); err != nil && !errors.Is(err, io.EOF) {
+			response.BadRequest(c, err.Error())
+			return
+		}
+	}
+	result, err := h.svc.TestChannelConnection(uint(id), req.Model)
+	if err != nil {
+		response.InternalError(c, err.Error())
+		return
+	}
+	response.Success(c, result)
+}
+
+// DiscoverChannelModels asks the upstream for its model list and merges it with
+// the channel's registered models. On failure the configured list is returned
+// with an explicit warning.
+func (h *LLMProxyHandler) DiscoverChannelModels(c *gin.Context) {
+	id, err := strconv.ParseUint(c.Param("id"), 10, 32)
+	if err != nil {
+		response.BadRequest(c, "invalid id")
+		return
+	}
+	result, err := h.svc.DiscoverChannelModels(uint(id))
+	if err != nil {
+		response.InternalError(c, err.Error())
+		return
+	}
+	response.Success(c, result)
+}
+
 func (h *LLMProxyHandler) CreateChannel(c *gin.Context) {
 	var ch model.LLMChannel
 	if err := c.ShouldBindJSON(&ch); err != nil {

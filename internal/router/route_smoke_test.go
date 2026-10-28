@@ -28,6 +28,9 @@ func TestLLMRouteRegistration(t *testing.T) {
 		"POST /api/llm/config/channels/:id/credentials",
 		"PUT /api/llm/config/credentials/:id",
 		"DELETE /api/llm/config/credentials/:id",
+		"GET /api/llm/config/models",
+		"POST /api/llm/config/channels/:id/test",
+		"GET /api/llm/config/channels/:id/models",
 		"GET /api/llm/channels/:name/balance/history",
 	}
 	for _, w := range want {
