@@ -273,6 +273,7 @@ llm_proxy:                     # LLM 网关始终启用（旧 enabled 开关已�
       rpd: 20000
       quota_window_seconds: 18000  # 5h 滚动积分窗（SenseNova 公测 5h/周双积分池）
       priority: 1
+      is_free: true
       models:
         - deepseek-flash             # 主力（28 号补丁更正：v4.1 真实 ID 是 deepseek-flash）
         - deepseek-v4-flash
