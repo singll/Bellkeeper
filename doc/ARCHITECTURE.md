@@ -1,6 +1,6 @@
 # Bellkeeper 架构文档（1.0 终态）
 
-> 更新日期: 2026-07-26
+> 更新日期: 2026-10-28
 > 状态标注: ✅ 已实施 | 🔶 运维待建 | 📋 规划中
 > 当前状态见 [STATUS.md](STATUS.md)；历史演进见 [TIMELINE.md](TIMELINE.md)
 
@@ -17,7 +17,7 @@ Bellkeeper 是 SilkSpool 的**知识治理中台 + LLM 代理网关 + Matrix 控
 | 能力 | 状态 | 说明 |
 |------|------|------|
 | **事件总线 NATS JetStream** | ✅ | `internal/eventbus/` 一级共享基础设施；6 条 stream（notifications/knowledge/llm/matrix/system/logs）；Event envelope 契约（ULID+TraceID）；禁止绕过直连 |
-| LLM 代理池 | ✅ | `internal/llmgateway/` 独立包；Gateway 进程内直调接口（Chat/Rerank）；多 provider 路由、熔断、粘性、自适应限流学习、计费、余额、Anthropic/Gemini/Rerank 协议转换；对外 OpenAI 兼容 API `/api/llm/v1/*`；详见 [LLM-GATEWAY-API.md](LLM-GATEWAY-API.md) |
+| LLM 代理池 | ✅ | `internal/llmgateway/` 独立包；Gateway 进程内直调接口（Chat/ChatStream/Rerank）；多渠道路由、熔断、粘性、自适应限流学习、计费、余额；运行时协议仅 `openai` / `anthropic` / `rerank`，vendor 与 protocol 分离；对外 OpenAI 兼容 API `/api/llm/v1/*`；详见 [LLM-GATEWAY-API.md](LLM-GATEWAY-API.md) |
 | LLM 持久任务队列(`llm_jobs`) | ✅ | 事件驱动（`llm.job.submit` NATS 事件 + DB 状态机）；原子 claim 反防重；recovery 兜底重投 |
 | 个人知识库 PKB | ✅ | `pkb-curate` CLI: 漏斗（raw/archive/vault）+ 原子化重构 + digest 综述 + golden set 评估；全闭环无人值守（Scheduler 驱动 + 域管理）；P2 骨架/缺口/闸审核 + 资讯库闸；提示词外置 `config/pkb/prompts/` |
 | 文件入库与治理 | ✅ | Trafilatura 主力 + Firecrawl 兜底,Markdown + frontmatter 落盘 `/mnt/knowledge/` |
@@ -59,7 +59,7 @@ Bellkeeper 是 SilkSpool 的**知识治理中台 + LLM 代理网关 + Matrix 控
 | 认证 | noauth(纯内网);LLM Token 鉴权独立保留 |
 | 监控/日志 | Prometheus `/metrics` + Zap（JSON 结构化 stdout）；**M6 观测栈：Prometheus+Loki+Grafana@silkdata + 三机 cAdvisor/Promtail**；TraceID 全链路 |
 | 部署 | Docker 多阶段构建,SilkSpool `spool` 编排 |
-| 迁移 | golang-migrate(显式迁移 005-007) + GORM AutoMigrate |
+| 迁移 | golang-migrate(显式迁移 005-009) + GORM AutoMigrate |
 
 ---
 
@@ -74,11 +74,18 @@ Bellkeeper/
 │   ├── config/                 # Viper 配置加载
 │   ├── eventbus/               # **1.0 新增** NATS JetStream 一级共享事件总线（6 条 stream + Event 契约）
 │   ├── handler/                # HTTP 处理器(按业务域拆分,31 个文件)
-│   ├── llmgateway/             # **1.0 重组** LLM 代理池独立包（从 llm/+service/llm_*.go 迁入）
-│   │   ├── balance/            #   真实余额 provider
-│   │   ├── converter/          #   Gemini/Anthropic 协议转换
-│   │   ├── errors/             #   错误码语义化分类(驱动熔断)
-│   │   ├── gateway.go          #   Gateway 进程内直调接口(Chat/Rerank)
+│   ├── llmgateway/             # **1.0 重组** LLM 代理池独立包（P1 按职责拆分）
+│   │   ├── balance/            #   真实余额 provider（Kind: usd/fraction/quota）
+│   │   ├── converter/          #   Anthropic ↔ OpenAI 协议转换 + SSE
+│   │   ├── errors/             #   vendor 驱动的错误语义分类（驱动熔断）
+│   │   ├── gateway.go          #   Gateway 进程内直调（Chat/ChatStream/Rerank）
+│   │   ├── llm_adapter.go      #   UpstreamAdapter：协议/鉴权/转换/错误/探测统一入口
+│   │   ├── llm_service.go      #   LLMProxyService 生命周期 + Options/Repos
+│   │   ├── llm_runtime.go      #   DB→内存快照、Reload、凭证解析
+│   │   ├── llm_proxy_request.go#   缓冲路由 + 4xx failover
+│   │   ├── llm_stream.go       #   流式路由 + 流式 failover
+│   │   ├── llm_upstream.go     #   渠道、统一上游请求、重试/退避
+│   │   ├── llm_config_service.go#  渠道/模型组/凭证写管理（LLMConfigService）
 │   │   └── admin.go            #   TokenScopeService + LLMAdminService 管理面
 │   ├── llmclient/              # 内部统一 LLM 调用 SDK(进程外,供 CLI/n8n)
 │   ├── pkb/                    # PKB 编排(curator/score/reconstruct/digest/scheduler/eval)
@@ -120,7 +127,8 @@ Bellkeeper/
 | 爬取 | `crawl_failures` | 失败档案事件（→ events 域名健康度 worker） |
 | 爬取 | `crawl_extraction_rules` / `crawl_rule_trials` | LLM 生成的提取规则及试用记录 |
 | RSS | `rss_feeds` | 订阅源(fetch_interval、RSSHub 参数) |
-| LLM | `llm_channels` / `llm_model_groups` | 渠道与虚拟模型组(DB 动态配置) |
+| LLM | `llm_channels` / `llm_model_groups` | 渠道（含 protocol/vendor、quota_window_seconds）与虚拟模型组(DB 动态配置) |
+| LLM | `llm_model_group_members` | 组成员（含 max_context_tokens / max_output_tokens 能力约束） |
 | LLM | `llm_tokens` / `llm_token_usage_daily` | 调用方 Token 与日用量 |
 | LLM | `llm_model_pricing` / `llm_proxy_logs` | 定价;请求日志(cost/cached) |
 | LLM | `llm_channel_credentials` / `llm_channel_balance_snapshots` | 加密凭证;余额快照 |
@@ -156,9 +164,26 @@ Obsidian ← LiveSync(CouchDB) ← vault/
 
 ### LLM 代理
 
-进程内调用方（KB/Agent/日报/分类/RSS 规则优化）经 `llmgateway.Gateway` 接口直调，
-绕 HTTP+Token 鉴权但保留路由/熔断/限流；外部客户端（CLI/n8n）仍经 `POST /api/llm/v1/*`
-OpenAI 兼容协议 + Bearer Token 鉴权。详见 [LLM-GATEWAY-API.md](LLM-GATEWAY-API.md)。
+```
+外部 CLI/n8n → POST /api/llm/v1/*（OpenAI 兼容入口 + LLMTokenAuth）
+进程内调用方 → Gateway.Chat/ChatStream/Rerank（绕 HTTP+鉴权，保留路由/熔断/限流/计费）
+  → ProxyRequest / ProxyStreamRequest
+      ├─ /v1/rerank → 仅 provider_type=rerank 渠道
+      ├─ 模型组 → 任务分层/粘性/balance_aware → 成员 (channel, model)
+      └─ 直连 → 模型名匹配渠道（priority 排序）
+  → UpstreamAdapter（openai/anthropic/rerank）
+      PrepareRequest → ApplyAuth → tryChannel/tryChannelStream
+  → 2xx 成功；非 2xx 记录 vendor 错误分类后换下一个成员，最后透传真实上游响应
+```
+
+- **protocol 与 vendor 分离**：`provider_type` 只决定请求/响应格式与鉴权；`vendor` 决定错误语义、余额口径与厂商 hook（DeepSeek reasoning 剥离、OpenCode Go session 头）。
+- **健康影响**：`context_too_long` / `max_output_exceeded` 不计渠道健康；成员级配额类错误只冷却 `(channel, model)`。
+- **余额路由**：`balance.Kind` 区分 `usd` / `fraction` / `quota`，`balance_aware` 按同量纲归一化后再评分。
+- **配置写入**：渠道/模型组/凭证由 `LLMConfigService` 写入并触发 `Reload()`；`LLMProxyService` 只读快照与运行时。
+- **始终启用**：`llm_proxy.enabled` 已移除，LLM 网关随服务启动。
+- **迁移**：`009_llm_runtime_columns` 增加 vendor/quota_window_seconds/max_context_tokens/max_output_tokens。
+
+详见 [LLM-GATEWAY-API.md](LLM-GATEWAY-API.md)。
 
 ### NATS 事件总线
 

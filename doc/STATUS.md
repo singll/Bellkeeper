@@ -1,6 +1,6 @@
 # Bellkeeper 运行状态
 
-> 最后更新: 2026-10-24 · **1.0 已 GA；部署已切到 SilkSpool knowledge-stack**
+> 最后更新: 2026-10-28 · **1.0 已 GA；部署已切到 SilkSpool knowledge-stack**
 >
 > 本文档记录**当前线上真实状态**。历史演进见 [TIMELINE.md](TIMELINE.md)；架构细节见 [ARCHITECTURE.md](ARCHITECTURE.md)；待办见 [ROADMAP.md](ROADMAP.md)。
 
@@ -59,7 +59,7 @@ RSS(rsshub + 官方直连) ─→ 后端 RSSFetcherService(fetch+enqueue)
   └→ 资讯早报 08:00(6-6周期·同源落资讯库) / 系统日报 21:00 (DailyReportService) ─→ Matrix 推送
 ```
 
-- **LLM**：进程内调用方（KB/Agent/日报/分类/规则优化）经 `llmgateway.Gateway` 直调；外部（CLI/n8n）经 `/api/llm/v1/*` OpenAI 兼容 + Token 鉴权。
+- **LLM**：进程内调用方（KB/Agent/日报/分类/规则优化）经 `llmgateway.Gateway` 直调；外部（CLI/n8n）经 `/api/llm/v1/*` OpenAI 兼容 + Token 鉴权；渠道协议仅 openai/anthropic/rerank，vendor 决定错误语义与余额口径。
 - **Matrix**：告警推送 + Agent 问答（chat 知识库 / direct 直连大模型两类房间）+ 命令路由。
 - **知识真相源**：Obsidian Vault（Markdown），经 CouchDB LiveSync 同步。
 
@@ -73,7 +73,7 @@ RSS(rsshub + 官方直连) ─→ 后端 RSSFetcherService(fetch+enqueue)
 | 事件总线 | ✅ 1.0 | `internal/eventbus/` NATS JetStream 一级共享；6 stream + Event 契约（ULID+TraceID） |
 | Bellkeeper 后端 | ✅ 1.0 | eventbus 贯穿；llmgateway 独立包 + 进程内直调；KB 链路事件化；trace_id 全链路 |
 | Bellkeeper 前端 | ✅ 1.0 | SolidJS SPA；Matrix 7→2 页；爬取队列可视化；知识总览/骨架/问答/搜索；问答 SSE 流式 |
-| LLM 代理 | ✅ 1.0 | `internal/llmgateway/`；多 provider 路由/熔断/粘性/自适应限流学习/计费/真实余额；Anthropic/Gemini/Rerank 协议转换 |
+| LLM 代理 | ✅ 1.0 | `internal/llmgateway/`；多渠道路由/熔断/粘性/自适应限流学习/计费/真实余额；协议仅 openai/anthropic/rerank；vendor 与 protocol 分离；P1 运行时拆分 + 管理面下沉 |
 | LLM 持久队列 | ✅ 1.0 | `llm_jobs` DB 状态机 + `llm.job.submit` 事件驱动 + 原子 claim + recovery 兜底 |
 | 个人知识库 PKB | ✅ | `pkb-curate` 漏斗 + 原子化重构 + 知识骨架/双库 + 自动闭环调度 + golden set 评估；提示词外置 |
 | 爬取与提取 | ✅ 1.0 | DequeueFair 公平调度 + 域名冷却/健康度 + 三 worker 事件链 + LLM 规则优化 + recrawl 去重 |

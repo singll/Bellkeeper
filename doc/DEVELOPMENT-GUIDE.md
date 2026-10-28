@@ -1,7 +1,7 @@
 # Bellkeeper 开发指南
 
 > **面向对象**: 初级开发者
-> **最后更新**: 2026-07-26
+> **最后更新**: 2026-10-28
 > **适用版本**: 1.0 GA（稳定运行）
 >
 > 本文档是 Bellkeeper 项目的完整开发指南，包含架构说明、开发规范、禁止事项和验收标准。
@@ -150,14 +150,14 @@ make docker-down    # Docker Compose 停止
 
 | 对象 | 规范 | 示例 |
 |------|------|------|
-| 文件名 | 小写 + 下划线 | `llm_proxy.go`, `file_ingestion.go` |
+| 文件名 | 小写 + 下划线 | `llm_runtime.go`, `file_ingestion.go` |
 | 包名 | 小写单词 | `service`, `handler`, `repository` |
 | 结构体 | 大驼峰 | `LLMProxyService`, `TokenBucket` |
 | 公开方法 | 大驼峰 | `GetChannel()`, `TryAcquire()` |
 | 私有方法 | 小驼峰 | `selectChannel()`, `doCleanup()` |
 | 常量 | 大驼峰 | `DefaultTimeout`, `MaxRetries` |
 | 接口 | er 结尾或名词 | `Handler`, `Repository` |
-| 测试文件 | `*_test.go` | `llm_proxy_test.go` |
+| 测试文件 | `*_test.go` | `llm_adapter_test.go` |
 
 ### 错误处理规范
 
@@ -1189,6 +1189,9 @@ curl http://localhost:8080/api/llm/channels/status -H "X-API-Key: your-key"
 # 查看模型组状态
 curl http://localhost:8080/api/llm/groups/status -H "X-API-Key: your-key"
 
+# 查看渠道配置（含 protocol/vendor/models，密钥仅掩码）
+curl http://localhost:8080/api/llm/config/channels -H "X-API-Key: your-key"
+
 # 查看请求日志
 curl http://localhost:8080/api/llm/logs?limit=10 -H "X-API-Key: your-key"
 
@@ -1344,8 +1347,7 @@ logging:
   format: "json"       # json / text
   output: "stdout"     # stdout / file
 
-llm_proxy:
-  enabled: true
+llm_proxy:            # LLM 网关始终启用，无 enabled 开关
   default_timeout: 60
   max_retries: 3
   default_bucket_rpm: 60
@@ -1392,10 +1394,10 @@ file_ingestion:
 git log --oneline -20
 
 # 查看某个文件的修改历史
-git log --follow -p -- internal/service/llm_proxy.go
+git log --follow -p -- internal/llmgateway/llm_proxy_request.go
 
 # 查看谁修改了某一行
-git blame internal/service/llm_proxy.go
+git blame internal/llmgateway/llm_proxy_request.go
 
 # 创建功能分支
 git checkout -b feature/bookmark-module

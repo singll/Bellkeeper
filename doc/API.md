@@ -102,13 +102,15 @@
 |------|------|------|
 | ANY | `/api/llm/v1/*path` | OpenAI 兼容代理(chat/completions、rerank 等;LLM Token 鉴权;响应透传) |
 
+> 运行时协议仅 `openai` / `anthropic` / `rerank`。渠道的 `provider_type` 表示协议，`vendor` 表示厂商；错误分类与余额口径按 vendor 处理。完整契约见 [LLM-GATEWAY-API.md](LLM-GATEWAY-API.md)。
+
 ## LLM Proxy(管理,前缀 `/api/llm`)
 
 | 方法 | 路径 | 说明 |
 |------|------|------|
 | GET | `/channels/status` `/health` `/groups/status` `/stats` `/logs` `/rate-limit-events` `/alerts` | 运行时状态与日志 |
 | POST / DELETE | `/channels/:name/reset` / `/groups/:name/sticky` | 重置熔断 / 清粘性 |
-| CRUD | `/config/channels[/:id]`、`/config/groups[/:id]` | 渠道 / 模型组配置(DB,热重载) |
+| CRUD | `/config/channels[/:id]`、`/config/groups[/:id]` | 渠道 / 模型组配置(DB,热重载;渠道含 protocol/vendor/quota_window_seconds,组成员含 context/output 上限) |
 | CRUD | `/config/channels/:id/credentials`、`/config/credentials/:id` | 加密凭证 |
 | POST | `/reload` | 配置热重载 |
 | GET / POST | `/channels/:name/balance[/history]`、`/balances` / `/balances/refresh` | 余额查询 / 刷新 |

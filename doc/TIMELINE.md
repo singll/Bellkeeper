@@ -27,7 +27,7 @@
 - 前端四大域重构；CrawlQueue 上线；检索切换 Meilisearch；Matrix Gateway 上线；**RAGFlow 退役启动**。
 
 ### 2026-05-30 ~ 06-01 · LLM Proxy 地基
-- LLM Proxy Tier 0–9 审计整改：Token / 计费 / 余额 / 路由 / 粘性 / 限流 / 熔断 / 告警 / Gemini / Rerank。
+- LLM Proxy Tier 0–9 审计整改：Token / 计费 / 余额 / 路由 / 粘性 / 限流 / 熔断 / 告警 / Anthropic / Rerank。
 
 ### 2026-06-06 ~ 06-09 · PKB MVP + 优化冲刺
 - **PKB MVP**：三层存储（raw/archive/vault）+ `pkb-curate` CLI + digest 综述 + 提示词外置 + `llm_jobs` 队列 + n8n 纳管。
@@ -75,6 +75,12 @@
 ### 2026-07-26 · M6 可观测性 —— 1.0 里程碑收官
 - 观测栈上线：**Prometheus + Loki + Grafana@silkdata** + 三机 cAdvisor/Promtail，`grafana.singll.net`。
 - **1.0 里程碑（M1–M6）全部完成，系统进入稳定运行状态。**
+
+### 2026-10-28 · LLM 网关 P0/P1 收口
+- vendor 与 protocol 边界分离：protocol 仅 `openai` / `anthropic` / `rerank`，vendor 驱动错误语义/余额/厂商 hook。
+- `llmgateway` 运行时按职责拆分，`UpstreamAdapter` 统一缓冲/流式准备、鉴权、转换、SSE、错误分类与探测。
+- 缓冲/流式一致 4xx failover、最后上游错误透传；`context_too_long` / `max_output_exceeded` 不计健康；余额按 `Kind` 同量纲归一化。
+- 管理面下沉 `LLMConfigService`；移除 `llm_proxy.enabled`；migration 009 增加 vendor/quota/context/output 列。
 
 ---
 

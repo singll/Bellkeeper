@@ -54,7 +54,7 @@ llm_job_queue:
   recovery_interval_minutes: 5
   job_timeout_seconds: 600
 
-llm_proxy:
+llm_proxy:                     # LLM 网关始终启用（旧 enabled 开关已移除）
   default_timeout: 60
   max_retries: 3
   balance_sync_interval: 300   # 余额/额度窗口同步间隔（秒）；OpenCode Go 用量 API 等
@@ -127,6 +127,8 @@ llm_proxy:
           model: "kimi-k2.6"
           weight: 2
 
+    # 组成员 max_context_tokens / max_output_tokens：0=未知；上下文不足的成员会被跳过，
+    # 输出上限会被用于封顶请求的 max_tokens（超限 400 不计渠道健康）。
     - name: "pool-secagent"
       description: "SilkSecAgent 漏洞/侦察任务专用池：OpenCode Go 套餐主力（w8，deepseek-v4.1-flash 优先）→ Go 限流/熔断/额度告急时顺延 SenseNova 免费链（deepseek-flash w7 -> glm-5.2 w6 -> flash-lite w5 -> ds-v4-flash w4）；超长请求自动跳过小窗口成员。2026-09-29 用户指示恢复 Go 主力（套餐可用但零消耗）"
       strategy: "best-weight"
@@ -211,6 +213,8 @@ llm_proxy:
           max_context_tokens: 1048576
           max_output_tokens: 65536
 
+  # 渠道：provider_type 仅表示协议（openai/anthropic/rerank）；vendor 表示厂商，
+  # 决定错误语义/余额口径/特殊 hook（留空按 base_url 推断）。models 只登记上游真实模型名。
   channels:
     - name: siliconflow-qwen3-8b
       base_url: https://api.siliconflow.cn

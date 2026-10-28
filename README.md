@@ -22,12 +22,14 @@
 
 ### LLM 代理池
 
-- **多渠道路由** — SiliconFlow、DashScope、DeepSeek、Moonshot、Kimi Code、new-api 系、Gemini 等，DB 动态配置 + 热重载
+- **多渠道路由** — SiliconFlow、DashScope、DeepSeek、Moonshot、Kimi Code、new-api 系、OpenCode Go 等，DB 动态配置 + 热重载
+- **协议与厂商分离** — 运行时协议仅 `openai` / `anthropic` / `rerank`；`vendor` 决定厂商错误语义、余额口径与特殊 hook，`provider_type` 只决定请求/响应格式
 - **虚拟模型组** — `pool-chat-free` / `pool-chat-balanced` / `pool-summary` / `pool-pkb` 等，任务感知分层路由（coding 按复杂度选 tier）、`least_latency` / `balance_aware` 多策略
-- **协议转换** — OpenAI 兼容入口，渠道侧转换 Anthropic（含 tool use 与流式）/ Gemini；`/v1/rerank` 端点
+- **协议转换** — OpenAI 兼容入口，渠道侧转换 Anthropic（含 tool use 与流式 SSE）；`/v1/rerank` 端点
 - **Token 体系与计费** — 调用方专用 Token（模型白名单 + 配额）、定价表 + cached tokens 折扣计费、用量聚合
-- **真实余额同步** — DeepSeek / Moonshot / new-api 系 / 阿里云 BSS 余额拉取，估算 vs 真实对比
-- **限速与熔断** — 令牌桶 RPM/RPD + 429 自适应限流学习；错误码语义化熔断（配额/认证/限流分类）
+- **真实余额同步** — DeepSeek / Moonshot / new-api 系 / 阿里云 BSS / OpenCode Go 用量 API；`Kind` 区分 usd/fraction/quota
+- **限速与熔断** — 令牌桶 RPM/RPD + 429 自适应限流学习；vendor 语义化错误分类（配额/认证/限流/余额）
+- **配置与向导** — 渠道模型清单驱动模型组/定价下拉联动；连接验证由后台 1-token 恢复探针承担（不计费）
 - **会话粘性** — `X-Conversation-ID` 绑定渠道保护 prompt cache；`X-Task-Key` 任务级粘性
 - **持久任务队列** — `llm_jobs` 表 + worker，内部批处理（PKB/分类/问答）统一排队与长退避重试
 - **告警聚合** — 5min 合并 + 1h 去重 → Matrix ops 频道
@@ -83,7 +85,7 @@ bellkeeper/
 │   ├── config/                     # Viper 配置加载与结构定义
 │   ├── eventbus/                   # NATS JetStream 一级共享事件总线（6 stream + Event 契约）
 │   ├── handler/                    # HTTP 处理器（按业务域拆分）
-│   ├── llmgateway/                 # LLM 代理池独立包（Gateway 进程内直调、协议转换、余额、错误分类）
+│   ├── llmgateway/                 # LLM 代理池独立包（Gateway 直调、UpstreamAdapter、路由/熔断/余额/错误分类）
 │   ├── llmclient/                  # 内部统一 LLM 调用 SDK（进程外 CLI/n8n）
 │   ├── pkb/                        # PKB 编排（curator / score / reconstruct / digest / skeleton / scheduler）
 │   ├── n8n_workflows/              # n8n 工作流 JSON 事实源
@@ -203,10 +205,11 @@ bellkeeper/
 
 | 方法 | 路径 | 说明 |
 |------|------|------|
-| ANY | `/api/llm/v1/*` | OpenAI 兼容代理（LLM Token 鉴权；含 `/v1/rerank`；Anthropic/Gemini 为渠道侧转换） |
-| GET | `/api/llm/health` | 渠道健康状态 |
+| ANY | `/api/llm/v1/*` | OpenAI 兼容代理（LLM Token 鉴权；含 `/v1/rerank`；Anthropic 为渠道侧协议转换） |
+| GET | `/api/llm/health` `/api/llm/channels/status` | 渠道健康/运行时状态 |
 | GET | `/api/llm/groups/status` | 模型组状态 |
-| CRUD | `/api/llm/config/channels` `/api/llm/config/groups` | 渠道/模型组配置（DB，热重载） |
+| CRUD | `/api/llm/config/channels` `/api/llm/config/groups` | 渠道/模型组配置（DB，热重载；渠道含 protocol/vendor） |
+| CRUD | `/api/llm/config/channels/:id/credentials` `/api/llm/config/credentials/:id` | 加密凭证（仅返回掩码） |
 | CRUD | `/api/llm/tokens` `/api/llm/pricing` | Token 与定价管理 |
 | GET | `/api/llm/usage` `/api/llm/balances` `/api/llm/rate-limits` `/api/llm/alerts` | 用量/余额/限流学习/告警 |
 
@@ -327,6 +330,8 @@ make swagger         # 生成 Swagger 文档（输出到 api/docs/）
 ## 配置
 
 主配置：`config/bellkeeper.yaml`。所有项支持 `BELLKEEPER_` 前缀的环境变量覆盖。运行时配置（API Key、渠道、模型组、Matrix 凭证）统一通过 Web UI 写入 `system_settings` 表 + LLM Proxy 专用表，运行时热重载。
+
+> LLM 网关始终启用：旧的 `llm_proxy.enabled` 开关已移除。渠道的 `provider_type` 仅表示协议（`openai`/`anthropic`/`rerank`），`vendor` 表示厂商（如 `deepseek`/`moonshot`/`opencodego`）；`vendor` 留空时按 `base_url` 推断。
 
 关键环境变量（线上写在 `hosts/keeper/.env`，由 `knowledge-stack` wiring 注入）：
 
