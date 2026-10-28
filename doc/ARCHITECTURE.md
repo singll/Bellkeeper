@@ -85,6 +85,7 @@ Bellkeeper/
 │   │   ├── llm_proxy_request.go#   缓冲路由 + 4xx failover
 │   │   ├── llm_stream.go       #   流式路由 + 流式 failover
 │   │   ├── llm_upstream.go     #   渠道、统一上游请求、重试/退避
+│   │   ├── llm_catalog.go      #   模型目录/连接测试/上游模型发现（只读诊断）
 │   │   ├── llm_config_service.go#  渠道/模型组/凭证写管理（LLMConfigService）
 │   │   └── admin.go            #   TokenScopeService + LLMAdminService 管理面
 │   ├── llmclient/              # 内部统一 LLM 调用 SDK(进程外,供 CLI/n8n)
@@ -180,6 +181,7 @@ Obsidian ← LiveSync(CouchDB) ← vault/
 - **健康影响**：`context_too_long` / `max_output_exceeded` 不计渠道健康；成员级配额类错误只冷却 `(channel, model)`。
 - **余额路由**：`balance.Kind` 区分 `usd` / `fraction` / `quota`，`balance_aware` 按同量纲归一化后再评分。
 - **配置写入**：渠道/模型组/凭证由 `LLMConfigService` 写入并触发 `Reload()`；`LLMProxyService` 只读快照与运行时。
+- **模型目录/连接测试**：`llm_catalog.go` 提供渠道×模型目录、`POST /config/channels/:id/test` 与上游模型发现；均为只读诊断，不写计费/用量、不改变健康/熔断、不回显密钥。
 - **始终启用**：`llm_proxy.enabled` 已移除，LLM 网关随服务启动。
 - **迁移**：`009_llm_runtime_columns` 增加 vendor/quota_window_seconds/max_context_tokens/max_output_tokens。
 

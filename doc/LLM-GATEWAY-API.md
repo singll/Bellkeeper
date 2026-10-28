@@ -67,6 +67,9 @@
 | PUT/DELETE | `/config/credentials/:id` | 凭证更新 / 删除 |
 | GET/POST | `/config/groups` | 模型组列表 / 创建 |
 | PUT/DELETE | `/config/groups/:id` | 模型组更新 / 删除 |
+| GET | `/config/models` | 模型目录（渠道×模型聚合 + 组成员能力约束） |
+| POST | `/config/channels/:id/test` | 渠道连接测试（可选 `{"model":"..."}`） |
+| GET | `/config/channels/:id/models` | 上游模型发现 + 已登记清单 |
 | POST | `/reload` | 从 DB 重新加载渠道/模型组/凭证（保留健康与限流桶状态） |
 | GET | `/channels/:name/balance` | 最近一次余额快照 |
 | GET | `/channels/:name/balance/history` | 余额历史快照 |
@@ -119,24 +122,84 @@
 - `max_context_tokens`：成员上下文窗口，`0` = 未知；请求预算超出时该成员被预过滤。
 - `max_output_tokens`：成员最大输出，`0` = 未知；请求的 `max_tokens` / `max_completion_tokens` 超出时自动封顶。
 
-### 2.5 模型目录与连接测试（现状）
+### 2.5 模型目录 API
 
-当前**没有独立的模型目录 HTTP 端点**，也没有面向管理面的“连接测试”端点：
+`GET /api/llm/config/models` 返回所有渠道已登记模型的聚合目录：
 
-- 模型目录由 `GET /api/llm/config/channels` 的 `models` 字段承担；新增模型必须先保存到渠道，再在模型组/定价中选择。
-- 连接验证目前只由后台恢复探针承担：`probeChannel` / `probeMemberQuotaExhausted` 使用 `UpstreamAdapter.ProbeRequest` 生成 1-token/rerank 探针，经 `tryChannel(..., tokenID=0)` 发出。探针不写 Token 用量、不经过计费归集，成功/失败只用于恢复熔断状态，不向调用方回显任何密钥。
-- 若后续新增管理面连接测试 API，必须保持相同约束：不发真实业务请求计费、不写入 Token 用量、不把测试失败计入渠道健康/熔断（或仅按显式策略处理）、响应中不得回显密钥。
+```json
+{
+  "data": {
+    "models": [
+      {
+        "channel_id": 3,
+        "channel_name": "sensenova-secagent",
+        "model": "deepseek-flash",
+        "provider_type": "openai",
+        "vendor": "sensenova",
+        "is_free": false,
+        "is_enabled": true,
+        "tier": "standard",
+        "rpm": 120,
+        "rpd": 20000,
+        "max_context_tokens": 1048576,
+        "max_output_tokens": 131072,
+        "groups": ["pool-secagent", "pool-secagent-heavy"]
+      }
+    ]
+  }
+}
+```
 
-### 2.6 新增模型向导与表单联动
+- 目录事实源是渠道的 `models` 字段；`max_context_tokens` / `max_output_tokens` 聚合该模型在模型组内声明的最大值。
+- `groups` 列出引用该 `(channel, model)` 的模型组。
+- 响应不含任何密钥、凭证预览或请求头；模型组/定价表单使用该目录做下拉联动。
 
-当前前端以“渠道 → 凭证 → 模型组 → 定价”的顺序引导新增模型，表单之间共享渠道登记清单：
+### 2.6 连接测试 API
 
-1. **渠道页**：选择协议（`openai` / `anthropic` / `rerank`），填写 `vendor`、`base_url`、`models`（上游真实模型名 JSON 数组）、`quota_window_seconds` 等；保存后自动热重载。
-2. **凭证**：在渠道卡片打开凭证管理，添加 `purpose=api`（聊天/补全）密钥；余额监控再添加 `purpose=balance`（缺省回退 `api`）。
-3. **模型组与路由**：新增/编辑模型组时，成员渠道与模型均为下拉选择，模型选项来自该渠道已登记清单；可设置权重、`max_context_tokens`、`max_output_tokens`。
-4. **用量与计费**：新增定价时同样从渠道/模型下拉选择，未配置定价的模型按 0 成本记账。
+`POST /api/llm/config/channels/:id/test`，请求体可选：
 
-模型组保存时后端会校验成员模型确实存在于渠道清单，避免“向导里能选、运行时路由不到”的漂移。
+```json
+{"model": "deepseek-v4-flash"}
+```
+
+不传 `model` 时使用渠道第一个已登记模型。返回：
+
+| 字段 | 说明 |
+|------|------|
+| `ok` | 是否 2xx |
+| `status_code` | 上游状态码（网络失败为 0） |
+| `latency_ms` | 往返延迟 |
+| `protocol` / `vendor` | 渠道协议与厂商 |
+| `class` | 失败时的 vendor 错误分类（如 `auth_failed`） |
+| `message` | 成功/失败摘要，失败体截断并脱敏 |
+| `tested_at` | 测试时间 |
+
+约束（硬性）：
+
+- **不计费**：不写 `llm_proxy_logs`、不累加 `llm_token_usage_daily`。
+- **不影响健康**：不调用令牌桶、不更新渠道/成员熔断、不触发告警，也不占用并发限流。
+- **不回显密钥**：不返回 API Key、凭证密文、鉴权头；上游错误体中的密钥会被替换为 `***`。
+- 直接使用渠道当前解析后的凭证（`purpose=api` 凭证优先，其次环境变量/字面值）；未配置密钥时返回 `ok=false` 的诊断结果而不是 500。
+
+### 2.7 上游模型发现 API
+
+`GET /api/llm/config/channels/:id/models`：
+
+- 对 `openai` / `anthropic` 协议请求上游 `GET /v1/models`，合并上游返回与渠道已登记模型。
+- `source=upstream` 表示发现成功；`source=configured` 表示无法发现（`rerank` 协议不支持、未配置密钥、上游非 2xx 或响应不可解析）。
+- 失败时仍返回渠道已登记清单，并在 `warning` 中显式给出原因（不静默降级）。
+- 只读诊断：不写用量/计费、不改变健康与熔断；不返回密钥。
+
+### 2.8 新增模型向导与表单联动
+
+前端“新增模型”按三步引导：
+
+1. **选择渠道**：展示渠道列表、协议、vendor、已登记模型数；新渠道先走“新增渠道”。
+2. **测试 / 发现**：选择模型执行连接测试；可调用上游模型发现，勾选新模型或手动输入模型名。
+3. **确认保存**：将新模型追加到渠道 `models`，保存后自动热重载；模型不会自动进入路由池，需到“模型组与路由”添加为成员。
+
+模型组与定价表单通过 `GET /api/llm/config/models` 的目录数据做渠道→模型级联选择；模型组保存时后端再次校验成员模型确实存在于渠道清单，避免“向导里能选、运行时路由不到”的漂移。
+
 
 ---
 
@@ -202,6 +265,7 @@ internal/llmgateway/
 ├── llm_background.go       // 余额快照、quota 恢复探针、配额告警、日志归档、会话清理
 ├── llm_bucket.go           // 令牌桶 + 自然日/滚动窗口计数
 ├── llm_management.go       // 管理面只读状态、统计、会话、限流学习、coding strategy
+├── llm_catalog.go          // 模型目录、连接测试、上游模型发现（只读诊断）
 ├── llm_config_service.go   // 渠道/模型组/凭证写入（LLMConfigService），写后 Reload
 ├── llm_validation.go       // 渠道/模型组校验、Vendor 推断、ValidationError
 ├── llm_model_group.go      // 虚拟模型组、粘性、优先级/权重/延迟/余额策略、成员熔断
@@ -366,7 +430,7 @@ configSvc := llmgateway.NewLLMConfigService(
 )
 ```
 
-`LLMProxyHandler` 依赖运行时 `*LLMProxyService`、管理面 `*LLMAdminService` 与配置写入 `*LLMConfigService`。
+`LLMProxyHandler` 依赖运行时 `*LLMProxyService`、管理面 `*LLMAdminService` 与配置写入 `*LLMConfigService`。模型目录读取由 `LLMConfigService.ListModelCatalog` 提供；连接测试与上游模型发现由 `LLMProxyService.TestChannelConnection` / `DiscoverChannelModels` 提供，二者均为只读诊断路径。
 
 ### 7.3 migration 009
 

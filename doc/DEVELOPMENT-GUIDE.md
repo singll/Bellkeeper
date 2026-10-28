@@ -1192,6 +1192,12 @@ curl http://localhost:8080/api/llm/groups/status -H "X-API-Key: your-key"
 # 查看渠道配置（含 protocol/vendor/models，密钥仅掩码）
 curl http://localhost:8080/api/llm/config/channels -H "X-API-Key: your-key"
 
+# 查看模型目录 / 测试渠道连接 / 发现上游模型（后两者只读诊断）
+curl http://localhost:8080/api/llm/config/models -H "X-API-Key: your-key"
+curl -X POST http://localhost:8080/api/llm/config/channels/1/test \
+  -H "X-API-Key: your-key" -H "Content-Type: application/json" -d '{"model":"deepseek-v4-flash"}'
+curl http://localhost:8080/api/llm/config/channels/1/models -H "X-API-Key: your-key"
+
 # 查看请求日志
 curl http://localhost:8080/api/llm/logs?limit=10 -H "X-API-Key: your-key"
 

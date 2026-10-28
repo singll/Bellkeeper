@@ -111,6 +111,8 @@
 | GET | `/channels/status` `/health` `/groups/status` `/stats` `/logs` `/rate-limit-events` `/alerts` | 运行时状态与日志 |
 | POST / DELETE | `/channels/:name/reset` / `/groups/:name/sticky` | 重置熔断 / 清粘性 |
 | CRUD | `/config/channels[/:id]`、`/config/groups[/:id]` | 渠道 / 模型组配置(DB,热重载;渠道含 protocol/vendor/quota_window_seconds,组成员含 context/output 上限) |
+| GET | `/config/models` | 模型目录(渠道×模型 + 组成员能力约束) |
+| POST / GET | `/config/channels/:id/test` / `/config/channels/:id/models` | 连接测试 / 上游模型发现(只读诊断) |
 | CRUD | `/config/channels/:id/credentials`、`/config/credentials/:id` | 加密凭证 |
 | POST | `/reload` | 配置热重载 |
 | GET / POST | `/channels/:name/balance[/history]`、`/balances` / `/balances/refresh` | 余额查询 / 刷新 |

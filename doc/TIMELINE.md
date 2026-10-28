@@ -81,6 +81,7 @@
 - `llmgateway` 运行时按职责拆分，`UpstreamAdapter` 统一缓冲/流式准备、鉴权、转换、SSE、错误分类与探测。
 - 缓冲/流式一致 4xx failover、最后上游错误透传；`context_too_long` / `max_output_exceeded` 不计健康；余额按 `Kind` 同量纲归一化。
 - 管理面下沉 `LLMConfigService`；移除 `llm_proxy.enabled`；migration 009 增加 vendor/quota/context/output 列。
+- P2：模型目录 API、管理面连接测试、上游模型发现、新增模型三步向导与表单联动。
 
 ---
 

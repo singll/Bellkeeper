@@ -29,7 +29,7 @@
 - **Token 体系与计费** — 调用方专用 Token（模型白名单 + 配额）、定价表 + cached tokens 折扣计费、用量聚合
 - **真实余额同步** — DeepSeek / Moonshot / new-api 系 / 阿里云 BSS / OpenCode Go 用量 API；`Kind` 区分 usd/fraction/quota
 - **限速与熔断** — 令牌桶 RPM/RPD + 429 自适应限流学习；vendor 语义化错误分类（配额/认证/限流/余额）
-- **配置与向导** — 渠道模型清单驱动模型组/定价下拉联动；连接验证由后台 1-token 恢复探针承担（不计费）
+- **模型目录与向导** — `GET /config/models` 聚合渠道×模型与能力约束；新增模型向导支持连接测试与上游模型发现（不计费/不影响健康/不回显密钥）
 - **会话粘性** — `X-Conversation-ID` 绑定渠道保护 prompt cache；`X-Task-Key` 任务级粘性
 - **持久任务队列** — `llm_jobs` 表 + worker，内部批处理（PKB/分类/问答）统一排队与长退避重试
 - **告警聚合** — 5min 合并 + 1h 去重 → Matrix ops 频道
@@ -210,6 +210,8 @@ bellkeeper/
 | GET | `/api/llm/groups/status` | 模型组状态 |
 | CRUD | `/api/llm/config/channels` `/api/llm/config/groups` | 渠道/模型组配置（DB，热重载；渠道含 protocol/vendor） |
 | CRUD | `/api/llm/config/channels/:id/credentials` `/api/llm/config/credentials/:id` | 加密凭证（仅返回掩码） |
+| GET | `/api/llm/config/models` | 模型目录（渠道×模型 + 组成员能力约束） |
+| POST/GET | `/api/llm/config/channels/:id/test` `/api/llm/config/channels/:id/models` | 连接测试 / 上游模型发现（只读诊断） |
 | CRUD | `/api/llm/tokens` `/api/llm/pricing` | Token 与定价管理 |
 | GET | `/api/llm/usage` `/api/llm/balances` `/api/llm/rate-limits` `/api/llm/alerts` | 用量/余额/限流学习/告警 |
 
