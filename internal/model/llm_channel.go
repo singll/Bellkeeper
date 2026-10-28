@@ -12,28 +12,32 @@ import (
 // LLMChannel represents an LLM API channel configuration stored in the database.
 // API keys are referenced by environment variable name (not stored directly).
 type LLMChannel struct {
-	ID        uint           `gorm:"primaryKey" json:"id"`
-	Name      string         `gorm:"size:100;uniqueIndex;not null" json:"name"`
-	BaseURL   string         `gorm:"size:500;not null" json:"base_url"`
-	APIKeyEnv    string         `gorm:"size:200" json:"api_key_env"`
-	ProviderType string         `gorm:"size:50;default:'openai'" json:"provider_type"`
-	RPM          int            `gorm:"default:500" json:"rpm"`
-	RPD       int            `gorm:"default:50000" json:"rpd"`
+	ID        uint   `gorm:"primaryKey" json:"id"`
+	Name      string `gorm:"size:100;uniqueIndex;not null" json:"name"`
+	BaseURL   string `gorm:"size:500;not null" json:"base_url"`
+	APIKeyEnv string `gorm:"size:200" json:"api_key_env"`
+	// ProviderType selects the request/response protocol: openai | anthropic | rerank.
+	ProviderType string `gorm:"size:50;default:'openai'" json:"provider_type"`
+	// Vendor identifies the upstream vendor (deepseek | moonshot | opencodego | ...).
+	// It drives error classification and vendor-specific quirks; empty = infer from BaseURL.
+	Vendor string `gorm:"size:50" json:"vendor"`
+	RPM    int    `gorm:"default:500" json:"rpm"`
+	RPD    int    `gorm:"default:50000" json:"rpd"`
 	// QuotaWindowSeconds switches the rpd counter from calendar-day reset to a
 	// rolling window (e.g. 18000 = 5h for SenseNova / OpenCode Go rolling quota
 	// windows). 0 = calendar-day (default).
-	QuotaWindowSeconds int `gorm:"default:0" json:"quota_window_seconds"`
-	Priority  int            `gorm:"default:1" json:"priority"`
-	IsFree    bool           `gorm:"default:false" json:"is_free"`
-	IsEnabled bool           `gorm:"default:true" json:"is_enabled"`
-	Models    string         `gorm:"type:text" json:"models"` // JSON array string
+	QuotaWindowSeconds int    `gorm:"default:0" json:"quota_window_seconds"`
+	Priority           int    `gorm:"default:1" json:"priority"`
+	IsFree             bool   `gorm:"default:false" json:"is_free"`
+	IsEnabled          bool   `gorm:"default:true" json:"is_enabled"`
+	Models             string `gorm:"type:text" json:"models"` // JSON array string
 	// Balance monitoring
 	BalanceProviderType string `gorm:"size:50" json:"balance_provider_type"` // e.g. "deepseek", "moonshot", "newapi", "aliyun"
-	BalanceConfigJSON   string `gorm:"type:text" json:"balance_config_json"`   // provider-specific extra config
-	ModelRPMOverrides   string `gorm:"type:text" json:"model_rpm_overrides"`   // JSON: {"model": rpm}
+	BalanceConfigJSON   string `gorm:"type:text" json:"balance_config_json"` // provider-specific extra config
+	ModelRPMOverrides   string `gorm:"type:text" json:"model_rpm_overrides"` // JSON: {"model": rpm}
 	// Task-aware tiered routing (§2.6.5)
-	TaskTypes string `gorm:"type:text" json:"task_types"` // JSON array, empty = eligible for all task types
-	Tier      string `gorm:"size:20" json:"tier"`         // free | standard | premium; empty = derived from is_free
+	TaskTypes string         `gorm:"type:text" json:"task_types"` // JSON array, empty = eligible for all task types
+	Tier      string         `gorm:"size:20" json:"tier"`         // free | standard | premium; empty = derived from is_free
 	CreatedAt time.Time      `json:"created_at"`
 	UpdatedAt time.Time      `json:"updated_at"`
 	DeletedAt gorm.DeletedAt `gorm:"index" json:"-"`

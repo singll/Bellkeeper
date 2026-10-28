@@ -51,7 +51,7 @@ func (p *deepSeekProvider) Fetch(ctx context.Context) (*Info, error) {
 	}
 
 	var result struct {
-		IsAvailable  bool    `json:"is_available"`
+		IsAvailable  bool `json:"is_available"`
 		BalanceInfos []struct {
 			Currency        string  `json:"currency"`
 			TotalBalance    float64 `json:"total_balance"`
@@ -66,6 +66,7 @@ func (p *deepSeekProvider) Fetch(ctx context.Context) (*Info, error) {
 	info := &Info{
 		ProviderType: "deepseek",
 		ChannelName:  p.channelName,
+		Kind:         KindUSD,
 		FetchedAt:    time.Now(),
 	}
 

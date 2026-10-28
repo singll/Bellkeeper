@@ -19,6 +19,7 @@ type Services struct {
 	LLMProxy      *llmgateway.LLMProxyService
 	LLMJobQueue   *llmgateway.LLMJobQueueService
 	LLMAdmin      *llmgateway.LLMAdminService
+	LLMConfig     *llmgateway.LLMConfigService
 	Classify      *ClassifyService
 	ActivityLog   *ActivityLogService
 	LogCenter     *LogCenterService
@@ -57,10 +58,28 @@ func NewServices(repos *repository.Repositories, cfg *config.Config, version str
 	// llm_job_queue 经进程内直调 Gateway 接口，替代原 localhost HTTP 自回环）。
 	pricer := llmgateway.NewPricer(repos.LLMModelPricing)
 	_ = pricer.SeedDefaultPricing()
-	llmGateway := llmgateway.NewLLMProxyService(cfg.LLMProxy, repos.LLMProxy, repos.LLMChannel, repos.LLMModelGroup, pricer, repos.LLMTokenUsage, repos.LLMRateLimit, repos.LLMConversationBinding, repos.LLMToken, repos.LLMChannelCredential, repos.LLMChannelBalanceSnapshot)
+	llmGateway := llmgateway.NewLLMProxyService(llmgateway.Options{
+		Config: cfg.LLMProxy,
+		Repos: llmgateway.Repos{
+			Proxy:               repos.LLMProxy,
+			Channel:             repos.LLMChannel,
+			Group:               repos.LLMModelGroup,
+			TokenUsage:          repos.LLMTokenUsage,
+			RateLimit:           repos.LLMRateLimit,
+			ConversationBinding: repos.LLMConversationBinding,
+			Token:               repos.LLMToken,
+			Credential:          repos.LLMChannelCredential,
+			BalanceSnapshot:     repos.LLMChannelBalanceSnapshot,
+		},
+		Pricer:      pricer,
+		SettingRepo: repos.Setting,
+	})
 	// LLMAdminService 收拢 token/pricing 管理 CRUD + 计费试算（消化分层例外②），
 	// 复用 pricer；handler 经此 service 访问，不再直接持有 repository。
 	llmAdminSvc := llmgateway.NewLLMAdminService(repos.LLMToken, repos.LLMTokenUsage, repos.LLMModelPricing, pricer)
+	// 管理面下沉：渠道/模型组/凭证写入由 LLMConfigService 负责，运行时服务只保留
+	// 只读快照 / Reload；handler 的配置写入依赖此 service。
+	llmConfigSvc := llmgateway.NewLLMConfigService(repos.LLMChannel, repos.LLMModelGroup, repos.LLMChannelCredential, llmGateway)
 
 	llmJobQueueSvc := llmgateway.NewLLMJobQueueService(cfg.LLMJobQueue, repos.LLMJob, llmGateway, nil)
 
@@ -168,6 +187,7 @@ func NewServices(repos *repository.Repositories, cfg *config.Config, version str
 		LLMProxy:      llmGateway,
 		LLMJobQueue:   llmJobQueueSvc,
 		LLMAdmin:      llmAdminSvc,
+		LLMConfig:     llmConfigSvc,
 		Classify:      classifySvc,
 		ActivityLog:   activityLogSvc,
 		LogCenter:     logCenterSvc,

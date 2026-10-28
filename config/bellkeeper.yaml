@@ -55,7 +55,6 @@ llm_job_queue:
   job_timeout_seconds: 600
 
 llm_proxy:
-  enabled: true
   default_timeout: 60
   max_retries: 3
   balance_sync_interval: 300   # 余额/额度窗口同步间隔（秒）；OpenCode Go 用量 API 等

@@ -66,6 +66,7 @@ func (p *moonshotProvider) Fetch(ctx context.Context) (*Info, error) {
 	return &Info{
 		ProviderType: "moonshot",
 		ChannelName:  p.channelName,
+		Kind:         KindUSD,
 		Balance:      result.Data.AvailableBalance,
 		Currency:     result.Data.Currency,
 		TotalGranted: result.Data.CashBalance + result.Data.VoucherBalance,

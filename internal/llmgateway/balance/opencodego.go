@@ -94,6 +94,7 @@ func (p *openCodeGoProvider) Fetch(ctx context.Context) (*Info, error) {
 	return &Info{
 		ProviderType: "opencodego",
 		ChannelName:  p.channelName,
+		Kind:         KindFraction,
 		Balance:      remaining, // 窗口剩余比例（0..1），非美元
 		Currency:     "window_ratio",
 		TotalGranted: 1,

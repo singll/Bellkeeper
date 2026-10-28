@@ -1,12 +1,11 @@
 package handler
 
 import (
-	"bufio"
+	"errors"
 	"fmt"
 	"io"
 	"net/http"
 	"strconv"
-	"strings"
 	"time"
 
 	"github.com/gin-gonic/gin"
@@ -14,22 +13,35 @@ import (
 	"github.com/singll/bellkeeper/internal/llmgateway"
 	"github.com/singll/bellkeeper/internal/model"
 	"github.com/singll/bellkeeper/internal/pkg/response"
-	"github.com/singll/bellkeeper/internal/llmgateway/converter"
 )
 
 type LLMProxyHandler struct {
-	svc  *llmgateway.LLMProxyService
-	admin *llmgateway.LLMAdminService
+	svc    *llmgateway.LLMProxyService
+	admin  *llmgateway.LLMAdminService
+	config *llmgateway.LLMConfigService
 }
 
 func NewLLMProxyHandler(
 	svc *llmgateway.LLMProxyService,
 	admin *llmgateway.LLMAdminService,
+	config *llmgateway.LLMConfigService,
 ) *LLMProxyHandler {
 	return &LLMProxyHandler{
-		svc:   svc,
-		admin: admin,
+		svc:    svc,
+		admin:  admin,
+		config: config,
 	}
+}
+
+// writeLLMServiceError maps configuration validation failures to 400 so the UI
+// can show the actionable message instead of a generic internal error.
+func writeLLMServiceError(c *gin.Context, err error) {
+	var validationErr *llmgateway.ValidationError
+	if errors.As(err, &validationErr) {
+		response.BadRequest(c, validationErr.Message)
+		return
+	}
+	response.InternalError(c, err.Error())
 }
 
 // Proxy handles OpenAI-compatible proxy requests.
@@ -64,16 +76,25 @@ func (h *LLMProxyHandler) proxyBuffered(c *gin.Context, path string, body []byte
 		c.Request.Method, path, c.Request.Header, body, callerID, tokenID,
 	)
 
-	if err != nil {
-		response.InternalError(c, err.Error())
-		return
-	}
-
 	// Forward upstream content-type
 	if ct := respHeaders.Get("Content-Type"); ct != "" {
 		c.Header("Content-Type", ct)
 	}
 
+	// A real upstream status/body always wins over the internal error wrapper:
+	// clients must see 400/404/429 from the provider, not a synthetic 500.
+	if err != nil && statusCode == 0 {
+		response.InternalError(c, err.Error())
+		return
+	}
+	if respBody == nil {
+		if err != nil {
+			response.InternalError(c, err.Error())
+		} else {
+			response.InternalError(c, "empty upstream response")
+		}
+		return
+	}
 	c.Data(statusCode, "application/json", respBody)
 }
 
@@ -105,11 +126,7 @@ func (h *LLMProxyHandler) proxyStream(c *gin.Context, path string, body []byte, 
 	c.Header("Connection", "keep-alive")
 	c.Header("X-Accel-Buffering", "no")
 
-	if result.ProviderType == "anthropic" {
-		h.streamAnthropicToOpenAI(c, result.BodyReader)
-	} else {
-		h.streamPassthrough(c, result.BodyReader)
-	}
+	h.streamPassthrough(c, result.BodyReader)
 }
 
 // streamPassthrough transparently forwards SSE data from an OpenAI-compatible upstream.
@@ -129,40 +146,6 @@ func (h *LLMProxyHandler) streamPassthrough(c *gin.Context, bodyReader io.ReadCl
 		}
 		if err != nil {
 			break
-		}
-	}
-}
-
-// streamAnthropicToOpenAI converts Anthropic SSE events to OpenAI SSE format on the fly.
-func (h *LLMProxyHandler) streamAnthropicToOpenAI(c *gin.Context, bodyReader io.ReadCloser) {
-	flusher, ok := c.Writer.(http.Flusher)
-	if !ok {
-		response.InternalError(c, "streaming not supported")
-		return
-	}
-
-	conv := converter.NewAnthropicSSEConverter()
-	scanner := bufio.NewScanner(bodyReader)
-	scanner.Buffer(make([]byte, 0, 64*1024), 1024*1024)
-
-	var eventType string
-	for scanner.Scan() {
-		line := scanner.Text()
-
-		if strings.HasPrefix(line, "event: ") {
-			eventType = strings.TrimPrefix(line, "event: ")
-			continue
-		}
-
-		if strings.HasPrefix(line, "data: ") {
-			data := strings.TrimPrefix(line, "data: ")
-			output := conv.ConvertEvent(eventType, data)
-			if output != "" {
-				c.Writer.Write([]byte(output)) //nolint:errcheck
-				flusher.Flush()
-			}
-			eventType = ""
-			continue
 		}
 	}
 }
@@ -265,7 +248,7 @@ func (h *LLMProxyHandler) ResetChannelCircuit(c *gin.Context) {
 // --- Channel & Group Config CRUD ---
 
 func (h *LLMProxyHandler) ListChannels(c *gin.Context) {
-	channels, err := h.svc.ListChannelConfigs()
+	channels, err := h.config.ListChannelConfigs()
 	if err != nil {
 		response.InternalError(c, err.Error())
 		return
@@ -279,8 +262,8 @@ func (h *LLMProxyHandler) CreateChannel(c *gin.Context) {
 		response.BadRequest(c, err.Error())
 		return
 	}
-	if err := h.svc.CreateChannel(&ch); err != nil {
-		response.InternalError(c, err.Error())
+	if err := h.config.CreateChannel(&ch); err != nil {
+		writeLLMServiceError(c, err)
 		return
 	}
 	response.Success(c, ch)
@@ -298,8 +281,8 @@ func (h *LLMProxyHandler) UpdateChannel(c *gin.Context) {
 		return
 	}
 	ch.ID = uint(id)
-	if err := h.svc.UpdateChannel(&ch); err != nil {
-		response.InternalError(c, err.Error())
+	if err := h.config.UpdateChannel(&ch); err != nil {
+		writeLLMServiceError(c, err)
 		return
 	}
 	response.Success(c, ch)
@@ -311,8 +294,8 @@ func (h *LLMProxyHandler) DeleteChannel(c *gin.Context) {
 		response.BadRequest(c, "invalid id")
 		return
 	}
-	if err := h.svc.DeleteChannel(uint(id)); err != nil {
-		response.InternalError(c, err.Error())
+	if err := h.config.DeleteChannel(uint(id)); err != nil {
+		writeLLMServiceError(c, err)
 		return
 	}
 	response.Message(c, "channel deleted")
@@ -328,7 +311,7 @@ func (h *LLMProxyHandler) ListChannelCredentials(c *gin.Context) {
 		response.BadRequest(c, "invalid id")
 		return
 	}
-	creds, err := h.svc.ListChannelCredentials(uint(id))
+	creds, err := h.config.ListChannelCredentials(uint(id))
 	if err != nil {
 		response.InternalError(c, err.Error())
 		return
@@ -357,7 +340,7 @@ func (h *LLMProxyHandler) CreateChannelCredential(c *gin.Context) {
 		response.BadRequest(c, err.Error())
 		return
 	}
-	view, err := h.svc.CreateChannelCredential(uint(id), req.Purpose, req.Source, req.EnvVarName, req.ProviderType, req.Label, req.Credential, req.Priority)
+	view, err := h.config.CreateChannelCredential(uint(id), req.Purpose, req.Source, req.EnvVarName, req.ProviderType, req.Label, req.Credential, req.Priority)
 	if err != nil {
 		response.InternalError(c, err.Error())
 		return
@@ -387,7 +370,7 @@ func (h *LLMProxyHandler) UpdateChannelCredential(c *gin.Context) {
 		response.BadRequest(c, err.Error())
 		return
 	}
-	view, err := h.svc.UpdateChannelCredential(uint(id), req.ProviderType, req.Status, req.Credential, req.Purpose, req.Source, req.EnvVarName, req.Label, req.Priority)
+	view, err := h.config.UpdateChannelCredential(uint(id), req.ProviderType, req.Status, req.Credential, req.Purpose, req.Source, req.EnvVarName, req.Label, req.Priority)
 	if err != nil {
 		response.InternalError(c, err.Error())
 		return
@@ -403,7 +386,7 @@ func (h *LLMProxyHandler) DeleteChannelCredential(c *gin.Context) {
 		response.BadRequest(c, "invalid id")
 		return
 	}
-	if err := h.svc.DeleteChannelCredential(uint(id)); err != nil {
+	if err := h.config.DeleteChannelCredential(uint(id)); err != nil {
 		response.InternalError(c, err.Error())
 		return
 	}
@@ -424,7 +407,7 @@ func (h *LLMProxyHandler) ChannelBalanceHistory(c *gin.Context) {
 }
 
 func (h *LLMProxyHandler) ListGroups(c *gin.Context) {
-	groups, err := h.svc.ListGroupConfigs()
+	groups, err := h.config.ListGroupConfigs()
 	if err != nil {
 		response.InternalError(c, err.Error())
 		return
@@ -438,8 +421,8 @@ func (h *LLMProxyHandler) CreateGroup(c *gin.Context) {
 		response.BadRequest(c, err.Error())
 		return
 	}
-	if err := h.svc.CreateGroup(&g); err != nil {
-		response.InternalError(c, err.Error())
+	if err := h.config.CreateGroup(&g); err != nil {
+		writeLLMServiceError(c, err)
 		return
 	}
 	response.Success(c, g)
@@ -457,8 +440,8 @@ func (h *LLMProxyHandler) UpdateGroup(c *gin.Context) {
 		return
 	}
 	g.ID = uint(id)
-	if err := h.svc.UpdateGroup(&g); err != nil {
-		response.InternalError(c, err.Error())
+	if err := h.config.UpdateGroup(&g); err != nil {
+		writeLLMServiceError(c, err)
 		return
 	}
 	response.Success(c, g)
@@ -470,8 +453,8 @@ func (h *LLMProxyHandler) DeleteGroup(c *gin.Context) {
 		response.BadRequest(c, "invalid id")
 		return
 	}
-	if err := h.svc.DeleteGroup(uint(id)); err != nil {
-		response.InternalError(c, err.Error())
+	if err := h.config.DeleteGroup(uint(id)); err != nil {
+		writeLLMServiceError(c, err)
 		return
 	}
 	response.Message(c, "group deleted")
@@ -856,10 +839,9 @@ func (h *LLMProxyHandler) SetCodingStrategy(c *gin.Context) {
 		response.BadRequest(c, err.Error())
 		return
 	}
-	if req.Strategy != "free_first" && req.Strategy != "quality_first" && req.Strategy != "complexity_aware" {
-		response.BadRequest(c, "strategy must be one of: free_first, quality_first, complexity_aware")
+	if err := h.svc.SetCodingStrategy(req.Strategy); err != nil {
+		writeLLMServiceError(c, err)
 		return
 	}
-	h.svc.SetCodingStrategy(req.Strategy)
 	response.Message(c, "coding strategy updated")
 }

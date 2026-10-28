@@ -41,8 +41,10 @@ type Result struct {
 	CanRetry       bool
 }
 
-// Classify maps status code + body + provider type to a semantic error class.
-func Classify(statusCode int, body string, providerType string) Result {
+// Classify maps status code + body + vendor identity to a semantic error class.
+// The vendor (deepseek/moonshot/kimi-code/...) carries provider semantics; the
+// wire protocol (openai/anthropic/rerank) is not used here.
+func Classify(statusCode int, body string, vendor string) Result {
 	lowerBody := strings.ToLower(body)
 
 	// 401 → auth failed (all providers), BUT some providers (e.g. OpenCode Go)
@@ -72,8 +74,8 @@ func Classify(statusCode int, body string, providerType string) Result {
 		return Result{Class: MaxOutputExceeded, BreakdownUntil: "none", CanRetry: true}
 	}
 
-	// Provider-specific classification
-	switch providerType {
+	// Vendor-specific classification
+	switch vendor {
 	case "kimi-code", "anthropic":
 		return classifyKimiCode(statusCode, lowerBody)
 	case "deepseek":

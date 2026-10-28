@@ -5,14 +5,29 @@ import (
 	"time"
 )
 
+// Kind describes the unit of Info.Balance. Values from different kinds must
+// never be compared directly (e.g. OpenCode Go's 0..1 remaining-window ratio vs
+// a DeepSeek USD balance).
+type Kind string
+
+const (
+	// KindUSD is a monetary amount; Currency carries the actual unit (USD/CNY).
+	KindUSD Kind = "usd"
+	// KindFraction is a remaining ratio in [0,1] (e.g. OpenCode Go quota windows).
+	KindFraction Kind = "fraction"
+	// KindQuota is an absolute quota count in provider-specific units.
+	KindQuota Kind = "quota"
+)
+
 // Info holds the result of a balance fetch.
 type Info struct {
-	ProviderType string  `json:"provider_type"` // e.g. "deepseek", "moonshot", "newapi", "aliyun"
-	ChannelName  string  `json:"channel_name"`
-	Balance      float64 `json:"balance"`       // in USD (or equivalent)
-	Currency     string  `json:"currency"`
-	TotalGranted float64 `json:"total_granted"` // total quota ever granted
-	TotalUsed    float64 `json:"total_used"`    // total consumed
+	ProviderType string     `json:"provider_type"` // e.g. "deepseek", "moonshot", "newapi", "aliyun"
+	ChannelName  string     `json:"channel_name"`
+	Balance      float64    `json:"balance"` // remaining amount, unit described by Kind
+	Kind         Kind       `json:"kind"`    // usd | fraction | quota
+	Currency     string     `json:"currency"`
+	TotalGranted float64    `json:"total_granted"` // total quota ever granted
+	TotalUsed    float64    `json:"total_used"`    // total consumed
 	ExpiresAt    *time.Time `json:"expires_at"`
 	FetchedAt    time.Time  `json:"fetched_at"`
 	Error        string     `json:"error,omitempty"`
@@ -36,10 +51,10 @@ type Factory struct {
 func NewFactory() *Factory {
 	return &Factory{
 		constructors: map[string]func(string, string, string, string) (Provider, error){
-			"deepseek":  newDeepSeekProvider,
-			"moonshot":  newMoonshotProvider,
-			"newapi":    newNewAPIProvider,
-			"aliyun":    newAliyunProvider,
+			"deepseek":   newDeepSeekProvider,
+			"moonshot":   newMoonshotProvider,
+			"newapi":     newNewAPIProvider,
+			"aliyun":     newAliyunProvider,
 			"opencodego": newOpenCodeGoProvider,
 		},
 	}

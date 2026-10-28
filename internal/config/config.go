@@ -32,8 +32,10 @@ type Config struct {
 	LogCenter     LogCenterConfig     `mapstructure:"log_center"`
 }
 
+// LLMProxyConfig is always active: the LLM gateway is core infrastructure (it
+// also backs in-process callers), so the legacy llm_proxy.enabled switch was
+// removed rather than silently pretending to gate startup/routing.
 type LLMProxyConfig struct {
-	Enabled           bool                 `mapstructure:"enabled"`
 	DefaultTimeout    int                  `mapstructure:"default_timeout"`
 	MaxRetries        int                  `mapstructure:"max_retries"`
 	MaxWaitSeconds    int                  `mapstructure:"max_wait_seconds"`
@@ -106,27 +108,28 @@ type ModelGroupMember struct {
 }
 
 type ChannelConfig struct {
-	ID                  uint     `mapstructure:"-"` // DB row id (0 for YAML-only config); used for rate-limit learning + bindings
-	Name                string   `mapstructure:"name"`
-	BaseURL             string   `mapstructure:"base_url"`
-	APIKey              string   `mapstructure:"api_key"`
-	ProviderType        string   `mapstructure:"provider_type"`
-	RawAPIKey           string   `mapstructure:"-"` // Pre-expansion value, set by Load()
-	RPM                 int      `mapstructure:"rpm"`
-	BalanceProviderType string   `mapstructure:"balance_provider_type"`
-	BalanceConfigJSON   string   `mapstructure:"balance_config_json"`
-	ModelRPMOverrides   string   `mapstructure:"model_rpm_overrides"`
-	RPD                 int      `mapstructure:"rpd"`
+	ID                  uint   `mapstructure:"-"` // DB row id (0 for YAML-only config); used for rate-limit learning + bindings
+	Name                string `mapstructure:"name"`
+	BaseURL             string `mapstructure:"base_url"`
+	APIKey              string `mapstructure:"api_key"`
+	ProviderType        string `mapstructure:"provider_type"`
+	Vendor              string `mapstructure:"vendor"`
+	RawAPIKey           string `mapstructure:"-"` // Pre-expansion value, set by Load()
+	RPM                 int    `mapstructure:"rpm"`
+	BalanceProviderType string `mapstructure:"balance_provider_type"`
+	BalanceConfigJSON   string `mapstructure:"balance_config_json"`
+	ModelRPMOverrides   string `mapstructure:"model_rpm_overrides"`
+	RPD                 int    `mapstructure:"rpd"`
 	// QuotaWindowSeconds switches the rpd counter from calendar-day reset to a
 	// rolling window of this many seconds (e.g. 18000 = 5h for SenseNova /
 	// OpenCode Go rolling quota windows). 0 = calendar-day (default).
-	QuotaWindowSeconds  int      `mapstructure:"quota_window_seconds"`
-	Priority            int      `mapstructure:"priority"`
-	Models              []string `mapstructure:"models"`
-	IsEnabled           bool     `mapstructure:"is_enabled"`
-	IsFree              bool     `mapstructure:"is_free"`
-	TaskTypes           []string `mapstructure:"task_types"` // empty = eligible for all task types
-	Tier                string   `mapstructure:"tier"`       // free | standard | premium; empty = derived from IsFree
+	QuotaWindowSeconds int      `mapstructure:"quota_window_seconds"`
+	Priority           int      `mapstructure:"priority"`
+	Models             []string `mapstructure:"models"`
+	IsEnabled          bool     `mapstructure:"is_enabled"`
+	IsFree             bool     `mapstructure:"is_free"`
+	TaskTypes          []string `mapstructure:"task_types"` // empty = eligible for all task types
+	Tier               string   `mapstructure:"tier"`       // free | standard | premium; empty = derived from IsFree
 }
 
 type ServerConfig struct {
@@ -514,7 +517,6 @@ func setDefaults(v *viper.Viper) {
 	v.SetDefault("features.url_dedup", true)
 
 	// LLM Proxy
-	v.SetDefault("llm_proxy.enabled", false)
 	v.SetDefault("llm_proxy.default_timeout", 60)
 	v.SetDefault("llm_proxy.max_retries", 3)
 	v.SetDefault("llm_proxy.max_wait_seconds", 30)

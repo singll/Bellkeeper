@@ -8,6 +8,7 @@ import (
 	"time"
 
 	"github.com/singll/bellkeeper/internal/config"
+	"github.com/singll/bellkeeper/internal/llmgateway/balance"
 )
 
 // --- Sticky Binding ---
@@ -296,8 +297,8 @@ func NewModelGroup(cfg config.ModelGroupConfig, channels map[string]*Channel) (*
 // member keys (channel:model) already tried this request so retries advance
 // deterministically and the same physical channel can be reused with a different
 // model. For backward compatibility a bare channel name is also accepted.
-// `balances` (channel→remaining USD) feeds the balance_aware strategy.
-func (g *ModelGroup) SelectChannel(taskKey string, taskType TaskType, codingPref string, balances map[string]float64, exclude map[string]bool) (*Channel, string) {
+// `balances` (channel→remaining headroom + unit kind) feeds the balance_aware strategy.
+func (g *ModelGroup) SelectChannel(taskKey string, taskType TaskType, codingPref string, balances map[string]channelBalance, exclude map[string]bool) (*Channel, string) {
 	// 1. Check sticky binding (skip if excluded/unhealthy/member-broken)
 	if taskKey != "" && g.Sticky != nil {
 		if binding := g.Sticky.Get(taskKey); binding != nil {
@@ -423,7 +424,7 @@ func (g *ModelGroup) contextExcluded(inputTokens, outputBudget int) map[string]b
 }
 
 // selectByStrategy applies the group's base load-balancing strategy.
-func (g *ModelGroup) selectByStrategy(candidates []*ModelGroupMemberRuntime, balances map[string]float64) *ModelGroupMemberRuntime {
+func (g *ModelGroup) selectByStrategy(candidates []*ModelGroupMemberRuntime, balances map[string]channelBalance) *ModelGroupMemberRuntime {
 	switch g.Config.Strategy {
 	case "best-weight":
 		return bestWeightSelect(candidates)
@@ -439,7 +440,7 @@ func (g *ModelGroup) selectByStrategy(candidates []*ModelGroupMemberRuntime, bal
 // selectCodingTiered partitions candidates by tier and picks within the first
 // non-empty tier in the order dictated by the coding sub-strategy. Within a tier
 // the group's base strategy breaks ties.
-func (g *ModelGroup) selectCodingTiered(candidates []*ModelGroupMemberRuntime, codingPref string, balances map[string]float64) *ModelGroupMemberRuntime {
+func (g *ModelGroup) selectCodingTiered(candidates []*ModelGroupMemberRuntime, codingPref string, balances map[string]channelBalance) *ModelGroupMemberRuntime {
 	byTier := map[string][]*ModelGroupMemberRuntime{}
 	for _, m := range candidates {
 		t := memberTier(m)
@@ -586,28 +587,43 @@ func leastLatencySelect(candidates []*ModelGroupMemberRuntime) *ModelGroupMember
 	return best
 }
 
-// balanceAwareSelect scores members by score = latency_ewma × (1 + error_rate) /
-// max(remaining_usd, 1) — lower is better — using the live balance snapshot. When
-// no balance is known for any candidate (provider unsupported / stale), it degrades
-// to priority-health rather than guessing. (§2.3.5 / §2.6.3)
-func balanceAwareSelect(candidates []*ModelGroupMemberRuntime, balances map[string]float64) *ModelGroupMemberRuntime {
+// channelBalance is the routing view of a balance fetch. Kind records the
+// dimension so USD amounts and 0..1 quota fractions are never compared raw.
+type channelBalance struct {
+	Remaining float64
+	Kind      balance.Kind
+}
+
+// balanceAwareSelect scores members by latency_ewma × (1 + error_rate) /
+// normalized_remaining — lower is better. Remaining headroom is normalised per
+// kind (USD, fraction, quota) to 0..1 relative to the best candidate of that
+// kind, so an OpenCode Go 0..1 window ratio is not compared against a USD
+// amount directly. When no balance is known for any candidate (provider
+// unsupported / stale), it degrades to priority-health rather than guessing.
+// (§2.3.5 / §2.6.3)
+func balanceAwareSelect(candidates []*ModelGroupMemberRuntime, balances map[string]channelBalance) *ModelGroupMemberRuntime {
 	if len(candidates) == 0 {
 		return nil
 	}
 	hasBalance := false
+	maxByKind := make(map[balance.Kind]float64)
 	for _, m := range candidates {
-		if _, ok := balances[m.Channel.Config.Name]; ok {
-			hasBalance = true
-			break
+		b, ok := balances[m.Channel.Config.Name]
+		if !ok {
+			continue
+		}
+		hasBalance = true
+		if b.Remaining > maxByKind[b.Kind] {
+			maxByKind[b.Kind] = b.Remaining
 		}
 	}
 	if !hasBalance {
 		return priorityHealthSelect(candidates)
 	}
 	best := candidates[0]
-	bestScore := balanceScore(best, balances)
+	bestScore := balanceScore(best, balances, maxByKind)
 	for _, m := range candidates[1:] {
-		if s := balanceScore(m, balances); s < bestScore {
+		if s := balanceScore(m, balances, maxByKind); s < bestScore {
 			best = m
 			bestScore = s
 		}
@@ -615,14 +631,23 @@ func balanceAwareSelect(candidates []*ModelGroupMemberRuntime, balances map[stri
 	return best
 }
 
-func balanceScore(m *ModelGroupMemberRuntime, balances map[string]float64) float64 {
+func balanceScore(m *ModelGroupMemberRuntime, balances map[string]channelBalance, maxByKind map[balance.Kind]float64) float64 {
 	latency := m.Channel.EWMALatency()
 	if latency <= 0 {
 		latency = 1 // no latency samples yet — neutral weight
 	}
-	remaining := balances[m.Channel.Config.Name]
-	if remaining < 1 {
-		remaining = 1 // floor so near-zero balances don't divide by ~0
+	// No balance data is neutral (full headroom); otherwise use the fraction of
+	// the best candidate's headroom within the SAME kind.
+	remaining := 1.0
+	if b, ok := balances[m.Channel.Config.Name]; ok {
+		if max := maxByKind[b.Kind]; max > 0 {
+			remaining = b.Remaining / max
+		} else {
+			remaining = 0
+		}
+	}
+	if remaining < 0.01 {
+		remaining = 0.01 // floor so exhausted channels don't divide by ~0
 	}
 	return latency * (1 + m.ErrorRate()) / remaining
 }

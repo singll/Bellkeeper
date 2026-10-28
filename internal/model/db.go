@@ -170,17 +170,38 @@ func SeedLLMProxyConfig(db *gorm.DB, cfg config.LLMProxyConfig) error {
 				zap.String("channel", ch.Name), zap.Error(err))
 			continue
 		}
+		taskTypes := ch.TaskTypes
+		if taskTypes == nil {
+			taskTypes = []string{}
+		}
+		taskTypesJSON, err := json.Marshal(taskTypes)
+		if err != nil {
+			middleware.GetLogger().Warn("failed to marshal task types for LLM channel",
+				zap.String("channel", ch.Name), zap.Error(err))
+			continue
+		}
+		providerType := ch.ProviderType
+		if providerType == "" {
+			providerType = "openai"
+		}
 		channel := LLMChannel{
-			Name:      ch.Name,
-			BaseURL:   ch.BaseURL,
-			APIKeyEnv: apiKeyEnv,
-			RPM:       ch.RPM,
-			RPD:       ch.RPD,
-			QuotaWindowSeconds: ch.QuotaWindowSeconds,
-			Priority:  ch.Priority,
-			IsFree:    ch.IsFree,
-			IsEnabled: ch.IsEnabled,
-			Models:    string(modelsJSON),
+			Name:                ch.Name,
+			BaseURL:             ch.BaseURL,
+			APIKeyEnv:           apiKeyEnv,
+			ProviderType:        providerType,
+			Vendor:              ch.Vendor,
+			RPM:                 ch.RPM,
+			RPD:                 ch.RPD,
+			QuotaWindowSeconds:  ch.QuotaWindowSeconds,
+			Priority:            ch.Priority,
+			IsFree:              ch.IsFree,
+			IsEnabled:           ch.IsEnabled,
+			Models:              string(modelsJSON),
+			BalanceProviderType: ch.BalanceProviderType,
+			BalanceConfigJSON:   ch.BalanceConfigJSON,
+			ModelRPMOverrides:   ch.ModelRPMOverrides,
+			TaskTypes:           string(taskTypesJSON),
+			Tier:                ch.Tier,
 		}
 		if err := db.Create(&channel).Error; err != nil {
 			middleware.GetLogger().Warn("failed to seed LLM channel",

@@ -56,6 +56,15 @@ func (m *Manager) Unregister(channelName string) {
 	m.mu.Unlock()
 }
 
+// Reset clears all registered providers and cached results so a config reload
+// can rebuild them from the current channel set.
+func (m *Manager) Reset() {
+	m.mu.Lock()
+	m.providers = make(map[string]Provider)
+	m.results = make(map[string]*Info)
+	m.mu.Unlock()
+}
+
 // Get returns the last fetched balance info for a channel.
 func (m *Manager) Get(channelName string) *Info {
 	m.mu.RLock()
@@ -103,6 +112,9 @@ func (m *Manager) RefreshAll() {
 				}
 				m.mu.Unlock()
 				return
+			}
+			if info != nil && info.Kind == "" {
+				info.Kind = KindUSD // legacy providers are monetary by default
 			}
 			m.mu.Lock()
 			m.results[n] = info

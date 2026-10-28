@@ -23,8 +23,8 @@ import (
 	"net/http"
 	"strings"
 
-	"github.com/singll/bellkeeper/internal/middleware"
 	"github.com/singll/bellkeeper/internal/llmclient"
+	"github.com/singll/bellkeeper/internal/middleware"
 	"go.uber.org/zap"
 )
 
@@ -57,6 +57,9 @@ func (s *LLMProxyService) ChatStream(ctx context.Context, req llmclient.ChatRequ
 	if opts.TaskType != "" {
 		headers.Set("X-Task-Type", opts.TaskType)
 	}
+	if opts.ConversationID != "" {
+		headers.Set("X-Conversation-ID", opts.ConversationID)
+	}
 
 	const callerInternal = "internal"
 	streamResult, err := s.ProxyStreamRequest(http.MethodPost, "/v1/chat/completions", headers, body, callerInternal, 0)
@@ -76,6 +79,7 @@ func (s *LLMProxyService) ChatStream(ctx context.Context, req llmclient.ChatRequ
 	go func() {
 		defer close(tokenCh)
 		defer streamResult.BodyReader.Close()
+		defer s.FinalizeStream(streamResult, "/v1/chat/completions", callerInternal, 0)
 		scanner := bufio.NewScanner(streamResult.BodyReader)
 		for scanner.Scan() {
 			line := scanner.Text()
@@ -159,7 +163,7 @@ func (s *LLMProxyService) Chat(ctx context.Context, req llmclient.ChatRequest, o
 		Model   string `json:"model"`
 		Choices []struct {
 			Message struct {
-				Content   string             `json:"content"`
+				Content   string               `json:"content"`
 				ToolCalls []llmclient.ToolCall `json:"tool_calls"`
 			} `json:"message"`
 			FinishReason string `json:"finish_reason"`
@@ -179,6 +183,7 @@ func (s *LLMProxyService) Chat(ctx context.Context, req llmclient.ChatRequest, o
 		Model:        out.Model,
 	}, nil
 }
+
 // Rerank 执行进程内 rerank 调用（路由 /v1/rerank，绕 HTTP+鉴权，保留熔断/限流/路由）。
 // rerank channel 由 provider_type=="rerank" 的通道承担，proxyRerank 内部处理路由。
 func (s *LLMProxyService) Rerank(ctx context.Context, req llmclient.RerankRequest) (*llmclient.RerankResponse, error) {

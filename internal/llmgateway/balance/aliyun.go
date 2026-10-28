@@ -81,6 +81,7 @@ func (p *aliyunProvider) Fetch(ctx context.Context) (*Info, error) {
 		return &Info{
 			ProviderType: "aliyun",
 			ChannelName:  p.channelName,
+			Kind:         KindUSD,
 			Balance:      0,
 			Currency:     "CNY",
 			FetchedAt:    time.Now(),
@@ -91,6 +92,7 @@ func (p *aliyunProvider) Fetch(ctx context.Context) (*Info, error) {
 	return &Info{
 		ProviderType: "aliyun",
 		ChannelName:  p.channelName,
+		Kind:         KindUSD,
 		Balance:      result.Data.AvailableAmount,
 		Currency:     result.Data.Currency,
 		TotalGranted: result.Data.AvailableAmount + result.Data.CreditLimit,

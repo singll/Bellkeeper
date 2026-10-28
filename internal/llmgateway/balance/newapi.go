@@ -11,11 +11,11 @@ import (
 // newAPIProvider fetches balance from new-api compatible sites (anyrouter, etc.).
 // Requires session-based auth (not sk-key).
 type newAPIProvider struct {
-	channelName string
-	baseURL     string
+	channelName  string
+	baseURL      string
 	userInfoPath string
-	apiUserKey  string
-	client      *http.Client
+	apiUserKey   string
+	client       *http.Client
 }
 
 func newNewAPIProvider(channelName, baseURL, apiUserKey, extraConfig string) (Provider, error) {
@@ -62,9 +62,9 @@ func (p *newAPIProvider) Fetch(ctx context.Context) (*Info, error) {
 
 	var result struct {
 		Data struct {
-			Quota      int64   `json:"quota"`
-			UsedQuota  int64   `json:"used_quota"`
-			RemainQuota int64  `json:"remain_quota"`
+			Quota       int64 `json:"quota"`
+			UsedQuota   int64 `json:"used_quota"`
+			RemainQuota int64 `json:"remain_quota"`
 		} `json:"data"`
 	}
 	if err := json.NewDecoder(resp.Body).Decode(&result); err != nil {
@@ -77,6 +77,7 @@ func (p *newAPIProvider) Fetch(ctx context.Context) (*Info, error) {
 	return &Info{
 		ProviderType: "newapi",
 		ChannelName:  p.channelName,
+		Kind:         KindUSD,
 		Balance:      float64(result.Data.RemainQuota) * pointToUSD,
 		Currency:     "USD",
 		TotalGranted: float64(result.Data.Quota) * pointToUSD,
