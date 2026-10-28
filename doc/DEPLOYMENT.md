@@ -1,6 +1,6 @@
 # Bellkeeper 部署与配置（现行）
 
-> 最后更新：2026-10-24 · 适用 SilkSpool `spool` 1.2+
+> 最后更新：2026-10-28 · 适用 SilkSpool `spool` 1.2+
 >
 > Bellkeeper 以 **product bundle** 发布；生产由 SilkSpool 的 `knowledge-stack` composition 引用，
 > `silkdata` 作为只读数据依赖。不要直接 SSH/Docker 操作远程主机。
@@ -28,6 +28,11 @@ SilkSpool/
 - **Bellkeeper 仓库**：产品镜像、`deploy/bundle.yaml`、产品备份/恢复 hook。
 - **SilkSpool**：解析 composition/wiring、生成 compose override、执行 plan/apply/rollback。
 - **silkdata**：数据层独立部署，`knowledge-stack` 只读 outputs，绝不 apply/升级/回滚它。
+
+> **认证模式（排障）**：Caddy 未启用 Forward Auth / Authelia 时，composition wiring 必须显式
+> `BELLKEEPER_SERVER_MODE: noauth`。若沿用 `release`，`AutheliaAuth` 会要求 `Remote-User` 头，
+> 前端所有 `/api/*` 请求直接 401（表现为 LLM 管理页渠道/模型组/用量/余额/告警全部加载失败）。
+> 修改 wiring 后 `spool plan <stack> prod --offline` → `spool apply <stack> prod --yes`。
 
 ---
 
