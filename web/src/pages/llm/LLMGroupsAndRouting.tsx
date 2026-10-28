@@ -33,6 +33,13 @@ const STRATEGIES: StrategyOption[] = [
   { value: 'complexity_aware', label: '复杂度自适应', desc: '按请求复杂度动态选层：简单→免费，中等→标准，复杂→高级。' },
 ]
 
+const GROUP_STRATEGIES = [
+  { value: 'priority-health', label: 'priority-health', desc: '按优先级 → 健康度 → 令牌余量选择（默认）。' },
+  { value: 'best-weight', label: 'best-weight', desc: '选择当前可用成员中权重最高者。' },
+  { value: 'least_latency', label: 'least_latency', desc: '选择 EWMA 延迟最低的成员。' },
+  { value: 'balance_aware', label: 'balance_aware', desc: '按延迟、错误率与剩余余额综合评分。' },
+]
+
 const LLMGroupsAndRouting: Component = () => {
   const toast = useToast()
 
@@ -160,7 +167,19 @@ const LLMGroupsAndRouting: Component = () => {
   const openGroupModal = (g?: LLMModelGroupConfig) => {
     if (g) {
       setEditingGroup(g)
-      setGrpForm({ name: g.name, description: g.description, strategy: g.strategy, sticky_ttl_seconds: g.sticky_ttl_seconds, members: g.members.map((m) => ({ channel_name: m.channel_name, model: m.model, weight: m.weight })) })
+      setGrpForm({
+        name: g.name,
+        description: g.description,
+        strategy: g.strategy,
+        sticky_ttl_seconds: g.sticky_ttl_seconds,
+        members: g.members.map((m) => ({
+          channel_name: m.channel_name,
+          model: m.model,
+          weight: m.weight,
+          max_context_tokens: m.max_context_tokens || 0,
+          max_output_tokens: m.max_output_tokens || 0,
+        })),
+      })
     } else {
       setEditingGroup(null)
       setGrpForm({ name: '', description: '', strategy: 'priority-health', sticky_ttl_seconds: 600, members: [] })
@@ -187,10 +206,24 @@ const LLMGroupsAndRouting: Component = () => {
     catch (err) { toast.error('删除失败: ' + (err as Error).message) }
   }
 
-  const addGroupMember = () => setGrpForm('members', produce((m) => { m.push({ channel_name: '', model: '', weight: 1 }) }))
+  const channelModels = (channelName: string): string[] => {
+    const ch = channels().find((c) => c.name === channelName)
+    return ch ? parseJsonArray(ch.models) : []
+  }
+
+  const addGroupMember = () => setGrpForm('members', produce((m) => {
+    const ch = enabledChannels()[0]
+    const models = ch ? parseJsonArray(ch.models) : []
+    m.push({ channel_name: ch?.name || '', model: models[0] || '', weight: 1, max_context_tokens: 0, max_output_tokens: 0 })
+  }))
   const removeGroupMember = (index: number) => setGrpForm('members', produce((m) => { m.splice(index, 1) }))
   const updateGroupMember = (index: number, field: keyof LLMModelGroupMemberConfig, value: string | number) => {
     setGrpForm('members', index, field, value)
+  }
+  const updateMemberChannel = (index: number, channelName: string) => {
+    const models = channelModels(channelName)
+    setGrpForm('members', index, 'channel_name', channelName)
+    setGrpForm('members', index, 'model', models[0] || '')
   }
 
   const loading = () => groupsData.loading || groupConfigsData.loading || channelsData.loading
@@ -518,11 +551,21 @@ const LLMGroupsAndRouting: Component = () => {
         </div>
       </div>
 
-      <Modal open={showGroupModal()} onClose={() => setShowGroupModal(false)} title={editingGroup() ? '编辑模型组' : '新增模型组'} size="lg">
+      <Modal open={showGroupModal()} onClose={() => setShowGroupModal(false)} title={editingGroup() ? '编辑模型组' : '新增模型组'} size="xl">
         <div class="space-y-4">
+          <div class="p-3 rounded-lg bg-dark-700/40 border border-dark-600/50 text-xs text-dark-400">
+            <span class="text-dark-200 font-medium">关联配置：</span>
+            成员只能从「渠道管理」已登记的模型中选择；新增渠道/模型请先去渠道页保存。定价与用量在「用量与计费」。未配置定价的模型成本按 0 计。
+          </div>
           <div class="grid grid-cols-1 sm:grid-cols-2 gap-4">
             <div><label class="label">名称</label><input class="input" value={grpForm.name} onInput={(e) => setGrpForm('name', e.currentTarget.value)} placeholder="如 pool-chat-free" /></div>
-            <div><label class="label">策略</label><select class="input" value={grpForm.strategy} onChange={(e) => setGrpForm('strategy', e.currentTarget.value)}><option value="priority-health">priority-health</option><option value="round-robin">round-robin</option></select></div>
+            <div>
+              <label class="label">策略</label>
+              <select class="input" value={grpForm.strategy} onChange={(e) => setGrpForm('strategy', e.currentTarget.value)}>
+                <For each={GROUP_STRATEGIES}>{(opt) => <option value={opt.value}>{opt.label}</option>}</For>
+              </select>
+              <p class="text-xs text-dark-500 mt-1">{GROUP_STRATEGIES.find((s) => s.value === grpForm.strategy)?.desc}</p>
+            </div>
           </div>
           <div class="grid grid-cols-1 sm:grid-cols-2 gap-4">
             <div><label class="label">描述</label><input class="input" value={grpForm.description} onInput={(e) => setGrpForm('description', e.currentTarget.value)} placeholder="可选描述" /></div>
@@ -530,7 +573,10 @@ const LLMGroupsAndRouting: Component = () => {
           </div>
           <div>
             <div class="flex items-center justify-between mb-2">
-              <label class="label mb-0">成员</label>
+              <div>
+                <label class="label mb-0">成员</label>
+                <p class="text-xs text-dark-500 mt-1">上下文/输出上限可留 0（未知）。输出上限会在请求前封顶 max_tokens；上下文不足的成员会被自动跳过。</p>
+              </div>
               <button class="btn btn-ghost btn-sm" onClick={addGroupMember}>
                 <svg class="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M12 4v16m8-8H4" /></svg>
                 添加成员
@@ -538,12 +584,23 @@ const LLMGroupsAndRouting: Component = () => {
             </div>
             <Show when={grpForm.members.length > 0} fallback={<p class="text-sm text-dark-400">暂无成员，点击上方按钮添加。</p>}>
               <div class="space-y-2">
+                <div class="hidden sm:grid grid-cols-[1.2fr_1.4fr_70px_110px_110px_36px] gap-2 text-xs text-dark-500 px-1">
+                  <span>渠道</span><span>模型</span><span>权重</span><span>上下文 tokens</span><span>输出 tokens</span><span />
+                </div>
                 <For each={grpForm.members}>
                   {(member, index) => (
-                    <div class="grid grid-cols-[1fr_1fr_80px_40px] gap-2 items-end">
-                      <input class="input" value={member.channel_name} onInput={(e) => updateGroupMember(index(), 'channel_name', e.currentTarget.value)} placeholder="渠道名" />
-                      <input class="input" value={member.model} onInput={(e) => updateGroupMember(index(), 'model', e.currentTarget.value)} placeholder="模型名" />
+                    <div class="grid grid-cols-1 sm:grid-cols-[1.2fr_1.4fr_70px_110px_110px_36px] gap-2 items-center">
+                      <select class="input" value={member.channel_name} onChange={(e) => updateMemberChannel(index(), e.currentTarget.value)}>
+                        <option value="">选择渠道</option>
+                        <For each={channels()}>{(ch) => <option value={ch.name}>{ch.name}{ch.is_enabled ? '' : '（已禁用）'}</option>}</For>
+                      </select>
+                      <select class="input" value={member.model} onChange={(e) => updateGroupMember(index(), 'model', e.currentTarget.value)}>
+                        <option value="">选择模型</option>
+                        <For each={channelModels(member.channel_name)}>{(m) => <option value={m}>{m}</option>}</For>
+                      </select>
                       <input class="input" type="number" value={member.weight} onInput={(e) => updateGroupMember(index(), 'weight', parseInt(e.currentTarget.value) || 1)} placeholder="权重" />
+                      <input class="input" type="number" value={member.max_context_tokens || 0} onInput={(e) => updateGroupMember(index(), 'max_context_tokens', parseInt(e.currentTarget.value) || 0)} placeholder="0=未知" />
+                      <input class="input" type="number" value={member.max_output_tokens || 0} onInput={(e) => updateGroupMember(index(), 'max_output_tokens', parseInt(e.currentTarget.value) || 0)} placeholder="0=未知" />
                       <button class="btn btn-ghost btn-sm text-red-400" onClick={() => removeGroupMember(index())}>
                         <svg class="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M6 18L18 6M6 6l12 12" /></svg>
                       </button>

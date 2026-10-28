@@ -169,9 +169,11 @@ export interface LLMChannelConfig {
   api_key_env: string
   api_key_status: 'configured' | 'missing' | 'direct'  // resolved from env var
   api_key_preview: string  // masked preview e.g. "sk-o...Lvr"
-  provider_type: string  // "openai" | "anthropic"
+  provider_type: string  // "openai" | "anthropic" | "rerank"
+  vendor?: string        // upstream vendor, e.g. deepseek / moonshot / opencodego
   rpm: number
   rpd: number
+  quota_window_seconds?: number // 0 = calendar day; >0 = rolling window
   priority: number
   is_free: boolean
   is_enabled: boolean
@@ -203,6 +205,8 @@ export interface LLMModelGroupMemberConfig {
   channel_name: string
   model: string
   weight: number
+  max_context_tokens?: number
+  max_output_tokens?: number
 }
 
 // Activity Log Types
@@ -514,6 +518,8 @@ export interface LLMBalanceInfo {
   provider_type: string
   channel_name: string
   balance: number
+  /** Unit of `balance`: monetary, remaining ratio, or provider quota units. */
+  kind?: 'usd' | 'fraction' | 'quota'
   currency: string
   total_granted: number
   total_used: number

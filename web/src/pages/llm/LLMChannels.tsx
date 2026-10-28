@@ -72,8 +72,10 @@ const LLMChannels: Component = () => {
     base_url: '',
     api_key_env: '',
     provider_type: 'openai' as string,
+    vendor: '',
     rpm: 500,
     rpd: 50000,
+    quota_window_seconds: 0,
     priority: 1,
     is_free: false,
     is_enabled: true,
@@ -90,7 +92,8 @@ const LLMChannels: Component = () => {
       setEditingChannel(ch)
       setChForm({
         name: ch.name, base_url: ch.base_url, api_key_env: ch.api_key_env,
-        provider_type: ch.provider_type || 'openai', rpm: ch.rpm, rpd: ch.rpd,
+        provider_type: ch.provider_type || 'openai', vendor: ch.vendor || '',
+        rpm: ch.rpm, rpd: ch.rpd, quota_window_seconds: ch.quota_window_seconds || 0,
         priority: ch.priority, is_free: ch.is_free, is_enabled: ch.is_enabled, models: ch.models,
         tier: ch.tier || '', task_types: ch.task_types || '',
         balance_provider_type: ch.balance_provider_type || '',
@@ -99,7 +102,7 @@ const LLMChannels: Component = () => {
       })
     } else {
       setEditingChannel(null)
-      setChForm({ name: '', base_url: '', api_key_env: '', provider_type: 'openai', rpm: 500, rpd: 50000, priority: 1, is_free: false, is_enabled: true, models: '[]', tier: '', task_types: '', balance_provider_type: '', balance_config_json: '', model_rpm_overrides: '' })
+      setChForm({ name: '', base_url: '', api_key_env: '', provider_type: 'openai', vendor: '', rpm: 500, rpd: 50000, quota_window_seconds: 0, priority: 1, is_free: false, is_enabled: true, models: '[]', tier: '', task_types: '', balance_provider_type: '', balance_config_json: '', model_rpm_overrides: '' })
     }
     setShowChannelModal(true)
   }
@@ -289,6 +292,7 @@ const LLMChannels: Component = () => {
   const baseUrlPlaceholder = () => {
     const pt = chForm().provider_type
     if (pt === 'anthropic') return '如 https://api.anthropic.com (不含 /v1)'
+    if (pt === 'rerank') return '如 https://api.jina.ai (不含 /v1)'
     return '如 https://api.siliconflow.cn (不含 /v1)'
   }
 
@@ -439,28 +443,54 @@ const LLMChannels: Component = () => {
 
       <Modal open={showChannelModal()} onClose={() => setShowChannelModal(false)} title={editingChannel() ? '编辑渠道' : '新增渠道'} size="xl">
         <div class="space-y-4">
+          <div class="p-3 rounded-lg bg-dark-700/40 border border-dark-600/50 text-xs text-dark-400">
+            <span class="text-dark-200 font-medium">关联配置：</span>
+            API Key 保存后点渠道卡片的「凭证」添加；模型组/池在「模型组与路由」；定价在「用量与计费」。保存渠道后会自动热重载，无需重启。
+          </div>
           <div class="grid grid-cols-1 sm:grid-cols-2 gap-4">
             <div><label class="label">名称</label><input class="input" value={chForm().name} onInput={(e) => setChForm((p) => ({ ...p, name: e.currentTarget.value }))} placeholder="如 siliconflow" /></div>
-            <div><label class="label">供应商类型</label><select class="input" value={chForm().provider_type} onChange={(e) => setChForm((p) => ({ ...p, provider_type: e.currentTarget.value }))}><option value="openai">OpenAI 兼容</option><option value="anthropic">Anthropic (Claude)</option></select></div>
+            <div>
+              <label class="label">协议类型</label>
+              <select class="input" value={chForm().provider_type} onChange={(e) => setChForm((p) => ({ ...p, provider_type: e.currentTarget.value }))}>
+                <option value="openai">OpenAI 兼容</option>
+                <option value="anthropic">Anthropic (Claude)</option>
+                <option value="rerank">Rerank</option>
+              </select>
+            </div>
           </div>
           <div class="grid grid-cols-1 sm:grid-cols-2 gap-4">
             <div><label class="label">Base URL</label><input class="input" value={chForm().base_url} onInput={(e) => setChForm((p) => ({ ...p, base_url: e.currentTarget.value }))} placeholder={baseUrlPlaceholder()} /></div>
-            <div class="flex items-center">
-              <div class="p-3 rounded-lg bg-dark-700/40 border border-dark-600/50 text-xs text-dark-400 w-full">
-                <span class="text-dark-200 font-medium">API Key 管理：</span>密钥已统一至凭证区管理，请点击渠道卡片上的「凭证」按钮添加/编辑。
-              </div>
+            <div>
+              <label class="label">厂商 (vendor)</label>
+              <input class="input" list="llm-vendors" value={chForm().vendor} onInput={(e) => setChForm((p) => ({ ...p, vendor: e.currentTarget.value }))} placeholder="留空自动识别；如 deepseek、moonshot、opencodego" />
+              <datalist id="llm-vendors">
+                <option value="deepseek" />
+                <option value="moonshot" />
+                <option value="kimi-code" />
+                <option value="opencodego" />
+                <option value="sensenova" />
+                <option value="siliconflow" />
+                <option value="aliyun" />
+                <option value="newapi" />
+                <option value="anthropic" />
+              </datalist>
             </div>
           </div>
-          <div class="grid grid-cols-2 sm:grid-cols-4 gap-4">
+          <div class="grid grid-cols-2 sm:grid-cols-5 gap-4">
             <div><label class="label">RPM</label><input class="input" type="number" value={chForm().rpm} onInput={(e) => setChForm((p) => ({ ...p, rpm: parseInt(e.currentTarget.value) || 0 }))} /></div>
             <div><label class="label">RPD</label><input class="input" type="number" value={chForm().rpd} onInput={(e) => setChForm((p) => ({ ...p, rpd: parseInt(e.currentTarget.value) || 0 }))} /></div>
+            <div><label class="label">滚动窗口 (秒)</label><input class="input" type="number" value={chForm().quota_window_seconds} onInput={(e) => setChForm((p) => ({ ...p, quota_window_seconds: parseInt(e.currentTarget.value) || 0 }))} placeholder="0=按天" /></div>
             <div><label class="label">优先级</label><input class="input" type="number" value={chForm().priority} onInput={(e) => setChForm((p) => ({ ...p, priority: parseInt(e.currentTarget.value) || 1 }))} /></div>
             <div class="flex items-end gap-4">
               <label class="flex items-center gap-2 cursor-pointer"><input type="checkbox" checked={chForm().is_free} onChange={(e) => setChForm((p) => ({ ...p, is_free: e.currentTarget.checked }))} class="w-4 h-4 rounded" /><span class="text-sm text-dark-200">免费</span></label>
               <label class="flex items-center gap-2 cursor-pointer"><input type="checkbox" checked={chForm().is_enabled} onChange={(e) => setChForm((p) => ({ ...p, is_enabled: e.currentTarget.checked }))} class="w-4 h-4 rounded" /><span class="text-sm text-dark-200">启用</span></label>
             </div>
           </div>
-          <div><label class="label">模型列表 (JSON 数组)</label><textarea class="input min-h-[80px]" value={chForm().models} onInput={(e) => setChForm((p) => ({ ...p, models: e.currentTarget.value }))} placeholder='["Qwen/Qwen3-8B", "Qwen/Qwen2.5-7B-Instruct"]' /></div>
+          <div>
+            <label class="label">模型列表 (JSON 数组)</label>
+            <textarea class="input min-h-[80px]" value={chForm().models} onInput={(e) => setChForm((p) => ({ ...p, models: e.currentTarget.value }))} placeholder='["Qwen/Qwen3-8B", "Qwen/Qwen2.5-7B-Instruct"]' />
+            <p class="text-xs text-dark-500 mt-1">这里只登记上游真实模型名；保存后请到「模型组与路由」把模型加入池，否则不会被路由到。</p>
+          </div>
           <div class="grid grid-cols-1 sm:grid-cols-2 gap-4">
             <div>
               <label class="label">层级 (tier)</label>
@@ -474,12 +504,20 @@ const LLMChannels: Component = () => {
             <div>
               <label class="label">任务类型 (JSON 数组)</label>
               <input class="input" value={chForm().task_types} onInput={(e) => setChForm((p) => ({ ...p, task_types: e.currentTarget.value }))} placeholder='["coding", "analysis"]' />
+              <p class="text-xs text-dark-500 mt-1">空 = 所有任务可用；任务过滤在模型组成员上生效。</p>
             </div>
           </div>
           <div class="grid grid-cols-1 sm:grid-cols-2 gap-4">
             <div>
               <label class="label">余额供应商类型</label>
-              <input class="input" value={chForm().balance_provider_type} onInput={(e) => setChForm((p) => ({ ...p, balance_provider_type: e.currentTarget.value }))} placeholder="如 siliconflow、openrouter" />
+              <select class="input" value={chForm().balance_provider_type} onChange={(e) => setChForm((p) => ({ ...p, balance_provider_type: e.currentTarget.value }))}>
+                <option value="">不监控余额</option>
+                <option value="deepseek">deepseek</option>
+                <option value="moonshot">moonshot</option>
+                <option value="newapi">newapi</option>
+                <option value="aliyun">aliyun</option>
+                <option value="opencodego">opencodego</option>
+              </select>
             </div>
             <div>
               <label class="label">余额配置 (非密参数 JSON)</label>
@@ -490,6 +528,9 @@ const LLMChannels: Component = () => {
             <label class="label">模型 RPM 覆盖 (JSON: model→rpm)</label>
             <input class="input" value={chForm().model_rpm_overrides} onInput={(e) => setChForm((p) => ({ ...p, model_rpm_overrides: e.currentTarget.value }))} placeholder='{"deepseek-chat": 10, "Qwen/Qwen3-8B": 20}' />
           </div>
+          <div class="p-3 rounded-lg bg-amber-500/10 border border-amber-500/20 text-xs text-amber-200">
+            保存后若渠道卡片显示「未配置密钥」，请立即点「凭证」添加 purpose=api 的密钥；余额监控使用 purpose=balance（缺省会回退到 api）。
+          </div>
           <div class="flex justify-end gap-3 pt-2">
             <button class="btn btn-secondary" onClick={() => setShowChannelModal(false)}>取消</button>
             <button class="btn btn-primary" disabled={saving()} onClick={saveChannel}>{saving() ? '保存中...' : '保存'}</button>
@@ -499,8 +540,9 @@ const LLMChannels: Component = () => {
 
       <Modal open={showCredModal()} onClose={() => setShowCredModal(false)} title={`${credChannelName()} — 凭证管理`} size="lg">
         <div class="space-y-4">
-          <div class="p-3 rounded-lg bg-dark-700/40 border border-dark-600/50 text-xs text-dark-400">
-            <span class="text-dark-200 font-medium">安全说明：</span>凭证在服务端加密存储（AES-256-GCM），API 仅返回已掩盖的预览。可管理多个用途×来源的凭证。
+          <div class="p-3 rounded-lg bg-dark-700/40 border border-dark-600/50 text-xs text-dark-400 space-y-1">
+            <p><span class="text-dark-200 font-medium">安全说明：</span>凭证在服务端加密存储（AES-256-GCM），API 仅返回已掩盖的预览。可管理多个用途×来源的凭证。</p>
+            <p><span class="text-dark-200 font-medium">用途：</span>purpose=api 供聊天/补全使用；purpose=balance 供余额监控使用（未配置时回退 api）。保存后自动热重载。</p>
           </div>
 
           <div>

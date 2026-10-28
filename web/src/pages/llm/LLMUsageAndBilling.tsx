@@ -3,7 +3,7 @@ import type { LLMToken, LLMTokenUsageDaily, LLMModelPricing, LLMUsageByModel } f
 import { llmProxyApi } from '@/api'
 import { useToast } from '@/components/Toast'
 import Modal from '@/components/Modal'
-import { formatCents, formatDateShort } from './shared'
+import { formatCents, formatDateShort, parseJsonArray } from './shared'
 
 const LLMUsageAndBilling: Component = () => {
   const toast = useToast()
@@ -24,6 +24,13 @@ const LLMUsageAndBilling: Component = () => {
 
   const [pricingData, { refetch: refetchPricing }] = createResource(() => llmProxyApi.listPricing())
   const pricing = () => pricingData()?.data || []
+
+  const [channelsData] = createResource(() => llmProxyApi.listChannels())
+  const channels = () => channelsData()?.data || []
+  const pricingModels = (channelName: string) => {
+    const ch = channels().find((c) => c.name === channelName)
+    return ch ? parseJsonArray(ch.models) : []
+  }
 
   const [tokensData, { refetch: refetchTokens }] = createResource(() => llmProxyApi.listTokens())
   const tokens = () => tokensData()?.data || []
@@ -350,9 +357,29 @@ const LLMUsageAndBilling: Component = () => {
 
       <Modal open={showPricingModal()} onClose={() => setShowPricingModal(false)} title={editingPricing() ? '编辑定价' : '新增定价'}>
         <div class="space-y-4">
+          <div class="p-3 rounded-lg bg-dark-700/40 border border-dark-600/50 text-xs text-dark-400">
+            <span class="text-dark-200 font-medium">关联配置：</span>
+            渠道与模型来自「渠道管理」已登记的清单；新增模型请先到渠道页保存。未配置定价的模型按 0 成本记账。
+          </div>
           <div class="grid grid-cols-2 gap-3">
-            <div><label class="label">渠道</label><input class="input" value={pricingForm().channel_name} onInput={(e) => setPricingForm((p) => ({ ...p, channel_name: e.currentTarget.value }))} /></div>
-            <div><label class="label">模型</label><input class="input" value={pricingForm().model} onInput={(e) => setPricingForm((p) => ({ ...p, model: e.currentTarget.value }))} /></div>
+            <div>
+              <label class="label">渠道</label>
+              <select class="input" value={pricingForm().channel_name} onChange={(e) => {
+                const channelName = e.currentTarget.value
+                const models = pricingModels(channelName)
+                setPricingForm((p) => ({ ...p, channel_name: channelName, model: models[0] || '' }))
+              }}>
+                <option value="">选择渠道</option>
+                <For each={channels()}>{(ch) => <option value={ch.name}>{ch.name}</option>}</For>
+              </select>
+            </div>
+            <div>
+              <label class="label">模型</label>
+              <select class="input" value={pricingForm().model} onChange={(e) => setPricingForm((p) => ({ ...p, model: e.currentTarget.value }))}>
+                <option value="">选择模型</option>
+                <For each={pricingModels(pricingForm().channel_name)}>{(m) => <option value={m}>{m}</option>}</For>
+              </select>
+            </div>
           </div>
           <div class="grid grid-cols-3 gap-3">
             <div><label class="label">Input / 1M (¢)</label><input type="number" class="input" value={pricingForm().input_price_per_1m_cents} onInput={(e) => setPricingForm((p) => ({ ...p, input_price_per_1m_cents: parseInt(e.currentTarget.value) || 0 }))} /></div>
