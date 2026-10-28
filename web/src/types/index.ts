@@ -209,6 +209,48 @@ export interface LLMModelGroupMemberConfig {
   max_output_tokens?: number
 }
 
+// Model catalog: aggregated (channel, model) metadata, no credentials.
+export interface LLMModelCatalogEntry {
+  channel_id: number
+  channel_name: string
+  model: string
+  provider_type: string
+  vendor: string
+  is_free: boolean
+  is_enabled: boolean
+  tier: string
+  rpm: number
+  rpd: number
+  max_context_tokens: number
+  max_output_tokens: number
+  groups: string[]
+}
+
+export interface LLMChannelConnectionTestResult {
+  channel_id: number
+  channel_name: string
+  protocol: string
+  vendor: string
+  model: string
+  ok: boolean
+  status_code: number
+  latency_ms: number
+  class?: string
+  message: string
+  tested_at: string
+}
+
+export interface LLMChannelModelDiscoveryResult {
+  channel_id: number
+  channel_name: string
+  protocol: string
+  source: 'upstream' | 'configured'
+  models: string[]
+  configured: string[]
+  warning?: string
+  fetched_at: string
+}
+
 // Activity Log Types
 
 export interface ActivityLog {

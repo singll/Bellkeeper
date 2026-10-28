@@ -12,6 +12,9 @@ import type {
   LLMChannelStatus,
   LLMGroupStatus,
   LLMChannelConfig,
+  LLMModelCatalogEntry,
+  LLMChannelConnectionTestResult,
+  LLMChannelModelDiscoveryResult,
   LLMModelGroupConfig,
   LLMProxyLog,
   LLMConversationBinding,
@@ -236,6 +239,18 @@ export const llmProxyApi = {
 
   deleteChannel: (id: number) =>
     request<{ message: string }>(`/llm/config/channels/${id}`, { method: 'DELETE' }),
+
+  listModelCatalog: () =>
+    request<{ data: { models: LLMModelCatalogEntry[] } }>('/llm/config/models'),
+
+  testChannelConnection: (id: number, model?: string) =>
+    request<{ data: LLMChannelConnectionTestResult }>(`/llm/config/channels/${id}/test`, {
+      method: 'POST',
+      body: JSON.stringify({ model: model || '' }),
+    }),
+
+  discoverChannelModels: (id: number) =>
+    request<{ data: LLMChannelModelDiscoveryResult }>(`/llm/config/channels/${id}/models`),
 
   listGroups: () =>
     request<{ data: LLMModelGroupConfig[] }>('/llm/config/groups'),

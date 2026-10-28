@@ -46,11 +46,13 @@ const LLMGroupsAndRouting: Component = () => {
   const [groupsData, { refetch: refetchGroups }] = createResource(() => llmProxyApi.groupsStatus())
   const [groupConfigsData, { refetch: refetchGroupConfigs }] = createResource(() => llmProxyApi.listGroups())
   const [channelsData, { refetch: refetchChannels }] = createResource(() => llmProxyApi.listChannels())
+  const [catalogData, { refetch: refetchCatalog }] = createResource(() => llmProxyApi.listModelCatalog())
   const [rateLimitsData, { refetch: refetchRateLimits }] = createResource(() => llmProxyApi.listRateLimits())
 
   const groups = () => groupsData()?.data || []
   const groupConfigs = () => groupConfigsData()?.data || []
   const channels = () => channelsData()?.data || []
+  const catalog = () => catalogData()?.data?.models || []
   const enabledChannels = createMemo(() => channels().filter((c) => c.is_enabled))
 
   const [busyGroup, setBusyGroup] = createSignal<string | null>(null)
@@ -127,7 +129,7 @@ const LLMGroupsAndRouting: Component = () => {
     loadConversations()
   })
 
-  const refetchAll = () => Promise.all([refetchGroups(), refetchGroupConfigs(), refetchChannels(), loadStrategy(), loadConversations(), refetchRateLimits()])
+  const refetchAll = () => Promise.all([refetchGroups(), refetchGroupConfigs(), refetchChannels(), refetchCatalog(), loadStrategy(), loadConversations(), refetchRateLimits()])
 
   const usingDefaultTaskTypes = createMemo(
     () => !enabledChannels().some((c) => parseJsonArray(c.task_types).length > 0)
@@ -207,13 +209,15 @@ const LLMGroupsAndRouting: Component = () => {
   }
 
   const channelModels = (channelName: string): string[] => {
+    const fromCatalog = catalog().filter((entry) => entry.channel_name === channelName).map((entry) => entry.model)
+    if (fromCatalog.length > 0) return fromCatalog
     const ch = channels().find((c) => c.name === channelName)
     return ch ? parseJsonArray(ch.models) : []
   }
 
   const addGroupMember = () => setGrpForm('members', produce((m) => {
     const ch = enabledChannels()[0]
-    const models = ch ? parseJsonArray(ch.models) : []
+    const models = channelModels(ch?.name || '')
     m.push({ channel_name: ch?.name || '', model: models[0] || '', weight: 1, max_context_tokens: 0, max_output_tokens: 0 })
   }))
   const removeGroupMember = (index: number) => setGrpForm('members', produce((m) => { m.splice(index, 1) }))
@@ -226,7 +230,7 @@ const LLMGroupsAndRouting: Component = () => {
     setGrpForm('members', index, 'model', models[0] || '')
   }
 
-  const loading = () => groupsData.loading || groupConfigsData.loading || channelsData.loading
+  const loading = () => groupsData.loading || groupConfigsData.loading || channelsData.loading || catalogData.loading
 
   return (
     <div class="animate-fade-in">

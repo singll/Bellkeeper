@@ -1,5 +1,11 @@
 import { Component, For, Show, createMemo, createSignal, createResource } from 'solid-js'
-import type { LLMChannelStatus, LLMChannelConfig, LLMChannelCredentialView } from '@/types'
+import type {
+  LLMChannelStatus,
+  LLMChannelConfig,
+  LLMChannelCredentialView,
+  LLMChannelConnectionTestResult,
+  LLMChannelModelDiscoveryResult,
+} from '@/types'
 import { llmProxyApi } from '@/api'
 import { useToast } from '@/components/Toast'
 import Modal from '@/components/Modal'
@@ -136,6 +142,140 @@ const LLMChannels: Component = () => {
       await refetchAll()
     } catch (err) {
       toast.error('删除失败: ' + (err as Error).message)
+    }
+  }
+
+  // --- New model wizard: choose channel → test/discover → save models ---
+  const [showModelWizard, setShowModelWizard] = createSignal(false)
+  const [wizardStep, setWizardStep] = createSignal(1)
+  const [wizardChannelId, setWizardChannelId] = createSignal<number | null>(null)
+  const [wizardModel, setWizardModel] = createSignal('')
+  const [wizardTest, setWizardTest] = createSignal<LLMChannelConnectionTestResult | null>(null)
+  const [wizardDiscovery, setWizardDiscovery] = createSignal<LLMChannelModelDiscoveryResult | null>(null)
+  const [wizardSelected, setWizardSelected] = createSignal<string[]>([])
+  const [wizardManual, setWizardManual] = createSignal('')
+  const [wizardBusy, setWizardBusy] = createSignal(false)
+
+  const wizardChannel = createMemo(() => channelConfigs().find((c) => c.id === wizardChannelId()) || null)
+  const wizardConfiguredModels = () => parseJsonArray(wizardChannel()?.models)
+  const wizardAvailableModels = createMemo(() => {
+    const set = new Set<string>(wizardConfiguredModels())
+    ;(wizardDiscovery()?.models || []).forEach((m) => set.add(m))
+    wizardSelected().forEach((m) => set.add(m))
+    return Array.from(set).sort()
+  })
+  const wizardNewModels = createMemo(() => {
+    const existing = new Set(wizardConfiguredModels())
+    return wizardSelected().filter((m) => !existing.has(m))
+  })
+
+  const openModelWizard = () => {
+    setWizardStep(1)
+    setWizardChannelId(null)
+    setWizardModel('')
+    setWizardTest(null)
+    setWizardDiscovery(null)
+    setWizardSelected([])
+    setWizardManual('')
+    setShowModelWizard(true)
+  }
+
+  const chooseWizardChannel = (ch: LLMChannelConfig) => {
+    setWizardChannelId(ch.id)
+    setWizardModel(parseJsonArray(ch.models)[0] || '')
+    setWizardTest(null)
+    setWizardDiscovery(null)
+    setWizardSelected([])
+    setWizardManual('')
+    setWizardStep(2)
+  }
+
+  const toggleWizardModel = (model: string) => {
+    setWizardSelected((prev) => prev.includes(model) ? prev.filter((m) => m !== model) : [...prev, model])
+  }
+
+  const addWizardManual = () => {
+    const value = wizardManual().trim()
+    if (!value) return
+    setWizardSelected((prev) => prev.includes(value) ? prev : [...prev, value])
+    setWizardModel(value)
+    setWizardManual('')
+  }
+
+  const runWizardTest = async () => {
+    const ch = wizardChannel()
+    if (!ch) return
+    if (!wizardModel()) {
+      toast.error('请先选择要测试的模型')
+      return
+    }
+    setWizardBusy(true)
+    try {
+      const result = await llmProxyApi.testChannelConnection(ch.id, wizardModel())
+      setWizardTest(result.data)
+      if (result.data.ok) toast.success(result.data.message)
+      else toast.error(result.data.message)
+    } catch (err) {
+      toast.error('连接测试失败: ' + (err as Error).message)
+    } finally {
+      setWizardBusy(false)
+    }
+  }
+
+  const runWizardDiscover = async () => {
+    const ch = wizardChannel()
+    if (!ch) return
+    setWizardBusy(true)
+    try {
+      const result = await llmProxyApi.discoverChannelModels(ch.id)
+      setWizardDiscovery(result.data)
+      if (!wizardModel() && result.data.models.length > 0) setWizardModel(result.data.models[0])
+      if (result.data.warning) toast.error(result.data.warning)
+      else toast.success(`已从上游发现 ${result.data.models.length} 个模型`)
+    } catch (err) {
+      toast.error('模型发现失败: ' + (err as Error).message)
+    } finally {
+      setWizardBusy(false)
+    }
+  }
+
+  const saveWizardModels = async () => {
+    const ch = wizardChannel()
+    if (!ch) return
+    const existing = parseJsonArray(ch.models)
+    const merged = Array.from(new Set([...existing, ...wizardSelected()]))
+    if (merged.length === existing.length) {
+      toast.error('请至少选择一个尚未登记的新模型')
+      return
+    }
+    setWizardBusy(true)
+    try {
+      await llmProxyApi.updateChannel(ch.id, {
+        name: ch.name,
+        base_url: ch.base_url,
+        api_key_env: ch.api_key_env,
+        provider_type: ch.provider_type,
+        vendor: ch.vendor,
+        rpm: ch.rpm,
+        rpd: ch.rpd,
+        quota_window_seconds: ch.quota_window_seconds || 0,
+        priority: ch.priority,
+        is_free: ch.is_free,
+        is_enabled: ch.is_enabled,
+        models: JSON.stringify(merged),
+        tier: ch.tier || '',
+        task_types: ch.task_types || '',
+        balance_provider_type: ch.balance_provider_type || '',
+        balance_config_json: ch.balance_config_json || '',
+        model_rpm_overrides: ch.model_rpm_overrides || '',
+      })
+      toast.success(`已新增 ${merged.length - existing.length} 个模型；请到「模型组与路由」加入池`)
+      setShowModelWizard(false)
+      await refetchAll()
+    } catch (err) {
+      toast.error('保存失败: ' + (err as Error).message)
+    } finally {
+      setWizardBusy(false)
     }
   }
 
@@ -303,12 +443,20 @@ const LLMChannels: Component = () => {
           <h1 class="text-2xl font-bold text-white">渠道管理</h1>
           <p class="text-sm text-dark-400 mt-1">查看运行状态、管理配置与凭证</p>
         </div>
-        <button class="btn btn-primary btn-sm" onClick={() => openChannelModal()}>
-          <svg class="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-            <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M12 4v16m8-8H4" />
-          </svg>
-          新增渠道
-        </button>
+        <div class="flex items-center gap-2">
+          <button class="btn btn-secondary btn-sm" onClick={openModelWizard}>
+            <svg class="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+              <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M4 6h16M4 12h16M4 18h10" />
+            </svg>
+            新增模型
+          </button>
+          <button class="btn btn-primary btn-sm" onClick={() => openChannelModal()}>
+            <svg class="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+              <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M12 4v16m8-8H4" />
+            </svg>
+            新增渠道
+          </button>
+        </div>
       </div>
 
       <div class="space-y-6">
@@ -534,6 +682,196 @@ const LLMChannels: Component = () => {
           <div class="flex justify-end gap-3 pt-2">
             <button class="btn btn-secondary" onClick={() => setShowChannelModal(false)}>取消</button>
             <button class="btn btn-primary" disabled={saving()} onClick={saveChannel}>{saving() ? '保存中...' : '保存'}</button>
+          </div>
+        </div>
+      </Modal>
+
+      <Modal open={showModelWizard()} onClose={() => setShowModelWizard(false)} title="新增模型向导" size="xl">
+        <div class="space-y-4">
+          <div class="flex flex-wrap items-center gap-2 text-xs">
+            <For each={['选择渠道', '测试 / 发现', '确认保存']}>
+              {(label, index) => (
+                <div class="flex items-center gap-2">
+                  <div class={`flex items-center gap-2 ${wizardStep() === index() + 1 ? 'text-primary-300' : 'text-dark-500'}`}>
+                    <span class={`w-6 h-6 rounded-full flex items-center justify-center border ${wizardStep() === index() + 1 ? 'border-primary-400 bg-primary-500/10' : 'border-dark-600'}`}>
+                      {index() + 1}
+                    </span>
+                    <span>{label}</span>
+                  </div>
+                  <Show when={index() < 2}><span class="w-6 h-px bg-dark-600" /></Show>
+                </div>
+              )}
+            </For>
+          </div>
+
+          <Show when={wizardStep() === 1}>
+            <div class="space-y-2 max-h-96 overflow-y-auto pr-1">
+              <For each={channelConfigs()}>
+                {(ch) => (
+                  <button
+                    class="w-full text-left p-3 rounded-lg bg-dark-700/30 border border-dark-600/50 hover:border-primary-500/50 transition-colors"
+                    onClick={() => chooseWizardChannel(ch)}
+                  >
+                    <div class="flex flex-wrap items-center gap-2">
+                      <span class="font-medium text-white">{ch.name}</span>
+                      <span class="badge badge-gray">{ch.provider_type || 'openai'}</span>
+                      <Show when={ch.vendor}><span class="badge badge-gray">{ch.vendor}</span></Show>
+                      <span class="badge badge-primary">{parseJsonArray(ch.models).length} 个模型</span>
+                      <Show when={!ch.is_enabled}><span class="badge badge-warning">已禁用</span></Show>
+                    </div>
+                    <div class="text-xs text-dark-500 break-all mt-1">{ch.base_url}</div>
+                  </button>
+                )}
+              </For>
+            </div>
+            <p class="text-xs text-dark-500">新渠道请先点「新增渠道」保存并添加凭证，再回到本向导。</p>
+          </Show>
+
+          <Show when={wizardStep() === 2}>
+            <Show when={wizardChannel()}>
+              {(ch) => (
+                <div class="p-3 rounded-lg bg-dark-700/40 border border-dark-600/50 text-xs text-dark-400">
+                  <span class="text-dark-200 font-medium">{ch().name}</span>
+                  <span class="mx-2">·</span>{ch().provider_type || 'openai'}
+                  <Show when={ch().vendor}><span class="mx-2">·</span>{ch().vendor}</Show>
+                  <span class="mx-2">·</span>{parseJsonArray(ch().models).length} 个已登记模型
+                </div>
+              )}
+            </Show>
+
+            <div class="grid grid-cols-1 sm:grid-cols-2 gap-4">
+              <div>
+                <label class="label">测试模型</label>
+                <select class="input" value={wizardModel()} onChange={(e) => setWizardModel(e.currentTarget.value)}>
+                  <option value="">选择模型</option>
+                  <For each={wizardAvailableModels()}>{(m) => <option value={m}>{m}</option>}</For>
+                </select>
+              </div>
+              <div class="flex items-end gap-2">
+                <button class="btn btn-secondary btn-sm" disabled={wizardBusy() || !wizardModel()} onClick={runWizardTest}>
+                  {wizardBusy() ? '检测中...' : '测试连接'}
+                </button>
+                <button class="btn btn-secondary btn-sm" disabled={wizardBusy()} onClick={runWizardDiscover}>
+                  从上游发现模型
+                </button>
+              </div>
+            </div>
+
+            <Show when={wizardTest()}>
+              {(result) => (
+                <div class={`p-3 rounded-lg border text-xs ${result().ok ? 'bg-emerald-500/10 border-emerald-500/20 text-emerald-200' : 'bg-red-500/10 border-red-500/20 text-red-200'}`}>
+                  <div class="font-medium">
+                    {result().ok ? '连接成功' : '连接失败'}
+                    <span class="ml-2 font-normal">
+                      {result().protocol} · {result().model} · {result().status_code || '--'} · {result().latency_ms}ms
+                    </span>
+                  </div>
+                  <div class="mt-1 break-all">{result().message}</div>
+                  <div class="mt-1 text-dark-400">测试不写入用量/计费，不改变渠道健康与熔断状态。</div>
+                </div>
+              )}
+            </Show>
+
+            <Show when={wizardDiscovery()}>
+              {(discovery) => (
+                <div class="space-y-2">
+                  <div class={`p-3 rounded-lg border text-xs ${discovery().warning ? 'bg-amber-500/10 border-amber-500/20 text-amber-200' : 'bg-emerald-500/10 border-emerald-500/20 text-emerald-200'}`}>
+                    {discovery().warning || `上游模型目录（${discovery().models.length} 个）`}
+                  </div>
+                  <div class="max-h-64 overflow-y-auto space-y-1 pr-1">
+                    <For each={discovery().models}>
+                      {(model) => {
+                        const configured = () => wizardConfiguredModels().includes(model)
+                        const selected = () => wizardSelected().includes(model)
+                        return (
+                          <label class="flex items-center gap-2 p-2 rounded-lg bg-dark-700/30 border border-dark-600/50 cursor-pointer">
+                            <input
+                              type="checkbox"
+                              class="w-4 h-4 rounded"
+                              checked={configured() || selected()}
+                              disabled={configured()}
+                              onChange={() => toggleWizardModel(model)}
+                            />
+                            <span class="text-sm text-dark-200 break-all">{model}</span>
+                            <Show when={configured()}><span class="badge badge-success ml-auto">已登记</span></Show>
+                          </label>
+                        )
+                      }}
+                    </For>
+                  </div>
+                </div>
+              )}
+            </Show>
+
+            <div class="flex gap-2">
+              <input
+                class="input"
+                value={wizardManual()}
+                onInput={(e) => setWizardManual(e.currentTarget.value)}
+                onKeyDown={(e) => { if (e.key === 'Enter') addWizardManual() }}
+                placeholder="手动输入上游模型名，如 deepseek-v4-flash"
+              />
+              <button class="btn btn-secondary btn-sm" onClick={addWizardManual}>添加</button>
+            </div>
+
+            <Show when={wizardSelected().length > 0}>
+              <div class="flex flex-wrap gap-2">
+                <span class="text-xs text-dark-400">待新增：</span>
+                <For each={wizardSelected()}>
+                  {(model) => (
+                    <button class="badge badge-primary" title="移除" onClick={() => toggleWizardModel(model)}>
+                      {model} ×
+                    </button>
+                  )}
+                </For>
+              </div>
+            </Show>
+          </Show>
+
+          <Show when={wizardStep() === 3}>
+            <div class="p-3 rounded-lg bg-dark-700/40 border border-dark-600/50 text-xs text-dark-400">
+              将向渠道 <span class="text-dark-200 font-medium">{wizardChannel()?.name}</span> 追加以下模型；保存后自动热重载。
+            </div>
+            <Show
+              when={wizardNewModels().length > 0}
+              fallback={<p class="text-sm text-dark-500">尚未选择新模型，请返回上一步选择。</p>}
+            >
+              <div class="space-y-2">
+                <For each={wizardNewModels()}>
+                  {(model) => (
+                    <div class="flex items-center justify-between p-2 rounded-lg bg-dark-700/30 border border-dark-600/50">
+                      <span class="text-sm text-dark-200 break-all">{model}</span>
+                      <span class="badge badge-primary">新增</span>
+                    </div>
+                  )}
+                </For>
+              </div>
+            </Show>
+            <p class="text-xs text-dark-500">模型只会加入渠道清单；要参与路由，请到「模型组与路由」把该模型添加为组成员。</p>
+          </Show>
+
+          <div class="flex items-center justify-between pt-2 border-t border-dark-600/30">
+            <button
+              class="btn btn-secondary btn-sm"
+              onClick={() => {
+                if (wizardStep() === 1) setShowModelWizard(false)
+                else setWizardStep((s) => s - 1)
+              }}
+            >
+              {wizardStep() === 1 ? '取消' : '上一步'}
+            </button>
+            <div class="flex items-center gap-2">
+              <Show when={wizardStep() === 2}>
+                <button class="btn btn-primary btn-sm" disabled={wizardNewModels().length === 0} onClick={() => setWizardStep(3)}>
+                  下一步
+                </button>
+              </Show>
+              <Show when={wizardStep() === 3}>
+                <button class="btn btn-primary btn-sm" disabled={wizardBusy() || wizardNewModels().length === 0} onClick={saveWizardModels}>
+                  {wizardBusy() ? '保存中...' : '保存模型'}
+                </button>
+              </Show>
+            </div>
           </div>
         </div>
       </Modal>

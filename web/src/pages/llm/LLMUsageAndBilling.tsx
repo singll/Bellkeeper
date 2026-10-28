@@ -27,7 +27,11 @@ const LLMUsageAndBilling: Component = () => {
 
   const [channelsData] = createResource(() => llmProxyApi.listChannels())
   const channels = () => channelsData()?.data || []
+  const [catalogData] = createResource(() => llmProxyApi.listModelCatalog())
+  const catalog = () => catalogData()?.data?.models || []
   const pricingModels = (channelName: string) => {
+    const fromCatalog = catalog().filter((entry) => entry.channel_name === channelName).map((entry) => entry.model)
+    if (fromCatalog.length > 0) return fromCatalog
     const ch = channels().find((c) => c.name === channelName)
     return ch ? parseJsonArray(ch.models) : []
   }
