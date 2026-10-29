@@ -78,3 +78,9 @@ URL 与内容去重、域名冷却和失败重试由 Bellkeeper 负责。资讯�
 2026-10-29 已移除不可达的旧 Memos、RAGFlow、Firecrawl、MinIO、Grafana 首页/DNS/反代入口；原配置保存在私有接入备份目录，不能把旧主机地址当作当前服务。
 
 订阅验收：76/77 至少成功获取一次。36氪旧 `/feed` 已失效，已改为本地 RSSHub `/36kr/newsflashes`；酷壳上游返回 403/超时，保留原订阅由健康探测恢复，不绕过访问限制。
+
+## NFS 与 Obsidian（2026-10-29）
+
+prod、knowledge、recordings 三个 NFS 挂载都已通过写入/fsync/读回/重命名/删除测试，knowledge 的容器与宿主双向读写也通过。录像路径为 `/mnt/NAS/data/media/recordings`，已持久化到 fstab，未迁移录像程序。
+
+CouchDB 3.3.3 复用 `https://couchdb.singll.net`，已配置认证、LiveSync CORS、大小限制和持久配置；`/_up` 保留健康探测。`obsidian-notes` 验收时为空，专用账号凭证在私有 `hosts/prod/couchdb/obsidian-livesync.env`。HTTPS 和实际同步所需 API 已验证，临时测试库已清除。用户已有本地 Vault 按 [初始化说明](knowledge-base/setup/livesync-checklist.md) 首次上传；客户端尚未由服务端代为操作。

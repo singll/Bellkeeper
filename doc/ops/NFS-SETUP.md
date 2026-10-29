@@ -1,261 +1,73 @@
-# TrueNAS NFS 共享配置指南
+# prod 的 NFS 挂载与写入
 
-> **目标**: 将 TrueNAS 的 `NAS/data/knowledge` 数据集通过 NFS 共享给 keeper 宿主机
+2026-10-29 核验；录像挂载在北京时间 2026-10-30 凌晨完成。所有远程操作使用 PATH 中的 `spool`。旧 keeper `.230` 和旧 Python TrueNAS RPC 脚本不是当前入口。
 
----
+## 实际路径
 
-## 环境信息
+| 数据 | TrueNAS 导出 | prod 挂载点 | 使用方 |
+|---|---|---|---|
+| 生产服务数据 | `192.168.7.121:/mnt/NAS/data/prod` | `/mnt/NAS/data/prod` | `store/` 下各服务持久数据与备份 |
+| knowledge | `192.168.7.121:/mnt/NAS/data/knowledge` | `/mnt/NAS/data/knowledge` | Bellkeeper 的 `prod-knowledge` NFS volume → `/mnt/knowledge:rw` |
+| 录像 | `192.168.7.121:/mnt/NAS/data/media/recordings` | `/mnt/NAS/data/media/recordings` | prod 的录像读写入口；复用 NAS 原有数据集 |
 
-- **TrueNAS**: 192.168.7.121 (truenas.singll.net)
-- **数据集**: NAS/data/knowledge
-- **TrueNAS 挂载点**: /mnt/NAS/data/knowledge
-- **宿主机挂载点**: /mnt/NAS/data/knowledge
-- **keeper 宿主机**: 通过 `spool exec keeper` 访问
+三个挂载均为 `nfs4`、`rw`、`vers=4.1`、`hard`，已写入 prod `/etc/fstab`。knowledge 原来已挂载且已接入 Bellkeeper；本次增加录像的 NFS 导出（ID 19）和宿主挂载，没有搬动历史录像。
 
----
+TrueNAS 的录像导出仅允许 prod `192.168.7.128/32`，与现有 prod 数据共享一样使用 `mapall=root`。knowledge 沿用既有 `192.168.7.0/24` 和身份映射。NFS 文件显示的 UID 可能与调用进程不同，不能凭 UID 显示判断写入失败，也不要对既有内容递归 chown/chmod。
 
-## 步骤 1: 创建 NFS 共享（TrueNAS 端）
+CouchDB 实际数据在 `/mnt/NAS/data/prod/store/couchdb`，经 `prod-couchdb` NFS volume 映射到 `/opt/couchdb/data`。`NAS/data/prod/couchdb` 是另一个既有 dataset，不能把它当作当前数据库路径。
 
-### 1.1 检查现有 NFS 共享
+## 挂载声明
+
+```fstab
+192.168.7.121:/mnt/NAS/data/prod /mnt/NAS/data/prod nfs4 rw,vers=4.1,hard,noatime,_netdev,timeo=600,retrans=2 0 0
+192.168.7.121:/mnt/NAS/data/knowledge /mnt/NAS/data/knowledge nfs4 rw,vers=4.1,hard,noatime,_netdev,timeo=600,retrans=2 0 0
+192.168.7.121:/mnt/NAS/data/media/recordings /mnt/NAS/data/media/recordings nfs4 rw,vers=4.1,hard,noatime,_netdev,timeo=600,retrans=2 0 0
+```
+
+prod/knowledge 原条目未显式写 `rw`，实际挂载为默认读写，已验证。不要重复追加 fstab，不要卸载业务正在使用的挂载来测试。
 
 ```bash
-# 在本地执行
-cd /home/ubuntu/SilkSpool
-python3 lib/core/truenas_rpc.py sharing.nfs.query '[]'
+spool exec prod 'findmnt -t nfs,nfs4 -o TARGET,SOURCE,FSTYPE,OPTIONS'
+spool exec prod 'sudo findmnt --verify --tab-file /etc/fstab'
+spool exec prod 'systemctl status mnt-NAS-data-media-recordings.mount --no-pager'
+spool nas rpc sharing.nfs.query '[]'
 ```
 
-### 1.2 创建 NFS 共享
+本次验证结果：
 
-```bash
-# 创建 NFS 共享配置
-python3 lib/core/truenas_rpc.py sharing.nfs.create '{
-  "path": "/mnt/NAS/data/knowledge",
-  "comment": "Knowledge base files for Bellkeeper",
-  "networks": ["192.168.0.0/16"],
-  "hosts": [],
-  "ro": false,
-  "maproot_user": "apps",
-  "maproot_group": "apps",
-  "mapall_user": "",
-  "mapall_group": "",
-  "security": ["SYS"]
-}'
-```
+- 以 prod 日常用户 UID 1001 在三个宿主挂载中分别创建唯一临时文件、写入 256 KiB、fsync、读回校验、重命名、删除，全部通过。
+- Bellkeeper 容器写入后宿主读到；宿主修改后容器读到，双向检查通过。
+- fstab 无解析或挂载错误；唯一警告为既有光驱文件系统列表，与 NFS 无关。
+- 内核日志未发现最近 24 小时 NFS stale、服务器无响应或 I/O 错误。
+- 未重启 prod 主机；开机挂载持久性通过 fstab 和 systemd 生成的 mount unit 核验。
 
-**参数说明**:
-- `path`: TrueNAS 上的数据集路径
-- `networks`: 允许访问的网络段（192.168.0.0/16 覆盖整个内网）
-- `ro`: false 表示读写权限
-- `maproot_user/group`: 映射 root 用户到 apps 用户（UID 568）
-- `security`: SYS 表示使用 Unix 权限
+## 容器如何接入
 
-### 1.3 启用 NFS 服务
-
-```bash
-# 检查 NFS 服务状态
-python3 lib/core/truenas_rpc.py service.query '[["service", "=", "nfs"]]'
-
-# 如果未启动，启用并启动 NFS 服务
-python3 lib/core/truenas_rpc.py service.update 'nfs' '{"enable": true}'
-python3 lib/core/truenas_rpc.py service.start '"nfs"'
-```
-
-### 1.4 验证 NFS 导出
-
-```bash
-# 在 keeper 宿主机上检查
-spool exec keeper "showmount -e 192.168.7.121"
-```
-
-预期输出应包含：
-```
-/mnt/NAS/data/knowledge 192.168.0.0/16
-```
-
----
-
-## 步骤 2: 配置宿主机挂载（keeper 端）
-
-### 2.1 安装 NFS 客户端
-
-```bash
-spool exec keeper "sudo apt-get update && sudo apt-get install -y nfs-common"
-```
-
-### 2.2 创建挂载点
-
-```bash
-spool exec keeper "sudo mkdir -p /mnt/NAS/data/knowledge"
-```
-
-### 2.3 测试手动挂载
-
-```bash
-spool exec keeper "sudo mount -t nfs -o vers=4,rw 192.168.7.121:/mnt/NAS/data/knowledge /mnt/NAS/data/knowledge"
-
-# 验证挂载
-spool exec keeper "df -h | grep knowledge"
-spool exec keeper "ls -la /mnt/NAS/data/knowledge"
-```
-
-### 2.4 配置自动挂载
-
-```bash
-# 添加到 /etc/fstab
-spool exec keeper "echo '192.168.7.121:/mnt/NAS/data/knowledge /mnt/NAS/data/knowledge nfs vers=4,rw,hard,intr,timeo=600,retrans=2,_netdev 0 0' | sudo tee -a /etc/fstab"
-
-# 测试 fstab 配置
-spool exec keeper "sudo umount /mnt/NAS/data/knowledge"
-spool exec keeper "sudo mount -a"
-spool exec keeper "df -h | grep knowledge"
-```
-
-**挂载选项说明**:
-- `vers=4`: 使用 NFSv4 协议
-- `rw`: 读写模式
-- `hard`: 硬挂载（NFS 不可用时会重试）
-- `intr`: 允许中断挂载操作
-- `timeo=600`: 超时时间 60 秒
-- `retrans=2`: 重传次数
-- `_netdev`: 等待网络就绪后再挂载
-
-### 2.5 设置权限
-
-```bash
-# 检查当前权限
-spool exec keeper "ls -ld /mnt/NAS/data/knowledge"
-
-# 如果需要，调整权限（通常 TrueNAS 已设置好）
-# spool exec keeper "sudo chown -R 568:568 /mnt/NAS/data/knowledge"
-```
-
----
-
-## 步骤 3: 修改 product compose
-
-### 3.1 修改 Bellkeeper 仓库
-
-在 `deploy/compose.yaml` 的 `bellkeeper` 服务 `volumes` 中保留：
+Bellkeeper 已用直接 NFS volume 连接 knowledge，重启不依赖宿主 bind mount 的启动时序。新录像服务可采用同一方式：
 
 ```yaml
 volumes:
-  - kp-bellkeeper-data:/app/data
-  - ${BELLKEEPER_KNOWLEDGE_PATH:-/mnt/knowledge}:/mnt/knowledge:rw
+  prod-recordings:
+    name: prod-recordings
+    driver: local
+    driver_opts:
+      type: nfs
+      o: "addr=192.168.7.121,vers=4.1,rw,hard,noatime,timeo=600,retrans=2"
+      device: ":/mnt/NAS/data/media/recordings"
+# 在实际录像服务 volumes 中添加 prod-recordings:/recordings:rw，
+# 再把应用的录像输出目录设为 /recordings 下的对应子目录。
 ```
 
-`BELLKEEPER_KNOWLEDGE_PATH` 由 `knowledge-stack` 的 `defaults` / `hosts/keeper/.env` 提供，
-不要把宿主 IP 或 `.env` 路径写进 compose。
+如果用宿主 bind mount，应先验证该目录确实是 NFS，并给启动服务配置 `RequiresMountsFor=/mnt/NAS/data/media/recordings`，防止 NAS 未挂载时写入 prod 系统盘。
 
-### 3.2 发布并应用
+本次没有在 prod 新建或迁移录像程序。istoreos 的 `bilirecorder.singll.net` 仍指向现有 `.108:2356`；给 prod 增加存储挂载不代表录像 Web 服务已迁到 prod。
 
-1. 提交 Bellkeeper 仓库的 `deploy/` 变更并发布新版本；
-2. 更新 `silkspool.yaml` 中 `bundle_sources.bellkeeper.commit`（或 OCI digest）；
-3. 在 SilkSpool 控制机执行：
+## knowledge 与 Obsidian
 
-```bash
-spool plan knowledge-stack keeper --offline
-spool plan knowledge-stack keeper
-spool apply knowledge-stack keeper --locked --yes
+NAS knowledge 提供 Bellkeeper 的 raw/archive/vault 文件资产。用户已有本地 Obsidian Vault 是首次 LiveSync 上传源；CouchDB 不会自动扫描 NFS 目录。
 
-# 验证挂载
-spool exec keeper "docker exec sp-bellkeeper ls -la /mnt/knowledge"
-```
+不要把原始 Markdown 当作任意 JSON 写入 LiveSync 数据库，也不要把整个 raw 或录像目录接入笔记同步。通过已有 [Windows 导入流程](../knowledge-base/setup/windows-knowledge-sync.md) 选择内容写入本地 Vault，再由 LiveSync 同步。客户端初始化见 [LiveSync 配置清单](../knowledge-base/setup/livesync-checklist.md)。
 
----
+## 备份与恢复
 
-## 步骤 4: 验证完整链路
-
-### 4.1 在 TrueNAS 上创建测试文件
-
-```bash
-python3 lib/core/truenas_rpc.py filesystem.file_receive '"/mnt/NAS/data/knowledge/test.txt"' <<EOF
-This is a test file from TrueNAS
-EOF
-```
-
-### 4.2 在宿主机上验证
-
-```bash
-spool exec keeper "cat /mnt/NAS/data/knowledge/test.txt"
-```
-
-### 4.3 在容器内验证
-
-```bash
-spool exec keeper "docker exec sp-bellkeeper cat /mnt/knowledge/test.txt"
-```
-
-### 4.4 测试写入权限
-
-```bash
-spool exec keeper "docker exec sp-bellkeeper sh -c 'echo \"Test from container\" > /mnt/knowledge/container-test.txt'"
-spool exec keeper "cat /mnt/NAS/data/knowledge/container-test.txt"
-```
-
-### 4.5 清理测试文件
-
-```bash
-spool exec keeper "docker exec sp-bellkeeper rm /mnt/knowledge/test.txt /mnt/knowledge/container-test.txt"
-```
-
----
-
-## 故障排查
-
-### 问题 1: showmount 显示 "No exports"
-
-**原因**: NFS 服务未启动或共享未创建
-
-**解决**:
-```bash
-python3 lib/core/truenas_rpc.py service.start '"nfs"'
-python3 lib/core/truenas_rpc.py sharing.nfs.query '[]'
-```
-
-### 问题 2: mount 失败 "access denied"
-
-**原因**: 网络段不匹配或权限配置错误
-
-**解决**:
-1. 检查 keeper 宿主机 IP 是否在 `192.168.0.0/16` 范围内
-2. 检查 NFS 共享的 `networks` 配置
-3. 尝试添加宿主机 IP 到 `hosts` 列表
-
-### 问题 3: 容器内无法写入
-
-**原因**: UID/GID 映射问题
-
-**解决**:
-```bash
-# 检查容器内用户
-spool exec keeper "docker exec sp-bellkeeper id"
-
-# 检查 TrueNAS 文件权限
-python3 lib/core/truenas_rpc.py filesystem.stat '"/mnt/NAS/data/knowledge"'
-
-# 调整 maproot_user 为容器内的用户（通常是 bellkeeper 或 apps）
-```
-
-### 问题 4: 重启后挂载丢失
-
-**原因**: fstab 配置错误或网络未就绪
-
-**解决**:
-1. 检查 fstab 是否包含 `_netdev` 选项
-2. 手动重新挂载：`sudo mount -a`
-3. 检查系统日志：`journalctl -u remote-fs.target`
-
----
-
-## 安全建议
-
-1. **限制网络访问**: 生产环境建议将 `networks` 改为具体的 IP 段或使用 `hosts` 指定特定主机
-2. **只读挂载**: 如果 Bellkeeper 只需读取，可以设置 `ro: true`
-3. **防火墙规则**: 确保 TrueNAS 防火墙允许 NFS 端口（2049）
-4. **定期备份**: NFS 共享的数据应定期快照备份
-
----
-
-## 下一步
-
-完成 NFS 配置后，继续执行 IMPLEMENTATION.md 的 Phase 1.2（配置文件扩展）。
+本次私有备份：`/opt/SilkSpool/backups/nfs-livesync-20261029/`。包含 fstab 原件、NFS 导出、CouchDB 原配置及验证结果；prod 的原 fstab 另存 `/etc/fstab.spool-before-recordings-20261029`。当前 fstab 快照位于控制机 `hosts/prod/nfs/fstab`，不要自动把含本机磁盘 UUID 的整份 fstab 覆盖到另一主机。

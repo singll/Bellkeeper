@@ -215,3 +215,9 @@ curl --unix-socket /run/spool.sock \
 - 不要把数据层（silkdata）加进 `knowledge-stack` 的 components；它必须是 dependencies。
 
 n8n 更新 settings 会保留遗漏字段：B02 的 `errorWorkflow` 必须显式设为空字符串，不能靠删除 JSON 字段清除旧 ID；其它工作流指向当前 B02 ID。
+
+## NFS 与 LiveSync 持久配置
+
+prod 的 knowledge 已通过 `prod-knowledge` NFS volume 接入 Bellkeeper；录像已增加宿主挂载 `/mnt/NAS/data/media/recordings`。NFS 配置、写入验收和容器接入示例见 [NFS-SETUP](ops/NFS-SETUP.md)。不要把旧 `NAS/data/prod/couchdb` dataset 当作正在使用的 `prod/store/couchdb`。
+
+CouchDB `prod-couchdb-config` 保留认证/运行配置；本次通过管理 API 和现有 volume 写入 `10-livesync.ini`，仅重启现有容器。未来 proddata 模板也挂载这一基线文件，避免重建后丢失 CORS 配置。API 生成的管理员哈希在 `docker.ini`，随 config volume 保存；新建容器仍需保留此 volume。客户端配置与已有 Vault 首次上传步骤见 [LiveSync 清单](knowledge-base/setup/livesync-checklist.md)。

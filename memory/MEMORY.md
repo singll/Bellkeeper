@@ -12,3 +12,7 @@
 
 - 生产补丁二进制在 `/app/data/bellkeeper-matrix`，现有 `/app/bellkeeper` 为软链，bundle entrypoint 已持久化；下次镜像升级含修复后移除覆盖，详见 DEPLOYMENT。
 - RSSHub 独立 bundle 已上线，四个相对路由抓取成功（含已替换旧 URL 的 36氪）；酷壳上游 403/超时待自动恢复。初次恢复会收录历史文章，资讯预览为当前入库内容。
+
+- 2026-10-29 NFS/LiveSync：prod、knowledge、录像三挂载可读写；录像 NAS `/mnt/NAS/data/media/recordings`，NFS 导出 ID 19，仅允许 prod /32，fstab 已持久化。未迁移录像程序。
+- CouchDB URL `https://couchdb.singll.net`，DB `obsidian-notes`；首次数据源是用户已有本地 Vault。专用管理员 `obsidian-sync` 的密码只在私有 hosts/prod/couchdb/obsidian-livesync.env，不能提交。需管理权限是因 LiveSync 初始化会 drop/create DB。`/_up` 通过 require_valid_user_except_for_up 保留匿名探活；其余 API 认证。
+- NAS knowledge 不会自动镜像为 LiveSync 文档；不能按旧 K07 _changes 直接读 Markdown 的设想接线。初始化文档已更新，客户端操作由用户在已有 Vault 完成。

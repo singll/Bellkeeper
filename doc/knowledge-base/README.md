@@ -61,6 +61,10 @@ Obsidian / Markdown 在这里最核心的职责是：
 
 ---
 
+## 当前服务端接入
+
+2026-10-29 已在 prod 完成 knowledge/录像 NFS 读写验证，CouchDB 使用 `https://couchdb.singll.net` 和 `obsidian-notes`。用户已有本地 Vault 为首次上传源；参数和操作步骤见 [LiveSync 配置清单](setup/livesync-checklist.md)。NAS 的 `knowledge/vault` 不会自动进入同步数据库。
+
 ## MVP-first 的具体落地
 
 如果你要先实现一个**可独立运转**的知识系统，推荐采用下面的分工：

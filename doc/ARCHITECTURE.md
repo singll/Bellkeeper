@@ -160,7 +160,8 @@ n8n K02(RSS 调度) → Bellkeeper CrawlQueue(事件驱动三 worker 链)
 pkb-curate(CLI/调度器,经 Gateway 进程内直调 LLM):
   raw → 五维打分 → vault(原子化重构卡片) / archive / discard
 pkb-curate digest:领域高分卡片 → 周/月综述
-Obsidian ← LiveSync(CouchDB) ← vault/
+已有 Obsidian Vault ←→ LiveSync(CouchDB)
+  ↑ 选取 Markdown 导入；NAS vault/ 不会自动写入 LiveSync 数据库
 ```
 
 ### LLM 代理
@@ -222,35 +223,24 @@ n8n 定时触发 → POST /api/reports/daily/generate
 ## 认证机制
 
 1. **API Key**:`X-API-Key`(server.api_key)— 内部服务调用
-2. **noauth 模式**:生产为纯内网部署、无公网暴露,`noauth` 模式为预期状态
+2. **生产模式**: 内网访问仍启用 API Key；禁止把 noauth 当作生产预期状态
 3. **LLM Token**:`Authorization: Bearer sk-bk-*` — `/api/llm/v1/*` 专用,带模型白名单与配额
 
 ---
 
 ## 部署
 
-**拓扑（2026-07-25 应用/数据分离）**：应用层与数据层分处两台 guest，通过 SilkSpool `spool` 编排。
+当前拓扑（2026-10-29）：prod `192.168.7.128` 上运行 `prod-stack`（Bellkeeper/n8n）、独立 `proddata`（PostgreSQL、Meilisearch、Redis、NATS、CouchDB）与 RSSHub；Matrix homeserver 是 txhk tuwunel。旧 keeper/silkdata/knowledge 地址不再是当前目标。
 
-| 层 | 主机 | 服务 |
-|----|------|------|
-| 应用层 | keeper (192.168.7.230) | `sp-bellkeeper`（内部 8080 → 宿主 8090，经 Caddy 反代）、n8n、rsshub、memos |
-| 数据层 | silkdata (192.168.7.231) | PostgreSQL / Meilisearch / Redis / NATS / CouchDB + 观测中心栈（Prometheus/Loki/Grafana） |
-| 抓取 | knowledge (192.168.7.220) | firecrawl（api/playwright/db/rabbitmq，端点 3002） |
-| 存储 | TrueNAS (192.168.7.121) | 经 NFS4 向 keeper 提供 `/mnt/NAS/data/knowledge`（知识 raw/archive/vault 落盘真源） |
+TrueNAS `192.168.7.121` 提供三个读写 NFS：`/mnt/NAS/data/prod`、`/mnt/NAS/data/knowledge`、`/mnt/NAS/data/media/recordings`。Bellkeeper 经 `prod-knowledge` volume 使用 `/mnt/knowledge`；CouchDB 数据经 `prod-couchdb` volume 使用 NAS `prod/store/couchdb`。录像已挂载到 prod 宿主，既有录像 Web 服务并未迁移。
 
-应用与数据层通过 SilkSpool `knowledge-stack` 的 endpoint wiring 连接：同机服务名 /
-跨机 Headscale MagicDNS（缺失时回退 `address`）；模板不写 IP，也不依赖 `extra_hosts`。
-发版重建 keeper 镜像不影响数据层。完整配置见 [DEPLOYMENT.md](DEPLOYMENT.md)，主机拓扑见 [STATUS.md](STATUS.md)。
+Obsidian 复用 istoreos `https://couchdb.singll.net`，使用 `obsidian-notes` 数据库。已有本地 Vault 负责首次上传，NAS knowledge 仍是独立文件资产入口，二者通过选择性文件导入衔接，不向 LiveSync 数据库直接写普通 JSON。
 
 ```bash
-spool plan knowledge-stack keeper --offline   # 静态校验
-spool plan knowledge-stack keeper             # online diff
-spool apply knowledge-stack keeper --locked --yes
-spool rollback knowledge-stack keeper         # 回滚上一 generation
-spool restart keeper bellkeeper               # 仅重启
-spool logs keeper bellkeeper 200              # 日志
+spool plan prod-stack prod --offline
+spool restart prod bellkeeper
+spool logs prod bellkeeper 200
+spool exec prod 'findmnt -t nfs,nfs4'
 ```
 
-> Bellkeeper 以 product bundle（`deploy/bundle.yaml`）发布；`knowledge-stack` 只 apply keeper 上的
-> components，`silkdata` 只读 dependency。旧 `keeper` bundle 命令仅为兼容 alias，已弃用。
-> 运维一律走 `spool` CLI，禁止裸 ssh/docker。
+数据与应用保持独立 bundle 生命周期。有状态容器重建需批准；日常配置和重启通过 PATH spool 完成。详见 [部署契约](DEPLOYMENT.md)、[运行状态](STATUS.md)、[NFS 接入](ops/NFS-SETUP.md) 和 [LiveSync 初始化](knowledge-base/setup/livesync-checklist.md)。
