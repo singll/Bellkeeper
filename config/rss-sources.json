@@ -1,5 +1,5 @@
 {
-  "_comment": "线上 rss_feeds 表活跃源快照（非程序加载，仅供复现/文档）。以 http(s) 开头=官方直连；/ 开头=RSSHub 相对路径。",
+  "_comment": "生产技术资讯源清单；通过 /api/rss 导入，不由程序自动加载。2026-10-29 在 prod 恢复；相对路径使用独立 RSSHub。Hacker News 使用 hnrss.org 原生 Feed。",
   "sources": [
     {
       "name": "Go 官方博客",
@@ -339,7 +339,7 @@
     },
     {
       "name": "Hacker News",
-      "url": "/hackernews/newest",
+      "url": "https://hnrss.org/newest",
       "category": "网络安全",
       "description": "Hacker News 最新技术资讯"
     },
@@ -387,7 +387,7 @@
     },
     {
       "name": "Hacker News-Best",
-      "url": "/hackernews/best",
+      "url": "https://hnrss.org/best",
       "category": "news",
       "description": "Hacker News 热门文章"
     },
@@ -423,7 +423,7 @@
     },
     {
       "name": "36氪",
-      "url": "https://36kr.com/feed",
+      "url": "/36kr/newsflashes",
       "category": "资讯",
       "description": "中文创投与科技商业资讯"
     },

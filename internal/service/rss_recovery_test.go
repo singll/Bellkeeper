@@ -83,7 +83,9 @@ func setupRecoveryTestDB(t *testing.T) *gorm.DB {
 	if err := db.AutoMigrate(&model.RSSFeed{}); err != nil {
 		t.Fatalf("auto migrate rss_feeds: %v", err)
 	}
-	db.Exec("TRUNCATE TABLE rss_feeds")
+	if err := db.Exec("TRUNCATE TABLE rss_feeds CASCADE").Error; err != nil {
+		t.Fatalf("truncate test RSS feeds: %v", err)
+	}
 	return db
 }
 

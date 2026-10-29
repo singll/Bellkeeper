@@ -42,7 +42,10 @@
         },
         "sendBody": true,
         "specifyBody": "json",
-        "jsonBody": "{\n  \"dry_run\": false,\n  \"skip_notify\": false\n}"
+        "jsonBody": "{\n  \"dry_run\": false,\n  \"skip_notify\": false\n}",
+        "options": {
+          "timeout": 900000
+        }
       },
       "id": "o01-0002",
       "name": "调用日报生成",
@@ -104,7 +107,10 @@
         },
         "sendBody": true,
         "specifyBody": "json",
-        "jsonBody": "={{ JSON.stringify({ channel: 'alerts', message: '### ❌ 日报生成失败\\n\\n- 时间: ' + $now.setZone($env.BELLKEEPER_TIMEZONE || 'Asia/Shanghai').toFormat('yyyy-MM-dd HH:mm') + '\\n- 错误: ' + (typeof $json.error === 'string' ? $json.error : JSON.stringify($json.error)) + '\\n\\n请检查 Bellkeeper 日志和日报服务状态。', message_type: 'markdown' }) }}"
+        "jsonBody": "={{ JSON.stringify({ channel: 'alerts', message: '### ❌ 日报生成失败\\n\\n- 时间: ' + $now.setZone($env.BELLKEEPER_TIMEZONE || 'Asia/Shanghai').toFormat('yyyy-MM-dd HH:mm') + '\\n- 错误: ' + (typeof $json.error === 'string' ? $json.error : JSON.stringify($json.error)) + '\\n\\n请检查 Bellkeeper 日志和日报服务状态。', message_type: 'markdown' }) }}",
+        "options": {
+          "timeout": 900000
+        }
       },
       "id": "o01-0004",
       "name": "发送告警",
@@ -134,7 +140,10 @@
         },
         "sendBody": true,
         "specifyBody": "json",
-        "jsonBody": "{\n  \"module\": \"daily_report\",\n  \"action\": \"generate\",\n  \"status\": \"success\",\n  \"summary\": \"日报生成成功\"\n}"
+        "jsonBody": "{\n  \"module\": \"daily_report\",\n  \"action\": \"generate\",\n  \"status\": \"success\",\n  \"summary\": \"日报生成成功\"\n}",
+        "options": {
+          "timeout": 900000
+        }
       },
       "id": "o01-0005",
       "name": "记录成功日志",
@@ -198,6 +207,9 @@
   "active": true,
   "settings": {
     "executionOrder": "v1",
-    "errorWorkflow": "DDPUVypFAgyDOXgn"
+    "errorWorkflow": "u0W5aC5Q6Y0cZGK6",
+    "timezone": "Asia/Shanghai",
+    "callerPolicy": "workflowsFromSameOwner",
+    "saveManualExecutions": true
   }
 }

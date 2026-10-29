@@ -160,3 +160,35 @@ func TestPushWorkflowDefinitionUpdatesByNameAndPreservesActive(t *testing.T) {
 		t.Fatalf("executionOrder default not set: %#v", putPayload["settings"])
 	}
 }
+
+func TestTriggerNormalizesWebhookBase(t *testing.T) {
+	for _, suffix := range []string{"", "/", "/webhook", "/webhook/", "/n8n/webhook/"} {
+		t.Run(suffix, func(t *testing.T) {
+			server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+				expected := "/webhook/article-ingest"
+				if suffix == "/n8n/webhook/" {
+					expected = "/n8n/webhook/article-ingest"
+				}
+				if r.URL.Path != expected || r.Method != http.MethodPost {
+					t.Errorf("unexpected request: %s %s", r.Method, r.URL.Path)
+				}
+				var payload map[string]interface{}
+				if err := json.NewDecoder(r.Body).Decode(&payload); err != nil || payload["url"] != "https://example.com/article" {
+					t.Errorf("bad payload: %#v (%v)", payload, err)
+				}
+				if err := json.NewEncoder(w).Encode(map[string]interface{}{"queued": true}); err != nil {
+					t.Error(err)
+				}
+			}))
+			defer server.Close()
+			svc := NewWorkflowService(config.N8NConfig{WebhookBaseURL: server.URL + suffix}, nil)
+			result, err := svc.Trigger("article-ingest", map[string]interface{}{"url": "https://example.com/article"})
+			if err != nil || result["queued"] != true {
+				t.Fatalf("Trigger = %#v, %v", result, err)
+			}
+			if _, err := svc.Trigger("article-ingest", map[string]interface{}{"invalid": make(chan int)}); err == nil {
+				t.Fatal("unsupported payload accepted")
+			}
+		})
+	}
+}

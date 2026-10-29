@@ -87,7 +87,7 @@ func (s *CommandService) registerHandlers() {
 		s.router.RegisterHandler(command.NewShortcutAliasHandler("完成", "完成", directMemos))
 		s.router.RegisterHandler(command.NewAliasHandler("todo", directMemos)) // 字母别名 = !待办
 		log.Printf("[Command] registered direct Memos handler with aliases")
-	} else if s.n8nCfg.WebhookBaseURL != "" {
+	} else if s.memosCfg.Enabled && s.n8nCfg.WebhookBaseURL != "" {
 		// Fallback: n8n webhook
 		memosWebhook := s.n8nCfg.WebhookBaseURL + "/memos-todo"
 		memosHandler := command.NewN8NTriggerHandler("memos", memosWebhook)

@@ -15,9 +15,9 @@
 | 知识治理 | n8n 无脑爬取入库 | **PKB 三层漏斗 + 知识骨架 + 双库** | 根治"信息垃圾场"，raw→archive/vault 分流 + 结构化合成 |
 | 爬虫调度 | 内存 DomainCoordinator（三桶分层） | **DB 公平调度 DequeueFair + 冷却** | 无状态、可观测、公平轮转，见 ADR-0003 |
 | 模块通信 | Service 直接互调 | **NATS JetStream 事件总线** | 解耦、可追溯（TraceID）、崩溃兜底 |
-| 部署形态 | keeper 单机全栈 | **app 层(keeper) ↔ 数据层(silkdata) 分离** | 生命周期解耦、备份独立、爆炸半径隔离 |
-| 可观测性 | 仅 `/metrics` 端点 | **Prometheus + Loki + Grafana 集中栈** | 三机指标/日志集中，grafana.singll.net |
-| 认证 | Authelia Forward Auth | **noauth（纯内网）** | 生产纯内网、无公网暴露；LLM Token 鉴权独立保留 |
+| 部署形态 | keeper 单机全栈 | **prod-stack ↔ proddata 分离（prod）** | 生命周期解耦、备份独立、爆炸半径隔离 |
+| 可观测性 | 仅 `/metrics` 端点 | **Bellkeeper 健康探测/日志 + n8n + Matrix** | 原集中监控栈不在当前 prod 清单中 |
+| 认证 | Authelia Forward Auth | **API Key + LLM Token** | 内网部署仍校验凭证；禁止空密钥/noauth |
 
 ---
 
@@ -91,3 +91,6 @@
 - **仍生效的运维 SOP** → [ops/](ops/)：istoreos 子网路由基线、离线托底、TrueNAS NFS 挂载。
 - **知识库运营资产** → [knowledge-base/](knowledge-base/)：Obsidian 单 Vault 设计、frontmatter/命名/同步规范、Templater 模板、每周整理 SOP。
 - **架构决策记录**（现行有效）→ [../docs/adr/](../docs/adr/)。
+
+### 2026-10-29 · Matrix 与资讯接入
+- 通过 PATH spool 接入 tuwunel：6 个私有房间、Bellkeeper bot、9 个 n8n 工作流；恢复 77 个技术资讯源，修复提取器、房间发现、停用命令、webhook 地址与重复入队语义，并清理旧部署说明。

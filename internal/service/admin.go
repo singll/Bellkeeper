@@ -212,7 +212,7 @@ func (s *AdminService) ListCommands(ctx context.Context) ([]*CommandResponse, er
 
 // UpdateCommand updates a command's strategy configuration
 func (s *AdminService) UpdateCommand(ctx context.Context, name string, updates map[string]interface{}) error {
-	cmd, err := s.repos.MatrixCommand.GetByName(name)
+	cmd, err := s.repos.MatrixCommand.GetConfigByName(name)
 	if err != nil || cmd == nil {
 		return fmt.Errorf("command not found: %w", err)
 	}

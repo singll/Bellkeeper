@@ -1,135 +1,80 @@
 # Bellkeeper 运行状态
 
-> 最后更新: 2026-10-28 · **1.0 已 GA；部署已切到 SilkSpool knowledge-stack**
->
-> 本文档记录**当前线上真实状态**。历史演进见 [TIMELINE.md](TIMELINE.md)；架构细节见 [ARCHITECTURE.md](ARCHITECTURE.md)；待办见 [ROADMAP.md](ROADMAP.md)。
+> 2026-10-29 生产实测。历史里程碑见 [TIMELINE.md](TIMELINE.md)，部署操作见 [DEPLOYMENT.md](DEPLOYMENT.md)。
 
----
+## 当前拓扑
 
-## 主机拓扑（5 机 + TrueNAS 存储）
+| 主机 | 地址 | 当前职责 |
+|---|---|---|
+| prod | 192.168.7.128 | `prod-stack`：Bellkeeper 2.4.3 + Matrix 修复补丁、n8n 2.44.6；`proddata`：PostgreSQL、Redis、NATS、Meilisearch、CouchDB；独立 RSSHub |
+| txhk | 腾讯云 HK | tuwunel 1.8.0、Caddy、Headscale、Authelia、RDP 网关 |
+| TrueNAS | 192.168.7.121 | NFS `/mnt/NAS/data/prod/store` 及 `/mnt/NAS/data/knowledge` 持久存储 |
+| istoreos | 192.168.7.1 | DNS、Caddy、代理、子网路由 |
 
-```
-                          Internet / 机场出口
-                                 │
-              ┌──────────────────┴───────────────────┐
-              ▼                                        ▼
-   istoreos (192.168.7.1) 网关                 txhk (腾讯云 HK)
-   openclash 透明代理 + caddy(TLS)             tuwunel (Matrix) + authelia
-   + dnsmasq + tailscaled(子网路由)            + headscale 控制面 + rdp-gateway
-              │  内网 192.168.7.0/24                    ▲ 告警/问答
-   ┌──────────┼───────────────────────┐                │
-   ▼          ▼                        ▼                │
- keeper     silkdata                knowledge ──────────┘
- (.230)     (.231)                  (.220)
- 应用层     数据层 + 观测中心栈       firecrawl
-```
+旧 keeper(.230)、silkdata(.231)、knowledge(.220) 不是当前 Spool 生产目标。旧 Prometheus/Loki/Grafana 的历史验收不能视为本机当前运行状态。当前告警使用 n8n、Bellkeeper 日志中心和 Matrix。
+Memos 当前未部署；待办频道和命令已停用，禁用时不再注册 n8n Memos 回退。Firecrawl 没有有效服务地址，已关闭无效回退，正文提取使用已实测的 Trafilatura 2.0。
 
-| 主机 | 地址 | 规格 | 角色 | 主要服务 |
-|------|------|------|------|----------|
-| **keeper** | 192.168.7.230 | LXC 4核8G | 应用层 | bellkeeper(8090→8080)、n8n(5678)、rsshub、memos |
-| **silkdata** | 192.168.7.231 | LXC 8核24G | 数据层 + 观测中心 | PostgreSQL(5432)、Meilisearch(7700)、Redis(6379)、NATS(4222)、CouchDB(5984)；Prometheus(9090)、Loki(3100)、Grafana(3000) |
-| **knowledge** | 192.168.7.220 | KVM 16核15G | 抓取引擎 | firecrawl（api/playwright/db/rabbitmq，端点 3002）+ sp-redis |
-| **TrueNAS** | 192.168.7.121 | NAS | 存储后端 | 经 NFS4 向 keeper 提供 `/mnt/NAS/data/knowledge`（知识 raw/archive/vault 落盘真源）；不入 tailnet 服务列 |
-| **istoreos** | 192.168.7.1 | 路由器 | 网关 | openclash 透明代理、caddy 反代(TLS)、dnsmasq、tailscaled 子网路由（advertise 192.168.7.0/24） |
-| **txhk** | 腾讯云 HK | 2核3.6G | Matrix + VPN 控制面 | **tuwunel**(Matrix)、authelia、**headscale 控制面**、caddy、tailscaled、rdp-gateway（全 systemd 裸进程，无 docker） |
+## Matrix 房间
 
-**部署形态**：keeper 只跑无状态应用，由 SilkSpool `knowledge-stack` composition 部署；数据层 `silkdata` 是只读 dependency，通过 endpoint wiring（同机服务名 / 跨机 MagicDNS，缺失时回退 address）连接，连接串零硬编码、无 `extra_hosts` IP。发版重建 keeper 镜像不影响数据层；数据层可独立备份/快照。知识文件经 **NFS4 从 TrueNAS(192.168.7.121) 挂载**至 keeper 宿主 `/mnt/NAS/data/knowledge`，再 bind 进容器 `/mnt/knowledge`。运维一律走 SilkSpool `spool` CLI（见根 CLAUDE.md §3），配置见 [DEPLOYMENT.md](DEPLOYMENT.md)。
+账号：`@bellkeeper:matrix.singll.net`；管理员：`@singll:matrix.singll.net`，已邀请到全部房间。
+所有房间采用邀请加入，访客禁止加入；机器人接入的房间未启用端到端加密。
 
----
+| 房间 | 类型 / 频道 | 入口 |
+|---|---|---|
+| 机器人命令 | command | [打开](https://matrix.to/#/!sUhDtrkWVUidmRmKln:matrix.singll.net) |
+| 知识聊天室 | chat / qa | [打开](https://matrix.to/#/!pt86Tgws4HhHgWBuUi:matrix.singll.net) |
+| 自由聊天 | direct | [打开](https://matrix.to/#/!Ov9F0IzKcd5dJL7UK0:matrix.singll.net) |
+| 技术资讯 | notification / news | [打开](https://matrix.to/#/!13hO0X4QDPEctQ2oFg:matrix.singll.net) |
+| 系统告警 | notification / alerts | [打开](https://matrix.to/#/!BC6V5eM69Brfq3u1O6:matrix.singll.net) |
+| 运行日报 | notification / daily | [打开](https://matrix.to/#/!L4JaaVlNJmVTJioCvZ:matrix.singll.net) |
 
-## 可观测性（M6，2026-07-26 上线）
+`!ping`、自由聊天、知识库工具检索均已通过真实 Matrix 收发验证。Agent 默认使用 `pool-chat-balanced`，`!model` 可切换；每房间 120 回合/小时，会话 30 分钟。
+Matrix 凭证与 Agent 开关只在启动时加载；房间和频道存数据库，频道支持 API 重载。
 
-- **中心栈**（silkdata）：Prometheus（15d 保留）+ Loki（7d）+ Grafana，经 `grafana.singll.net`（caddy+TLS，Grafana 自带 admin 登录）。
-- **采集端**（三机各一份）：cAdvisor（容器指标）+ Promtail（容器日志推 Loki）。
-- **验收**：Prometheus 6/6 targets UP（bellkeeper `/metrics` + cadvisor×3 + loki + self）；Loki 三机日志入库；Grafana 2 看板出数。
-- **已知遗留**：keeper 跑 Docker 29，cAdvisor 单容器指标缺失（有 bellkeeper 应用指标 + 机器级指标 + 全量日志兜底）；silkdata/knowledge 单容器指标正常。
+## 知识与通知链路
 
----
-
-## 核心数据流
-
-```
-RSS(rsshub + 官方直连) ─→ 后端 RSSFetcherService(fetch+enqueue)
-  └→ CrawlQueue：DequeueFair 公平轮转 + next_allowed_at 冷却 + recrawl-cooldown 去重 + 域名健康度
-       └→ 事件链三 worker：crawl → extract → index
-            提取：trafilatura(直连,省流量) 优先 → firecrawl(fetch 引擎优先) 兜底
-            落盘 /mnt/knowledge/raw + PG 入库 + Meili 索引
-  └→ PKB 漏斗(pkb-curate 五维打分)：≥7 → vault(原子卡) / 4~7 → archive / <4 → discard
-       └→ 知识骨架确定性归位 + 缺口填充 + 资讯库 + 晋升闸
-  └→ 资讯早报 08:00(6-6周期·同源落资讯库) / 系统日报 21:00 (DailyReportService) ─→ Matrix 推送
+```text
+77 个既有技术资讯源 → RSSFetcher → 持久化 CrawlQueue → Trafilatura 正文提取
+  → NATS crawl/extract/index → Markdown + PostgreSQL + Meilisearch
+  → 分类与 PKB 治理 → 资讯重要性评分 → news 房间
+用户 → Matrix Gateway → !命令 / chat 知识工具 / direct 模型对话
+n8n / Bellkeeper 日志 / LLM 聚合告警 → alerts 房间
 ```
 
-- **LLM**：进程内调用方（KB/Agent/日报/分类/规则优化）经 `llmgateway.Gateway` 直调；外部（CLI/n8n）经 `/api/llm/v1/*` OpenAI 兼容 + Token 鉴权；渠道协议仅 openai/anthropic/rerank，vendor 决定错误语义与余额口径；管理面支持模型目录、连接测试与上游模型发现。
-- **Matrix**：告警推送 + Agent 问答（chat 知识库 / direct 直连大模型两类房间）+ 命令路由。
-- **知识真相源**：Obsidian Vault（Markdown），经 CouchDB LiveSync 同步。
+URL 与内容去重、域名冷却和失败重试由 Bellkeeper 负责。资讯沿用编程、人工智能、网络安全和技术资讯范围，重要性评分阈值 6/10，每领域最多 15 条、打分候选最多 60 条；噪声社交/视频域名由现有规则过滤。评分失败时现有实现会记录降级并按时间取前 N，不宣称此时已完成评分过滤。
+首次恢复订阅会读取源内历史条目，积压由队列限速处理；7 天成功率属于后续观察。
 
----
+## n8n 工作流
 
-## 模块成熟度
+源文件：`internal/n8n_workflows/`；生产副本：`/opt/SilkSpool/hosts/prod/n8n-workflows/`。9 个工作流启用。
 
-| 模块 | 状态 | 说明 |
-|------|------|------|
-| 基础设施 | ✅ 稳定 | 5 机、反代、Headscale VPN、SilkSpool IaC；app/data 分离 |
-| 事件总线 | ✅ 1.0 | `internal/eventbus/` NATS JetStream 一级共享；6 stream + Event 契约（ULID+TraceID） |
-| Bellkeeper 后端 | ✅ 1.0 | eventbus 贯穿；llmgateway 独立包 + 进程内直调；KB 链路事件化；trace_id 全链路 |
-| Bellkeeper 前端 | ✅ 1.0 | SolidJS SPA；Matrix 7→2 页；爬取队列可视化；知识总览/骨架/问答/搜索；问答 SSE 流式 |
-| LLM 代理 | ✅ 1.0 | `internal/llmgateway/`；多渠道路由/熔断/粘性/自适应限流学习/计费/真实余额；协议仅 openai/anthropic/rerank；vendor 与 protocol 分离；P1 运行时拆分 + 管理面下沉；P2 模型目录/连接测试/新增模型向导 |
-| LLM 持久队列 | ✅ 1.0 | `llm_jobs` DB 状态机 + `llm.job.submit` 事件驱动 + 原子 claim + recovery 兜底 |
-| 个人知识库 PKB | ✅ | `pkb-curate` 漏斗 + 原子化重构 + 知识骨架/双库 + 自动闭环调度 + golden set 评估；提示词外置 |
-| 爬取与提取 | ✅ 1.0 | DequeueFair 公平调度 + 域名冷却/健康度 + 三 worker 事件链 + LLM 规则优化 + recrawl 去重 |
-| RSS | ✅ 稳定 | feed CRUD/验证 + 后端调度 + **自动暂停恢复（2026-07-27 接线修复，此前 probePausedFeeds 死代码致熔断源不自愈）**；停用源见记忆 |
-| Meilisearch 检索 | ✅ 1.0 | `/api/files/search\|ask`；入库即触发索引；问答 rerank 精排 |
-| Matrix 控制平面 | ✅ 稳定 | Gateway + Command Router + Agent + 通知聚合去重 + 权限两层 + Admin API |
-| Agent 系统 | ✅ MVP | 回合循环 + 9 工具 + Redis 房间会话 + 限速 + 权限分级；进程内直调 Gateway |
-| 日报系统 | ✅ 稳定 | 资讯早报(08:00·6-6周期·域字典归类·**LLM重要性打分过滤**·LLM总结·**同源落资讯库 vault/资讯/<date>.md**) + 系统日报(21:00·内嵌今日资讯速览) 早晚分离；后端驱动+并行采集+n8n 仅触发 |
-| n8n 工作流治理 | ✅ 落地 | 8 活跃工作流（源真相 `internal/n8n_workflows/`）；10 已退役归档 |
-| 日志中心 | ✅ 1.0 | threshold + pattern 告警 + 归档调度 + trace_id 全链路；**Loki/Grafana 已外挂（M6）** |
-| 可观测性 | ✅ **M6 上线** | Prometheus + Loki + Grafana@silkdata + 三机 cAdvisor/Promtail |
-| 认证 | ✅ 无需 | 纯内网 noauth；LLM Token 鉴权独立保留 |
-| 测试 / lint | ✅ | 31 Repository 全覆盖（真实 PG）+ 核心链路 + 协议转换 + pkb eval；golangci-lint 零 error |
+| 工作流 | 职责 |
+|---|---|
+| B02 | 工作流失败直达 Matrix；不依赖 Bellkeeper 可用性 |
+| K01 | 单 URL 校验、提交持久队列、返回入队/去重结果 |
+| K02 | 每日 06/12/18 点触发到期 RSS 采集；后端仍按源间隔调度 |
+| K03 | 批量 URL 入队，最多 100 个 |
+| K04 | 每 15 分钟检查持久队列终止任务；自动重试由后端负责 |
+| K08 | 08:00 生成资讯早报并发往 news；取材周期前日 06:00 至当日 06:00 |
+| O01 | 21:00 运行日报；21:20 后端检查日报缺失 |
+| O02 | 每 5 分钟检查服务状态，仅告警变化，忽略 disabled 服务 |
+| O03 | 每 5 分钟评估日志告警规则，经通知服务去重推送 |
 
-**1.0 里程碑 M1–M6 全部完成**（详见 [TIMELINE.md](TIMELINE.md)）。
+以上时间均为 Asia/Shanghai。旧 M01–M03、B01 属归档，不参与 Matrix 轮询或当前业务处理。
+日志规则覆盖系统 error、RSS 采集失败、抓取处理失败和正文提取失败。LLM 告警沿用内置聚合器，经 alerts 发送。
 
----
+## 验证与后续观察
 
-## 待决与收尾事项
+- Matrix 通知状态为 sent，机器人命令返回 Pong，自由聊天返回模型回答，知识聊天室返回检索结果及来源。
+- K01 重复提交已入队/入库 URL 返回 duplicate；受控无效 URL 触发 B02，错误告警执行成功。
+- 当日运行日报已生成、归档并通知 daily。
+- O02/O03 已有成功执行，日志规则实际触发并送达；正文提取修复后已产出成功入库记录。
+- 四个 RSSHub 路由均获取成功；实际文章经评分选出 20 条预览并推送到资讯房间。初次恢复包含历史资料，预览明确标注为当前入库内容。
+- 重启后 6 个房间的名称、类型、停用状态保留；未启用的待办命令不可执行或出现在帮助中。
+- `go test ./...`、`go vet ./...`、`go build ./...` 通过；额外覆盖真实 HTTP 提取、工作流脚本、命令禁用和重新启用。
+- 首轮恢复后的 RSS 成功率、积压消化速度继续观察；不把瞬时成功等同长期稳定。
+- 当前未部署旧观测中心栈；后续按需求在 prod 建立独立指标/日志后端。
 
-| 类型 | 事项 | 状态 |
-|------|------|------|
-| silkdata 收尾 | 稳定 ≥7 天后删 keeper 旧数据卷(~15G)、删停用 LXC 107/108/109、knowledge 降内存 | 🔶 计划中 |
-| 观测遗留 | keeper 单容器 CPU/内存指标缺失（Docker 29 + cAdvisor）；可试更新 cadvisor 或改回 overlay2 | 🔶 不影响核心 |
-| 成本 | openclash 省流量 VPS 采购；firecrawl fetch 翻转后流量已降 95%+，或不必买 | ⏸️ 观察中 |
-| PKB 运营 | **打分重构 Tier 0-8 已上线(2026-07-29)**：相关度硬门+配置化+atomic_potential 修复+领域配额+拒收台账+污染防护(反爬页/NO_CARD)+propose 单轮上限分批；已手动 `propose` 跑一轮消化各域存量待归位（skeleton 加节点填盲区，快照可回滚）。**Tier 9 存量清理已执行(2026-07-29)**：快照瘦身(36→20)、资讯合并(39份5子目录→17日文件)、daily 迁 logs-archive(52)、删 reCAPTCHA 污染卡、离群卡改名对齐。存量 raw 分批跑 + cron 固化；`feature_pkb_auto_fill/feed/propose` 默认关、按需开 | 🔶 数据运营 |
-| LLM | prompt cache 命中率监控（new-api 容器已退役下线） | 🔶 待决策 |
-| 爬虫运营 | 新源批量导入 + 7 天成功率验收；周源健康报告 | 🔶 持续 |
-| RSS 源 | SeebugPaper 上游 TLS 证书链不完整（缺中间 CA）直连验证失败，暂保留停用；余 6 源（HN×3/HF Papers/Krebs/嘶吼）已 07-27 恢复 | 🔶 待修 |
+2026-10-29 已移除不可达的旧 Memos、RAGFlow、Firecrawl、MinIO、Grafana 首页/DNS/反代入口；原配置保存在私有接入备份目录，不能把旧主机地址当作当前服务。
 
----
-
-## 核心设计决策
-
-| 选择 | 原因 |
-|------|------|
-| Markdown / Obsidian Vault 为知识真相源 | 数据主权、纯文本、长寿、可手工整理 |
-| PKB 用一次性 CLI（pkb-curate）而非常驻 agent | 流程固定的 LLM 批处理；提示词外置 config/pkb 可调方向不改代码 |
-| Meilisearch 替代 RAGFlow | 轻量、文件级派生、无需重型向量库 |
-| 自建 LLM Proxy 对标 new-api | 任务感知路由/真实余额/限流学习，与 Matrix/日志/配置融合 |
-| DB 公平调度替代内存分桶 | 无状态、可观测、公平轮转（ADR-0003） |
-| NATS 事件总线解耦模块 | 可追溯（TraceID）、崩溃兜底、多消费者 |
-| app/data 分离部署 | 生命周期解耦、备份独立、爆炸半径隔离 |
-| n8n 仅做编排 | 重逻辑下沉 Bellkeeper |
-
----
-
-## 文档导航
-
-- [DEPLOYMENT.md](DEPLOYMENT.md) — product bundle、knowledge-stack/silkdata 配置与 plan/apply/rollback
-- [TIMELINE.md](TIMELINE.md) — 演进时间线与技术栈选型（历史）
-- [ARCHITECTURE.md](ARCHITECTURE.md) — 架构、模块职责、数据模型、关键链路
-- [ROADMAP.md](ROADMAP.md) — 演进待办
-- [API.md](API.md) · [LLM-GATEWAY-API.md](LLM-GATEWAY-API.md) — API 契约
-- [DEVELOPMENT-GUIDE.md](DEVELOPMENT-GUIDE.md) · [ASSISTANT-GUIDELINES.md](ASSISTANT-GUIDELINES.md) — 规范与守则
-- [ARCHITECTURE-EXCEPTIONS.md](ARCHITECTURE-EXCEPTIONS.md) — 分层例外登记
-- [../docs/adr/](../docs/adr/) — 架构决策记录（现行有效）
-- [ops/](ops/) — 网络 / 存储 / 应急运维 SOP
-- [knowledge-base/](knowledge-base/) — Obsidian/PKB 知识库运营规范、模板与流程
+订阅验收：76/77 至少成功获取一次。36氪旧 `/feed` 已失效，已改为本地 RSSHub `/36kr/newsflashes`；酷壳上游返回 403/超时，保留原订阅由健康探测恢复，不绕过访问限制。

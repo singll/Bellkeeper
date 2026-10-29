@@ -9,6 +9,7 @@ Output: JSON to stdout with {title, author, url, date, raw_text} or {error: ...}
 """
 import sys
 import json
+from urllib.request import Request, urlopen
 import trafilatura
 
 
@@ -36,14 +37,23 @@ def main():
         headers = extra_headers.copy() if extra_headers else {}
         if user_agent:
             headers["User-Agent"] = user_agent
-        downloaded = trafilatura.fetch_url(url, headers=headers if headers else None)
+        headers.setdefault("User-Agent", "Bellkeeper/2.4 (RSS article extraction)")
+        # Trafilatura 2.0 fetch_url has no headers argument. Fetch explicitly so
+        # domain overrides and the requested timeout both reach the HTTP client.
+        with urlopen(Request(url, headers=headers), timeout=timeout) as response:
+            downloaded = response.read(20 * 1024 * 1024 + 1)
+        if len(downloaded) > 20 * 1024 * 1024:
+            raise ValueError("response exceeds 20 MiB")
         if not downloaded:
             print(json.dumps({"error": "fetch failed", "url": url}))
             sys.exit(1)
 
         result = trafilatura.extract(
             downloaded,
+            url=url,
             output_format="json",
+            with_metadata=True,
+            include_comments=False,
             include_tables=True,
             include_links=True,
         )

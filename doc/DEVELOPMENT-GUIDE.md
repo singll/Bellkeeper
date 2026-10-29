@@ -111,7 +111,7 @@ go run cmd/bellkeeper/main.go serve --config config/bellkeeper.local.yaml
 # 7. 前端开发（另一个终端）
 cd web
 npm install
-npm run dev
+pnpm dev
 ```
 
 ### Docker Compose 开发
@@ -369,30 +369,7 @@ DELETE /api/tags/:id      # 删除
 
 #### 统一响应格式
 
-```json
-// 成功
-{
-    "success": true,
-    "data": { ... }
-}
-
-// 列表（分页）
-{
-    "success": true,
-    "data": {
-        "items": [ ... ],
-        "total": 100,
-        "page": 1,
-        "page_size": 20
-    }
-}
-
-// 错误
-{
-    "success": false,
-    "error": "具体的错误信息"
-}
-```
+普通成功响应为 `{ "data": ... }`；分页响应为 `{ "data": [...], "total": 100, "page": 1, "per_page": 20 }`；错误响应为 `{ "error": "具体原因" }`。不要读取已废弃的顶层 `success` 或 `data.items`。删除和消息响应分别使用 `message`，代理/流式端点保留各自契约。
 
 #### 使用 response 包
 
@@ -403,7 +380,7 @@ import "github.com/singll/bellkeeper/internal/pkg/response"
 response.Success(c, data)
 
 // 列表
-response.SuccessList(c, items, total, page, pageSize)
+response.Page(c, items, total, page, pageSize)
 
 // 错误
 response.BadRequest(c, "invalid request")
@@ -449,18 +426,9 @@ type Bookmark struct {
 - JSON tag 控制 API 输出
 - 外键关系明确标注
 
-### 步骤 2: 在 db.go 中注册模型
+### 步骤 2: 注册模型与迁移
 
-文件: `internal/model/db.go` (修改)
-
-```go
-func AutoMigrate(db *gorm.DB) error {
-    return db.AutoMigrate(
-        // ... 现有模型
-        &Bookmark{},  // 添加新模型
-    )
-}
-```
+在 `internal/model/db.go` 注册模型，并在 `migrations/` 添加对应的 up/down SQL。生产 schema 变更以版本化迁移为准，AutoMigrate 仅作开发便利或启动校验；不能把修改模型后重启当作完整迁移方案。
 
 ### 步骤 3: 创建 Repository
 
@@ -678,7 +646,7 @@ func (h *BookmarkHandler) List(c *gin.Context) {
         return
     }
     
-    response.SuccessList(c, bookmarks, total, page, pageSize)
+    response.Page(c, bookmarks, total, page, pageSize)
 }
 
 func (h *BookmarkHandler) Create(c *gin.Context) {
@@ -771,64 +739,14 @@ func Setup(r *gin.Engine, h *handler.Handlers, mode, apiKey string) {
 
 ### 步骤 10: 添加测试
 
-文件: `internal/service/bookmark_test.go`
-
-```go
-package service
-
-import (
-    "testing"
-    
-    "github.com/stretchr/testify/assert"
-)
-
-func TestBookmarkService_Create(t *testing.T) {
-    // TODO: 设置测试数据库
-    // svc := setupBookmarkService(t)
-    
-    tests := []struct {
-        name    string
-        req     CreateBookmarkRequest
-        wantErr bool
-    }{
-        {
-            name: "valid bookmark",
-            req: CreateBookmarkRequest{
-                URL:   "https://example.com",
-                Title: "Test",
-            },
-            wantErr: false,
-        },
-        {
-            name: "empty URL",
-            req: CreateBookmarkRequest{
-                URL: "",
-            },
-            wantErr: true,
-        },
-    }
-    
-    for _, tt := range tests {
-        t.Run(tt.name, func(t *testing.T) {
-            // bookmark, err := svc.Create(tt.req)
-            // if tt.wantErr {
-            //     assert.Error(t, err)
-            // } else {
-            //     assert.NoError(t, err)
-            //     assert.NotNil(t, bookmark)
-            // }
-            _ = assert.Equal // 占位
-        })
-    }
-}
-```
+测试必须创建真实 Service、调用公开方法并断言结果，覆盖成功、无效输入和依赖失败。使用独立测试 PostgreSQL（本仓库测试默认 `localhost:15432/bellkeeper_test`），禁止连接生产数据库。可参考 `internal/service/crawl_queue_enqueue_test.go` 的独立 schema，以及 `internal/service/workflow_test.go` 的真实 HTTP 测试服务器。不要复制已删除的注释调用、TODO 数据库或占位断言。
 
 ### 开发清单
 
 每次添加新模块时，检查以下步骤：
 
 - [ ] 1. 定义数据模型 (`internal/model/`)
-- [ ] 2. 注册到 AutoMigrate (`internal/model/db.go`)
+- [ ] 2. 注册模型并添加 migration up/down
 - [ ] 3. 创建 Repository (`internal/repository/`)
 - [ ] 4. 注册到 Repositories (`internal/repository/repository.go`)
 - [ ] 5. 创建 Service (`internal/service/`)
@@ -1140,7 +1058,7 @@ server:
 docker compose down
 
 # ✅ 只重启指定服务
-spool restart keeper bellkeeper
+spool restart prod bellkeeper
 ```
 
 ---
@@ -1176,9 +1094,9 @@ new_module:
 ### Q2: 如何添加新的环境变量？
 
 1. 在 `.env` 文件中添加变量
-2. 生产 secret 写入 `hosts/keeper/.env`，并在 `knowledge-stack` wiring 中引用
+2. 生产 secret 写入 `hosts/prod/.env`，并在 `prod-stack` wiring 中引用
 3. 本地开发可同步到 `config/bellkeeper-init.sh` 仅作兼容
-4. `spool plan` 校验 → `spool apply knowledge-stack keeper` → 重启/观察
+4. `spool plan prod-stack prod --offline` 校验；现有生产容器使用持久配置并由 `spool restart prod bellkeeper` 重启读取。需要重建容器时遵守部署文档的批准要求。
 
 ### Q3: 如何调试 LLM Proxy？
 
@@ -1208,25 +1126,22 @@ curl -X POST http://localhost:8080/api/llm/channels/channel-name/reset \
 
 ### Q4: 如何处理数据库迁移？
 
-当前使用 AutoMigrate，修改模型后重启即自动迁移。
-
-**注意**: AutoMigrate 只会添加列、索引，不会删除或修改现有列。
-如需删除或修改列，需要手动编写 SQL。
+模型变更必须配套版本化 migration up/down，并验证升级和回滚路径。AutoMigrate 只用于开发或启动校验；生产操作遵循 [DEPLOYMENT.md](DEPLOYMENT.md)，先备份再执行迁移。
 
 ### Q5: 如何部署到生产环境？
 
 ```bash
 # 在 SilkSpool 目录
-cd /home/ubuntu/SilkSpool
+cd /home/dev/SilkSpool
 
 # 重启 Bellkeeper
-spool restart keeper bellkeeper
+spool restart prod bellkeeper
 
 # 查看日志
-spool logs keeper bellkeeper 200
+spool logs prod bellkeeper 200
 
 # 查看状态
-spool service keeper status bellkeeper
+spool service prod status bellkeeper
 ```
 
 ---
@@ -1249,7 +1164,7 @@ spool service keeper status bellkeeper
 |------|------|---------|
 | API 正常 | 所有端点返回正确响应 | HTTP 请求测试 |
 | 错误处理 | 错误响应格式正确 | 错误场景测试 |
-| 认证 | noauth（纯内网）+ API Key + LLM Token 正常 | 认证测试 |
+| 认证 | API Key + LLM Token 正常；生产禁用 noauth | 认证测试 |
 | 分页 | 列表 API 分页正常 | 分页参数测试 |
 | 并发安全 | 无数据竞争 | `go test -race` |
 
@@ -1275,123 +1190,11 @@ spool service keeper status bellkeeper
 
 ## 附录
 
-### A. 统一响应格式参考
+### A. 响应与配置的权威来源
 
-```go
-// internal/pkg/response/response.go
-
-package response
-
-import (
-    "github.com/gin-gonic/gin"
-    "net/http"
-)
-
-func Success(c *gin.Context, data interface{}) {
-    c.JSON(http.StatusOK, gin.H{
-        "success": true,
-        "data":    data,
-    })
-}
-
-func SuccessList(c *gin.Context, items interface{}, total int64, page, pageSize int) {
-    c.JSON(http.StatusOK, gin.H{
-        "success": true,
-        "data": gin.H{
-            "items":     items,
-            "total":     total,
-            "page":      page,
-            "page_size": pageSize,
-        },
-    })
-}
-
-func BadRequest(c *gin.Context, message string) {
-    c.JSON(http.StatusBadRequest, gin.H{
-        "success": false,
-        "error":   message,
-    })
-}
-
-func NotFound(c *gin.Context, message string) {
-    c.JSON(http.StatusNotFound, gin.H{
-        "success": false,
-        "error":   message,
-    })
-}
-
-func InternalError(c *gin.Context, message string) {
-    c.JSON(http.StatusInternalServerError, gin.H{
-        "success": false,
-        "error":   message,
-    })
-}
-```
-
-### B. 配置文件结构参考
-
-```yaml
-# config/bellkeeper.yaml
-
-server:
-  host: "0.0.0.0"
-  port: 8080
-  mode: "debug"       # debug / release
-  api_key: "${BELLKEEPER_API_KEY}"
-  shutdown_timeout: 10
-
-database:
-  host: "localhost"
-  port: 5432
-  user: "bellkeeper"
-  password: "${BELLKEEPER_DATABASE_PASSWORD}"
-  dbname: "bellkeeper"
-  sslmode: "disable"
-
-logging:
-  level: "info"        # debug / info / warn / error
-  format: "json"       # json / text
-  output: "stdout"     # stdout / file
-
-llm_proxy:            # LLM 网关始终启用，无 enabled 开关
-  default_timeout: 60
-  max_retries: 3
-  default_bucket_rpm: 60
-
-
-n8n:
-  base_url: "http://sp-n8n:5678"
-  api_key: "${N8N_API_KEY}"
-  webhook_base_url: "http://sp-n8n:5678/webhook"
-
-matrix:
-  homeserver_url: "https://matrix.singll.net"
-  bot_user_id: "@bellkeeper:matrix.singll.net"
-  bot_access_token: "${MATRIX_BOT_TOKEN}"
-  device_id: "BELLKEEPER"
-  max_retry: 3
-
-redis:
-  host: "sp-redis"
-  port: 6379
-  password: ""
-  db: 0
-
-nats:
-  url: "nats://sp-nats:4222"
-  stream_name: "BELLKEEPER"
-
-file_ingestion:
-  enabled: true
-  base_path: "/mnt/knowledge"
-  trafilatura:
-    enabled: true
-    timeout: 15
-  firecrawl:
-    enabled: true
-    fallback_only: true
-    api_key: "${FIRECRAWL_API_KEY}"
-```
+- 响应 helper：`internal/pkg/response/response.go`；端点契约见 [API.md](API.md)。
+- 默认配置：`config/bellkeeper.yaml`；当前生产覆盖和 secrets 位置见 [DEPLOYMENT.md](DEPLOYMENT.md)。不要维护第二份易过期的配置副本。
+- Matrix 配置在进程启动时加载；修改持久配置后通过 spool 重启。Admin rooms API 只登记房间，创建和邀请需调用 homeserver API。
 
 ### C. 有用的 Git 命令
 
@@ -1424,7 +1227,7 @@ go test -cover ./...       # 覆盖率
 go vet ./...               # 静态分析
 go mod tidy                # 整理依赖
 
-# Docker
+# Docker（仅本地开发；远程统一通过 spool）
 docker compose up -d       # 启动
 docker compose logs -f     # 日志
 docker compose restart     # 重启
@@ -1432,7 +1235,7 @@ docker compose exec app sh # 进入容器
 
 # 前端
 cd web
-npm run dev                # 开发
-npm run build              # 构建
-npm run lint               # 检查
+pnpm dev                # 开发
+pnpm build              # 构建
+pnpm lint               # 检查
 ```

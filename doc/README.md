@@ -9,7 +9,7 @@
 
 | 文档 | 用途 |
 |------|------|
-| [DEPLOYMENT.md](DEPLOYMENT.md) | **部署与配置** — product bundle、knowledge-stack/silkdata、secrets、plan/apply/rollback |
+| [DEPLOYMENT.md](DEPLOYMENT.md) | **部署与配置** — product bundle、prod-stack/proddata、secrets、plan/apply/rollback |
 | [STATUS.md](STATUS.md) | **主状态文档** — 主机拓扑、服务分布、观测、数据流、待决事项 |
 | [ARCHITECTURE.md](ARCHITECTURE.md) | 系统定位、模块职责、数据模型、关键链路、部署形态 |
 | [ROADMAP.md](ROADMAP.md) | 演进待办（前瞻） |

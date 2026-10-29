@@ -6,6 +6,7 @@ import (
 	"time"
 
 	"github.com/singll/bellkeeper/internal/model"
+	"github.com/singll/bellkeeper/internal/repository"
 )
 
 func TestClassifyCrawlErrorRateLimited(t *testing.T) {
@@ -106,5 +107,31 @@ func TestNextAllowedForDomainOutcomeRateLimitedFallback(t *testing.T) {
 	want := now.Add(5 * time.Minute)
 	if got == nil || !got.Equal(want) {
 		t.Fatalf("nextAllowed = %v, want %s", got, want)
+	}
+}
+
+func TestEnqueuePendingDuplicateIsIdempotent(t *testing.T) {
+	db := setupEnqueueTestDB(t)
+	svc := &CrawlQueueService{repo: repository.NewCrawlJobRepository(db)}
+	id, err := svc.Enqueue(0, "https://example.com/article", "Article", "auto", nil)
+	if err != nil || id == 0 {
+		t.Fatalf("first enqueue = %d, %v", id, err)
+	}
+	id, err = svc.Enqueue(0, "https://example.com/article", "Article", "auto", nil)
+	if err != nil || id != 0 {
+		t.Fatalf("duplicate enqueue = %d, %v", id, err)
+	}
+	var count int64
+	if err := db.Model(&model.CrawlJob{}).Count(&count).Error; err != nil {
+		t.Fatal(err)
+	}
+	if count != 1 {
+		t.Fatalf("created %d jobs for one URL", count)
+	}
+	if err := db.Migrator().DropTable(&model.CrawlJob{}); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := svc.Enqueue(0, "https://example.com/article", "Article", "auto", nil); err == nil {
+		t.Fatal("database error hidden as duplicate")
 	}
 }

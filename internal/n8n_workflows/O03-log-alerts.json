@@ -1,0 +1,222 @@
+{
+  "name": "O03-日志规则告警",
+  "nodes": [
+    {
+      "name": "定时检查",
+      "id": "8d35bf3b-6cae-52f5-82d5-179c8ce26e76",
+      "type": "n8n-nodes-base.scheduleTrigger",
+      "typeVersion": 1.2,
+      "parameters": {
+        "rule": {
+          "interval": [
+            {
+              "field": "minutes",
+              "minutesInterval": 5
+            }
+          ]
+        }
+      },
+      "position": [
+        0,
+        300
+      ]
+    },
+    {
+      "name": "读取告警规则",
+      "id": "95e0b5c5-d221-56fb-b642-c26d5ae2784a",
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4.2,
+      "parameters": {
+        "method": "GET",
+        "url": "={{ $env.BELLKEEPER_URL }}/api/logs/alerts",
+        "sendHeaders": true,
+        "headerParameters": {
+          "parameters": [
+            {
+              "name": "X-API-Key",
+              "value": "={{ $env.BELLKEEPER_API_KEY }}"
+            }
+          ]
+        },
+        "options": {
+          "timeout": 60000
+        }
+      },
+      "position": [
+        400,
+        300
+      ]
+    },
+    {
+      "name": "展开有效规则",
+      "id": "7bab0aab-bc9f-54a0-8303-f23d41b5e8d0",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "parameters": {
+        "jsCode": "return ($json.data || []).filter(r=>r.is_active).map(r=>{const c=typeof r.condition==='string'?JSON.parse(r.condition):r.condition;\nif (!c.threshold || !c.window_minutes) throw new Error('无效告警规则: '+r.name);\nreturn {json:{rule:r,condition:c,since:new Date(Date.now()-c.window_minutes*60000).toISOString()}};});"
+      },
+      "position": [
+        600,
+        300
+      ]
+    },
+    {
+      "name": "读取窗口日志",
+      "id": "9a257ad5-d50a-5ca5-8412-8ee3aed9f2cd",
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4.2,
+      "parameters": {
+        "url": "={{ $env.BELLKEEPER_URL + '/api/logs/entries' }}",
+        "sendHeaders": true,
+        "headerParameters": {
+          "parameters": [
+            {
+              "name": "X-API-Key",
+              "value": "={{ $env.BELLKEEPER_API_KEY }}"
+            }
+          ]
+        },
+        "sendQuery": true,
+        "queryParameters": {
+          "parameters": [
+            {
+              "name": "since",
+              "value": "={{ $json.since }}"
+            },
+            {
+              "name": "module",
+              "value": "={{ $json.condition.module || '' }}"
+            },
+            {
+              "name": "level",
+              "value": "={{ $json.condition.level || '' }}"
+            },
+            {
+              "name": "limit",
+              "value": "1000"
+            },
+            {
+              "name": "status",
+              "value": "={{ $json.condition.status || '' }}"
+            }
+          ]
+        },
+        "options": {
+          "timeout": 30000
+        }
+      },
+      "position": [
+        800,
+        300
+      ]
+    },
+    {
+      "name": "判断规则并去重",
+      "id": "23fcaefd-26c3-5b8a-ab5d-517ca201a401",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "parameters": {
+        "jsCode": "const rules=$('展开有效规则').all();\nreturn $input.all().flatMap((item,i)=>{const {rule,condition:c}=rules[i].json;const result=item.json.data;\nlet count=result.total || 0;\nif(c.pattern){const re=new RegExp(c.pattern);count=(result.items || []).filter(x=>re.test(x.summary || '')).length;}\nif(count<c.threshold)return [];\nreturn [{json:{channel:rule.notify_channel || 'alerts',message:`⚠️ ${rule.name}\n最近 ${c.window_minutes} 分钟命中 ${count} 条，阈值 ${c.threshold}。`,dedup_key:'log-rule-'+rule.id,severity:'warning'}}];});"
+      },
+      "position": [
+        1000,
+        300
+      ]
+    },
+    {
+      "name": "发送日志告警",
+      "id": "9ef6e9ed-b71c-5f7e-bdee-4dde8ba414cb",
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4.2,
+      "parameters": {
+        "method": "POST",
+        "url": "={{ $env.BELLKEEPER_URL }}/api/matrix/notify",
+        "sendHeaders": true,
+        "headerParameters": {
+          "parameters": [
+            {
+              "name": "X-API-Key",
+              "value": "={{ $env.BELLKEEPER_API_KEY }}"
+            }
+          ]
+        },
+        "options": {
+          "timeout": 60000
+        },
+        "sendBody": true,
+        "specifyBody": "json",
+        "jsonBody": "={{ JSON.stringify($json) }}"
+      },
+      "position": [
+        1200,
+        300
+      ]
+    }
+  ],
+  "connections": {
+    "定时检查": {
+      "main": [
+        [
+          {
+            "node": "读取告警规则",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "读取告警规则": {
+      "main": [
+        [
+          {
+            "node": "展开有效规则",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "展开有效规则": {
+      "main": [
+        [
+          {
+            "node": "读取窗口日志",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "读取窗口日志": {
+      "main": [
+        [
+          {
+            "node": "判断规则并去重",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "判断规则并去重": {
+      "main": [
+        [
+          {
+            "node": "发送日志告警",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    }
+  },
+  "settings": {
+    "executionOrder": "v1",
+    "timezone": "Asia/Shanghai",
+    "errorWorkflow": "u0W5aC5Q6Y0cZGK6",
+    "saveDataErrorExecution": "all",
+    "saveDataSuccessExecution": "all",
+    "callerPolicy": "workflowsFromSameOwner",
+    "saveManualExecutions": true
+  }
+}

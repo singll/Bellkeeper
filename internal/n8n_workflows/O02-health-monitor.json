@@ -1,0 +1,137 @@
+{
+  "name": "O02-服务健康监控",
+  "nodes": [
+    {
+      "name": "定时检查",
+      "id": "8d35bf3b-6cae-52f5-82d5-179c8ce26e76",
+      "type": "n8n-nodes-base.scheduleTrigger",
+      "typeVersion": 1.2,
+      "parameters": {
+        "rule": {
+          "interval": [
+            {
+              "field": "minutes",
+              "minutesInterval": 5
+            }
+          ]
+        }
+      },
+      "position": [
+        0,
+        300
+      ]
+    },
+    {
+      "name": "获取服务状态",
+      "id": "4f4a8acc-fa06-5268-b64a-685518e14a38",
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4.2,
+      "parameters": {
+        "method": "GET",
+        "url": "={{ $env.BELLKEEPER_URL }}/api/health/detailed",
+        "sendHeaders": true,
+        "headerParameters": {
+          "parameters": [
+            {
+              "name": "X-API-Key",
+              "value": "={{ $env.BELLKEEPER_API_KEY }}"
+            }
+          ]
+        },
+        "options": {
+          "timeout": 60000
+        }
+      },
+      "position": [
+        400,
+        300
+      ]
+    },
+    {
+      "name": "汇总并对比状态",
+      "id": "a0cdac80-33e0-59bb-a2df-1a3b8f97a325",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "parameters": {
+        "jsCode": "const state=$getWorkflowStaticData('global');\nconst services=$json.data?.services;\nif (!services || !Object.keys(services).length) throw new Error('健康检查未返回服务清单');\nconst previous=state.previous || {};\nconst current=Object.fromEntries(Object.entries(services).filter(([,v])=>v.status!=='disabled').map(([k,v])=>[k,v.status]));\nconst changes=[];\nfor (const [name,status] of Object.entries(current)) if ((previous[name] && previous[name]!==status) || (!previous[name] && status!=='up')) changes.push(`${name}: ${previous[name]||'首次检查'} → ${status}`);\nstate.previous=current;\nif (!changes.length) return [];\nreturn [{json:{channel:'alerts',message:'服务状态变化\\n'+changes.join('\\n'),severity:changes.some(x=>!x.endsWith('→ up'))?'warning':'info'}}];"
+      },
+      "position": [
+        600,
+        300
+      ]
+    },
+    {
+      "name": "发送状态变化",
+      "id": "468fcffc-8f99-5472-932c-797d5130c042",
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4.2,
+      "parameters": {
+        "method": "POST",
+        "url": "={{ $env.BELLKEEPER_URL }}/api/matrix/notify",
+        "sendHeaders": true,
+        "headerParameters": {
+          "parameters": [
+            {
+              "name": "X-API-Key",
+              "value": "={{ $env.BELLKEEPER_API_KEY }}"
+            }
+          ]
+        },
+        "options": {
+          "timeout": 60000
+        },
+        "sendBody": true,
+        "specifyBody": "json",
+        "jsonBody": "={{ JSON.stringify($json) }}"
+      },
+      "position": [
+        800,
+        300
+      ]
+    }
+  ],
+  "connections": {
+    "定时检查": {
+      "main": [
+        [
+          {
+            "node": "获取服务状态",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "获取服务状态": {
+      "main": [
+        [
+          {
+            "node": "汇总并对比状态",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "汇总并对比状态": {
+      "main": [
+        [
+          {
+            "node": "发送状态变化",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    }
+  },
+  "settings": {
+    "executionOrder": "v1",
+    "timezone": "Asia/Shanghai",
+    "errorWorkflow": "u0W5aC5Q6Y0cZGK6",
+    "saveDataErrorExecution": "all",
+    "saveDataSuccessExecution": "all",
+    "callerPolicy": "workflowsFromSameOwner",
+    "saveManualExecutions": true
+  }
+}

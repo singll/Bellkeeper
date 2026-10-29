@@ -1,6 +1,6 @@
 # Bellkeeper 架构文档（1.0 终态）
 
-> 更新日期: 2026-10-28
+> 更新日期: 2026-10-29
 > 状态标注: ✅ 已实施 | 🔶 运维待建 | 📋 规划中
 > 当前状态见 [STATUS.md](STATUS.md)；历史演进见 [TIMELINE.md](TIMELINE.md)
 
@@ -20,14 +20,14 @@ Bellkeeper 是 SilkSpool 的**知识治理中台 + LLM 代理网关 + Matrix 控
 | LLM 代理池 | ✅ | `internal/llmgateway/` 独立包；Gateway 进程内直调接口（Chat/ChatStream/Rerank）；多渠道路由、熔断、粘性、自适应限流学习、计费、余额；运行时协议仅 `openai` / `anthropic` / `rerank`，vendor 与 protocol 分离；对外 OpenAI 兼容 API `/api/llm/v1/*`；详见 [LLM-GATEWAY-API.md](LLM-GATEWAY-API.md) |
 | LLM 持久任务队列(`llm_jobs`) | ✅ | 事件驱动（`llm.job.submit` NATS 事件 + DB 状态机）；原子 claim 反防重；recovery 兜底重投 |
 | 个人知识库 PKB | ✅ | `pkb-curate` CLI: 漏斗（raw/archive/vault）+ 原子化重构 + digest 综述 + golden set 评估；全闭环无人值守（Scheduler 驱动 + 域管理）；P2 骨架/缺口/闸审核 + 资讯库闸；提示词外置 `config/pkb/prompts/` |
-| 文件入库与治理 | ✅ | Trafilatura 主力 + Firecrawl 兜底,Markdown + frontmatter 落盘 `/mnt/knowledge/` |
+| 文件入库与治理 | ✅ | Trafilatura 主力；Firecrawl 为可选能力，当前 prod 未配置并关闭,Markdown + frontmatter 落盘 `/mnt/knowledge/` |
 | 爬取队列 CrawlQueue | ✅ | 事件驱动三 worker 链（crawl→extract→index）+ 域名级限速/健康画像（HealthScore/Pause 自动启停）+ 错误分类退避 + LLM 爬取规则优化闭环 |
 | URL 去重(精确/归一化/模糊 + 内容哈希) | ✅ | DB 内多级匹配 |
 | 分类与标签 | ✅ | LLM 驱动分类,提示词外置 `config/prompts/`（system/user 分离 + json_object 结构化 + 自修复重试）；标签置信度/规范化/来源记录(tag_source),frontmatter+Meili+DB 三处持久化 |
 | RSS 订阅源管理 | ✅ | 源 CRUD、按源 fetch_interval 调度、RSSHub 参数支持、feed 验证 API；源配置 `config/rss-sources.json` |
 | Meilisearch 检索与问答 | ✅ | `/api/files/search\|ask`,事件驱动实时索引（入库即刷新，替代定时扫描）；问答 SSE 流式 + rerank 精排 |
 | Matrix 控制平面 | ✅ | Gateway(mautrix-go 长连接)+ Command Router + 权限两层制(IsAdmin+IsRoomEnabled)+ 通知网关(eventbus)+ 通知聚合去重(5min合并+1h抑制)+ Admin API |
-| Agent 系统 | ✅ | AgentService(回合循环+工具执行)+ 9 工具(system_health/dashboard_stats/knowledge_search/knowledge_ask/llm_usage/crawl_status + todo_list/todo_add/todo_done + trigger_workflow)+ Redis会话(房间级多轮,20条上限,30min TTL)+ 限速(每房间30回合/小时)+ 权限分级(readonly/write/danger) |
+| Agent 系统 | ✅ | AgentService(回合循环+工具执行)+ 9 工具(system_health/dashboard_stats/knowledge_search/knowledge_ask/llm_usage/crawl_status + todo_list/todo_add/todo_done + trigger_workflow)+ Redis会话(房间级多轮,20条上限,30min TTL)+ 限速(当前生产每房间120回合/小时)+ 权限分级(readonly/write/danger) |
 | 日报系统 DailyReport | ✅ | 后端驱动(DailyReportService)+ 并行采集器(服务状态/LLM用量/PKB/爬取/待办)+ n8n 仅触发；进程内直调 Gateway |
 | 日志中心 LogCenter | ✅ | threshold + pattern（正则）告警 + CleanOldEntries 每日调度 + 业务审计 activity_log；全文检索/SSE 交 Loki 外挂（LogQL 查询） |
 | 活动日志 ActivityLog | ✅ | 跨模块审计, TraceID 全链路贯穿（HTTP 中间件→eventbus→log_center→Loki） |
@@ -38,9 +38,9 @@ Bellkeeper 是 SilkSpool 的**知识治理中台 + LLM 代理网关 + Matrix 控
 
 ### n8n 负责
 
-- 定时调度与事件编排(B/K/M/O 四类工作流);重逻辑一律下沉 Bellkeeper
+- 当前 9 个 B/K/O 工作流；M 类已归档，Matrix 命令与聊天由 Bellkeeper 处理
 - CrawlQueue 是爬取主链路,n8n 只触发和汇报
-- 日报仅触发,数据采集与渲染全在 Bellkeeper
+- 日报仅触发，数据采集与渲染全在 Bellkeeper；O03 消费日志规则并周期评估，B02 直连 Matrix 兜底错误通知
 
 ---
 
@@ -57,7 +57,7 @@ Bellkeeper 是 SilkSpool 的**知识治理中台 + LLM 代理网关 + Matrix 控
 | 前端 | SolidJS 1.8 + TailwindCSS 3.4 + Vite 5 |
 | Matrix SDK | mautrix-go |
 | 认证 | noauth(纯内网);LLM Token 鉴权独立保留 |
-| 监控/日志 | Prometheus `/metrics` + Zap（JSON 结构化 stdout）；**M6 观测栈：Prometheus+Loki+Grafana@silkdata + 三机 cAdvisor/Promtail**；TraceID 全链路 |
+| 监控/日志 | Prometheus `/metrics` + Zap（JSON 结构化 stdout）；当前 prod：n8n O02/O03 + Matrix；M6 三机观测仅为历史部署；TraceID 全链路 |
 | 部署 | Docker 多阶段构建,SilkSpool `spool` 编排 |
 | 迁移 | golang-migrate(显式迁移 005-009) + GORM AutoMigrate |
 

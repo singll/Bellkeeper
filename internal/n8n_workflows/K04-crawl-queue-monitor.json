@@ -1,0 +1,137 @@
+{
+  "name": "K04-抓取队列巡检",
+  "nodes": [
+    {
+      "name": "定时检查",
+      "id": "8d35bf3b-6cae-52f5-82d5-179c8ce26e76",
+      "type": "n8n-nodes-base.scheduleTrigger",
+      "typeVersion": 1.2,
+      "parameters": {
+        "rule": {
+          "interval": [
+            {
+              "field": "minutes",
+              "minutesInterval": 15
+            }
+          ]
+        }
+      },
+      "position": [
+        0,
+        300
+      ]
+    },
+    {
+      "name": "读取持久化队列",
+      "id": "8d084118-2fe3-59ef-9f1f-3f7a5ec0a704",
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4.2,
+      "parameters": {
+        "method": "GET",
+        "url": "={{ $env.BELLKEEPER_URL }}/api/crawl/queue/stats",
+        "sendHeaders": true,
+        "headerParameters": {
+          "parameters": [
+            {
+              "name": "X-API-Key",
+              "value": "={{ $env.BELLKEEPER_API_KEY }}"
+            }
+          ]
+        },
+        "options": {
+          "timeout": 60000
+        }
+      },
+      "position": [
+        400,
+        300
+      ]
+    },
+    {
+      "name": "检查终止任务",
+      "id": "d70c4ed1-f9ed-5a05-a745-2b672a24ced0",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "parameters": {
+        "jsCode": "const s=$json.data || {};const count=(s.dead || 0)+(s.failed || 0)+(s.blocked || 0);\nif (!count) return [];\nreturn [{json:{channel:'alerts',message:`⚠️ 抓取队列需处理：失败 ${s.failed||0}，终止 ${s.dead||0}，阻塞 ${s.blocked||0}；自动重试中 ${s.retrying||0}。请在 Bellkeeper 抓取队列检查原因。`,dedup_key:'crawl-queue-terminal',severity:'warning'}}];"
+      },
+      "position": [
+        600,
+        300
+      ]
+    },
+    {
+      "name": "发送队列告警",
+      "id": "a00f1cac-a8f7-53d2-822b-f56bdf5c61d6",
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4.2,
+      "parameters": {
+        "method": "POST",
+        "url": "={{ $env.BELLKEEPER_URL }}/api/matrix/notify",
+        "sendHeaders": true,
+        "headerParameters": {
+          "parameters": [
+            {
+              "name": "X-API-Key",
+              "value": "={{ $env.BELLKEEPER_API_KEY }}"
+            }
+          ]
+        },
+        "options": {
+          "timeout": 60000
+        },
+        "sendBody": true,
+        "specifyBody": "json",
+        "jsonBody": "={{ JSON.stringify($json) }}"
+      },
+      "position": [
+        800,
+        300
+      ]
+    }
+  ],
+  "connections": {
+    "定时检查": {
+      "main": [
+        [
+          {
+            "node": "读取持久化队列",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "读取持久化队列": {
+      "main": [
+        [
+          {
+            "node": "检查终止任务",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "检查终止任务": {
+      "main": [
+        [
+          {
+            "node": "发送队列告警",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    }
+  },
+  "settings": {
+    "executionOrder": "v1",
+    "timezone": "Asia/Shanghai",
+    "errorWorkflow": "u0W5aC5Q6Y0cZGK6",
+    "saveDataErrorExecution": "all",
+    "saveDataSuccessExecution": "all",
+    "callerPolicy": "workflowsFromSameOwner",
+    "saveManualExecutions": true
+  }
+}

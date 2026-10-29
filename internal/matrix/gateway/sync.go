@@ -18,12 +18,12 @@ import (
 
 // SyncLoop manages the Matrix sync loop
 type SyncLoop struct {
-	client            *Client
-	syncer            *mautrix.DefaultSyncer
-	stopCh            chan struct{}
-	stopped           atomic.Bool
+	client             *Client
+	syncer             *mautrix.DefaultSyncer
+	stopCh             chan struct{}
+	stopped            atomic.Bool
 	dbPersistFailSince time.Time
-	commandService    interface {
+	commandService     interface {
 		ExecuteMessage(ctx context.Context, roomID, sender, eventID, content string) error
 	}
 	dispatcherWg sync.WaitGroup
@@ -277,7 +277,7 @@ func (s *SyncLoop) dispatchCommand(ctx context.Context, evt *event.Event, body s
 	}()
 }
 
-// discoverJoinedRooms upserts all joined rooms into the database
+// discoverJoinedRooms records new rooms and preserves existing administrator settings.
 func (s *SyncLoop) discoverJoinedRooms(ctx context.Context) {
 	rooms, err := s.client.JoinedRooms(ctx)
 	if err != nil {
@@ -287,19 +287,8 @@ func (s *SyncLoop) discoverJoinedRooms(ctx context.Context) {
 
 	count := 0
 	for _, roomID := range rooms {
-		// 发现逻辑只标记「已加入 & 活跃」，不应改写管理员设过的 room_type（如 chat）。
-		// 新房间默认 command；已存在的保留原 room_type。
-		roomType := model.RoomTypeCommand
-		if existing, err := s.client.repos.MatrixRoom.GetByRoomID(roomID); err == nil && existing.RoomType != "" {
-			roomType = existing.RoomType
-		}
-		room := &model.MatrixRoom{
-			RoomID:   roomID,
-			RoomType: roomType,
-			IsActive: true,
-		}
-		if err := s.client.repos.MatrixRoom.Upsert(ctx, room); err != nil {
-			middleware.GetLogger().Warn("failed to upsert room", zap.String("room_id", roomID), zap.Error(err))
+		if err := s.client.repos.MatrixRoom.Discover(ctx, roomID); err != nil {
+			middleware.GetLogger().Warn("failed to discover room", zap.String("room_id", roomID), zap.Error(err))
 		} else {
 			count++
 		}

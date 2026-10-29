@@ -2,6 +2,7 @@ package repository
 
 import (
 	"context"
+	"encoding/json"
 	"testing"
 
 	"github.com/singll/bellkeeper/internal/model"
@@ -122,4 +123,27 @@ func TestMatrixRoomRepository_Upsert(t *testing.T) {
 
 func strPtr(s string) *string {
 	return &s
+}
+
+func TestMatrixRoomRepository_DiscoverPreservesSettings(t *testing.T) {
+	repo := NewMatrixRoomRepository(setupTestDB(t))
+	ctx := context.Background()
+	const roomID = "!discovered:matrix.org"
+	assertNoError(t, repo.Discover(ctx, roomID), "Discover new room")
+	room, err := repo.GetByRoomID(roomID)
+	assertNoError(t, err, "Get new room")
+	assertEqual(t, room.RoomType, model.RoomTypeCommand)
+	assertEqual(t, room.IsActive, true)
+	room.RoomName, room.RoomType, room.IsActive = "Private chat", model.RoomTypeChat, false
+	room.Config = strPtr(`{"owner":"@owner:matrix.org"}`)
+	assertNoError(t, repo.Update(room), "Configure room")
+	assertNoError(t, repo.Discover(ctx, roomID), "Rediscover existing room")
+	got, err := repo.GetByRoomID(roomID)
+	assertNoError(t, err, "Get preserved room")
+	assertEqual(t, got.RoomName, room.RoomName)
+	assertEqual(t, got.RoomType, room.RoomType)
+	assertEqual(t, got.IsActive, false)
+	var config map[string]string
+	assertNoError(t, json.Unmarshal([]byte(*got.Config), &config), "Decode preserved config")
+	assertEqual(t, config["owner"], "@owner:matrix.org")
 }

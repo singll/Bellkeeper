@@ -53,6 +53,16 @@ func (r *MatrixRoomRepository) Delete(roomID string) error {
 	return r.db.Where("room_id = ?", roomID).Delete(&model.MatrixRoom{}).Error
 }
 
+// Discover records a newly joined room without overwriting administrator settings.
+func (r *MatrixRoomRepository) Discover(ctx context.Context, roomID string) error {
+	config := "{}"
+	return r.db.WithContext(ctx).Clauses(clause.OnConflict{
+		Columns: []clause.Column{{Name: "room_id"}}, DoNothing: true,
+	}).Create(&model.MatrixRoom{
+		RoomID: roomID, RoomType: model.RoomTypeCommand, IsActive: true, Config: &config,
+	}).Error
+}
+
 func (r *MatrixRoomRepository) Upsert(ctx context.Context, room *model.MatrixRoom) error {
 	room.UpdatedAt = time.Now()
 	return r.db.WithContext(ctx).Clauses(clause.OnConflict{

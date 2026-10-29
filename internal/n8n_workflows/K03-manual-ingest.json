@@ -2,16 +2,16 @@
   "name": "K03-手动批量提交",
   "nodes": [
     {
+      "name": "Webhook",
+      "id": "b4ba0a78-8fad-5d8e-b066-e0ef08ecbbc4",
+      "type": "n8n-nodes-base.webhook",
+      "typeVersion": 2,
       "parameters": {
         "httpMethod": "POST",
         "path": "manual-ingest",
         "responseMode": "responseNode",
         "options": {}
       },
-      "id": "webhook-trigger",
-      "name": "Webhook",
-      "type": "n8n-nodes-base.webhook",
-      "typeVersion": 2,
       "position": [
         0,
         300
@@ -19,94 +19,71 @@
       "webhookId": "manual-ingest"
     },
     {
-      "parameters": {
-        "jsCode": "// Normalize input to array of URLs and validate\nconst input = $input.first().json;\nconst body = input.body || input;\n\nlet urls = [];\n\nif (body.urls && Array.isArray(body.urls)) {\n  urls = body.urls;\n} else if (body.url) {\n  urls = [body.url];\n} else {\n  throw new Error('Missing required field: url or urls');\n}\n\n// Validate and normalize URLs (regex-based, URL constructor not available in sandbox)\nconst urlPattern = /^https?:\\/\\/[^\\s/$.?#].[^\\s]*$/i;\nconst validUrls = [];\nconst invalidUrls = [];\n\nfor (const rawUrl of urls) {\n  const u = (rawUrl || '').trim();\n  if (!u) continue;\n  if (urlPattern.test(u)) {\n    validUrls.push(u);\n  } else {\n    invalidUrls.push({ url: u, error: 'Invalid URL format' });\n  }\n}\n\nif (validUrls.length === 0) {\n  throw new Error('No valid URLs provided');\n}\n\n// Return each URL as a separate item for SplitInBatches\nconst items = validUrls.map(url => ({ json: { url, totalCount: validUrls.length, invalidUrls } }));\nreturn items;"
-      },
-      "id": "normalize-urls",
-      "name": "Normalize URLs",
+      "name": "规范化批量地址",
+      "id": "bb6e9b09-42a5-5c11-bdbc-4c12943b9d03",
       "type": "n8n-nodes-base.code",
       "typeVersion": 2,
+      "parameters": {
+        "jsCode": "const b=$json.body || $json;\nconst raw=Array.isArray(b.urls)?b.urls:String(b.urls || b.url || '').split(/[\\n,]+/);\nconst urls=[...new Set(raw.map(x=>String(x).trim()).filter(Boolean))];\nif (!urls.length || urls.length>100) throw new Error('请提供 1–100 个 URL');\nfor (const url of urls) if (!/^https?:\\/\\/[^\\s]+$/i.test(url)) throw new Error('无效的 http(s) URL');\nreturn urls.map(url=>({json:{url,channel_type:'auto',metadata:{source:'n8n-manual-batch'}}}));"
+      },
       "position": [
-        240,
+        200,
         300
       ]
     },
     {
-      "parameters": {
-        "batchSize": 1,
-        "options": {}
-      },
-      "id": "split-batches",
-      "name": "SplitInBatches",
-      "type": "n8n-nodes-base.splitInBatches",
-      "typeVersion": 3,
-      "position": [
-        480,
-        300
-      ]
-    },
-    {
-      "parameters": {
-        "method": "POST",
-        "url": "http://localhost:5678/webhook/article-ingest",
-        "sendBody": true,
-        "specifyBody": "json",
-        "jsonBody": "={{ JSON.stringify({ url: $json.url }) }}",
-        "options": {
-          "timeout": 120000,
-          "allowUnauthorizedCerts": true
-        }
-      },
-      "id": "call-ingest",
-      "name": "Call Article Ingest",
+      "name": "批量入队",
+      "id": "bb637f1a-6785-57c6-940f-ea428c811a5a",
       "type": "n8n-nodes-base.httpRequest",
       "typeVersion": 4.2,
+      "parameters": {
+        "method": "POST",
+        "url": "={{ $env.BELLKEEPER_URL }}/api/crawl/queue/enqueue",
+        "sendHeaders": true,
+        "headerParameters": {
+          "parameters": [
+            {
+              "name": "X-API-Key",
+              "value": "={{ $env.BELLKEEPER_API_KEY }}"
+            }
+          ]
+        },
+        "options": {
+          "timeout": 60000
+        },
+        "sendBody": true,
+        "specifyBody": "json",
+        "jsonBody": "={{ JSON.stringify($json) }}"
+      },
       "position": [
-        720,
+        400,
         300
       ]
     },
     {
-      "parameters": {
-        "amount": 2,
-        "unit": "seconds"
-      },
-      "id": "wait-delay",
-      "name": "Wait",
-      "type": "n8n-nodes-base.wait",
-      "typeVersion": 1.1,
-      "position": [
-        960,
-        300
-      ]
-    },
-    {
-      "parameters": {
-        "jsCode": "// Aggregate all results from the batch processing\nconst allItems = $('Call Article Ingest').all();\nconst normalizeData = $('Normalize URLs').first().json;\n\nlet success = 0;\nlet duplicate = 0;\nlet failed = 0;\nconst details = [];\n\nfor (const item of allItems) {\n  const result = item.json;\n  const status = result.status || 'unknown';\n\n  if (status === 'ingested' || result.success === true) {\n    success++;\n    details.push({ url: result.url || '', status: 'success', title: result.title || '' });\n  } else if (status === 'duplicate') {\n    duplicate++;\n    details.push({ url: result.url || '', status: 'duplicate' });\n  } else {\n    failed++;\n    details.push({ url: result.url || '', status: 'failed', error: result.message || result.error || 'Unknown error' });\n  }\n}\n\n// Include invalid URLs from initial validation\nconst invalidUrls = normalizeData.invalidUrls || [];\nfor (const inv of invalidUrls) {\n  failed++;\n  details.push({ url: inv.url, status: 'failed', error: inv.error });\n}\n\nreturn [{\n  json: {\n    total: success + duplicate + failed,\n    success,\n    duplicate,\n    failed,\n    details\n  }\n}];"
-      },
-      "id": "aggregate-results",
-      "name": "Aggregate Results",
+      "name": "汇总入队结果",
+      "id": "c3050cf3-06d5-5ea7-ada9-d6875f69049c",
       "type": "n8n-nodes-base.code",
       "typeVersion": 2,
+      "parameters": {
+        "jsCode": "const results=$input.all().map(x=>x.json.data); return [{json:{success:true,queued:results.filter(x=>x.queued).length,duplicate:results.filter(x=>!x.queued).length,results}}];"
+      },
       "position": [
-        1200,
+        600,
         300
       ]
     },
     {
+      "name": "返回批量结果",
+      "id": "b84359cd-c327-5963-a402-2035e8f199e8",
+      "type": "n8n-nodes-base.respondToWebhook",
+      "typeVersion": 1.4,
       "parameters": {
         "respondWith": "json",
-        "responseBody": "={{ JSON.stringify($json) }}",
-        "options": {
-          "responseCode": 200
-        }
+        "responseBody": "={{ $json }}"
       },
-      "id": "respond-summary",
-      "name": "Respond Summary",
-      "type": "n8n-nodes-base.respondToWebhook",
-      "typeVersion": 1.1,
       "position": [
-        1440,
+        800,
         300
       ]
     }
@@ -116,69 +93,40 @@
       "main": [
         [
           {
-            "node": "Normalize URLs",
+            "node": "规范化批量地址",
             "type": "main",
             "index": 0
           }
         ]
       ]
     },
-    "Normalize URLs": {
+    "规范化批量地址": {
       "main": [
         [
           {
-            "node": "SplitInBatches",
+            "node": "批量入队",
             "type": "main",
             "index": 0
           }
         ]
       ]
     },
-    "SplitInBatches": {
+    "批量入队": {
       "main": [
         [
           {
-            "node": "Call Article Ingest",
-            "type": "main",
-            "index": 0
-          }
-        ],
-        [
-          {
-            "node": "Aggregate Results",
+            "node": "汇总入队结果",
             "type": "main",
             "index": 0
           }
         ]
       ]
     },
-    "Call Article Ingest": {
+    "汇总入队结果": {
       "main": [
         [
           {
-            "node": "Wait",
-            "type": "main",
-            "index": 0
-          }
-        ]
-      ]
-    },
-    "Wait": {
-      "main": [
-        [
-          {
-            "node": "SplitInBatches",
-            "type": "main",
-            "index": 0
-          }
-        ]
-      ]
-    },
-    "Aggregate Results": {
-      "main": [
-        [
-          {
-            "node": "Respond Summary",
+            "node": "返回批量结果",
             "type": "main",
             "index": 0
           }
@@ -188,9 +136,11 @@
   },
   "settings": {
     "executionOrder": "v1",
-    "saveManualExecutions": true,
+    "timezone": "Asia/Shanghai",
+    "errorWorkflow": "u0W5aC5Q6Y0cZGK6",
+    "saveDataErrorExecution": "all",
+    "saveDataSuccessExecution": "all",
     "callerPolicy": "workflowsFromSameOwner",
-    "errorWorkflow": "DDPUVypFAgyDOXgn"
-  },
-  "tags": []
+    "saveManualExecutions": true
+  }
 }

@@ -3,6 +3,7 @@ package command
 import (
 	"context"
 	"encoding/json"
+	"errors"
 	"fmt"
 	"log"
 	"strings"
@@ -14,16 +15,17 @@ import (
 	"github.com/singll/bellkeeper/internal/model"
 	"github.com/singll/bellkeeper/internal/repository"
 	"go.uber.org/zap"
+	"gorm.io/gorm"
 )
 
 // Router routes commands to handlers
 type Router struct {
-	handlers    map[string]Handler
-	parser     *Parser
-	repos      *repository.Repositories
-	policy     *policy.Checker
-	n8nCfg     config.N8NConfig
-	memosCfg   config.MemosConfig
+	handlers map[string]Handler
+	parser   *Parser
+	repos    *repository.Repositories
+	policy   *policy.Checker
+	n8nCfg   config.N8NConfig
+	memosCfg config.MemosConfig
 }
 
 // RouterConfig holds configuration for the router
@@ -40,10 +42,10 @@ func NewRouter(prefixes string, repos *repository.Repositories, adminUsers []str
 // NewRouterWithConfig creates a new command router with config
 func NewRouterWithConfig(prefixes string, repos *repository.Repositories, adminUsers []string, cfg RouterConfig) *Router {
 	r := &Router{
-		handlers:   make(map[string]Handler),
-		parser:    NewParser(prefixes),
-		repos:     repos,
-		policy:    policy.NewChecker(repos, adminUsers),
+		handlers: make(map[string]Handler),
+		parser:   NewParser(prefixes),
+		repos:    repos,
+		policy:   policy.NewChecker(repos, adminUsers),
 		n8nCfg:   cfg.N8NConfig,
 		memosCfg: cfg.MemosConfig,
 	}
@@ -68,8 +70,8 @@ func (r *Router) SetPolicyChecker(checker *policy.Checker) {
 // Built-in handlers (ping, status, help) are preserved.
 func (r *Router) ReloadCommands() {
 	builtins := map[string]bool{
-		NewPingHandler().Name():   true,
-		NewStatusHandler().Name(): true,
+		NewPingHandler().Name():    true,
+		NewStatusHandler().Name():  true,
 		NewHelpHandler(nil).Name(): true,
 	}
 
@@ -95,14 +97,35 @@ func (r *Router) RegisterHandler(handler Handler) {
 // GetHandler returns a handler by name
 func (r *Router) GetHandler(name string) (Handler, bool) {
 	h, ok := r.handlers[name]
+	if ok {
+		cmd, err := r.repos.MatrixCommand.GetConfigByName(name)
+		if err == nil && cmd != nil && !cmd.IsActive {
+			return nil, false
+		}
+		if err != nil && !errors.Is(err, gorm.ErrRecordNotFound) {
+			middleware.GetLogger().Warn("failed to load command status", zap.String("command", name), zap.Error(err))
+			return nil, false
+		}
+	}
 	return h, ok
 }
 
 // ListCommands returns all registered command names
 func (r *Router) ListCommands() []string {
 	names := make([]string, 0, len(r.handlers))
+	commands, err := r.repos.MatrixCommand.List(false)
+	if err != nil {
+		middleware.GetLogger().Warn("failed to list command status", zap.Error(err))
+		return names
+	}
+	disabled := make(map[string]bool)
+	for _, cmd := range commands {
+		disabled[cmd.CommandName] = !cmd.IsActive
+	}
 	for name := range r.handlers {
-		names = append(names, name)
+		if !disabled[name] {
+			names = append(names, name)
+		}
 	}
 	return names
 }
@@ -143,8 +166,8 @@ func (r *Router) Route(ctx context.Context, cmdCtx *Context) (*Response, error) 
 // checkPermission checks if user has permission to execute command using policy engine
 func (r *Router) checkPermission(ctx context.Context, cmdCtx *Context) bool {
 	// Get command config from DB
-	cmd, err := r.repos.MatrixCommand.GetByName(cmdCtx.Command.Name)
-	if err != nil || cmd == nil {
+	cmd, err := r.repos.MatrixCommand.GetConfigByName(cmdCtx.Command.Name)
+	if errors.Is(err, gorm.ErrRecordNotFound) {
 		// Command not in DB — allow if handler is registered (built-in/dynamic commands)
 		// Built-in commands (ping, help, status, commands, health, rooms) may not have DB entries
 		if _, exists := r.handlers[cmdCtx.Command.Name]; exists {
@@ -152,6 +175,9 @@ func (r *Router) checkPermission(ctx context.Context, cmdCtx *Context) bool {
 			return true
 		}
 		middleware.GetLogger().Warn("command not found in DB or handlers", zap.String("command", cmdCtx.Command.Name))
+		return false
+	}
+	if err != nil || cmd == nil || !cmd.IsActive {
 		return false
 	}
 
@@ -326,7 +352,10 @@ func (r *Router) GetHelpText() string {
 	sb.WriteString("**可用命令:**\n\n")
 
 	for _, name := range r.ListCommands() {
-		handler, _ := r.GetHandler(name)
+		handler, ok := r.GetHandler(name)
+		if !ok {
+			continue
+		}
 		sb.WriteString(FormatHelp(name, handler.Description(), handler.Usage()))
 	}
 

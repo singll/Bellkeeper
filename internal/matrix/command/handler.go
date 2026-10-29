@@ -8,10 +8,10 @@ import (
 
 // Context holds command execution context
 type Context struct {
-	RoomID   string // Room where command was issued
-	Sender   string // User who issued the command
-	EventID  string // Event ID of the command message
-	Command  *ParsedCommand
+	RoomID    string // Room where command was issued
+	Sender    string // User who issued the command
+	EventID   string // Event ID of the command message
+	Command   *ParsedCommand
 	BotUserID string
 }
 
@@ -44,7 +44,7 @@ type BaseHandler struct {
 	usage       string
 }
 
-func (h *BaseHandler) Name() string         { return h.name }
+func (h *BaseHandler) Name() string        { return h.name }
 func (h *BaseHandler) Description() string { return h.description }
 func (h *BaseHandler) Usage() string       { return h.usage }
 
@@ -89,7 +89,10 @@ func (h *HelpHandler) Handle(ctx context.Context, cmdCtx *Context) (*Response, e
 	sb.WriteString("**可用命令:**\n\n")
 
 	for _, name := range h.router.ListCommands() {
-		handler, _ := h.router.GetHandler(name)
+		handler, ok := h.router.GetHandler(name)
+		if !ok {
+			continue
+		}
 		sb.WriteString(FormatHelp(name, handler.Description(), handler.Usage()))
 	}
 

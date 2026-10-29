@@ -700,14 +700,22 @@ func (s *WorkflowService) GetExecutions(workflowID string, limit int) ([]Workflo
 func (s *WorkflowService) Trigger(name string, payload map[string]interface{}) (map[string]interface{}, error) {
 	_, _, webhookBaseURL := s.getEffectiveConfig()
 
-	url := fmt.Sprintf("%s/webhook/%s", webhookBaseURL, name)
+	base := strings.TrimRight(webhookBaseURL, "/")
+	if !strings.HasSuffix(base, "/webhook") {
+		base += "/webhook"
+	}
+	endpoint := base + "/" + strings.TrimLeft(name, "/")
 
 	var body []byte
 	if payload != nil {
-		body, _ = json.Marshal(payload)
+		var err error
+		body, err = json.Marshal(payload)
+		if err != nil {
+			return nil, fmt.Errorf("encode workflow payload: %w", err)
+		}
 	}
 
-	req, err := http.NewRequest("POST", url, bytes.NewBuffer(body))
+	req, err := http.NewRequest("POST", endpoint, bytes.NewBuffer(body))
 	if err != nil {
 		return nil, err
 	}

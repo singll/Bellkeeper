@@ -33,6 +33,15 @@ func (r *MatrixCommandRepository) GetByName(name string) (*model.MatrixCommand, 
 	return &cmd, nil
 }
 
+// GetConfigByName includes disabled commands so a disabled entry cannot fall back to a built-in.
+func (r *MatrixCommandRepository) GetConfigByName(name string) (*model.MatrixCommand, error) {
+	var cmd model.MatrixCommand
+	if err := r.db.Where("command_name = ?", name).First(&cmd).Error; err != nil {
+		return nil, err
+	}
+	return &cmd, nil
+}
+
 func (r *MatrixCommandRepository) Create(cmd *model.MatrixCommand) error {
 	if cmd.HandlerConfig == nil {
 		s := "{}"

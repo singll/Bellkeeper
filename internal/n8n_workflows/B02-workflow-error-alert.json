@@ -2,57 +2,60 @@
   "name": "B02-工作流错误告警",
   "nodes": [
     {
-      "parameters": {},
-      "id": "error-trigger",
       "name": "Error Trigger",
+      "id": "dfb4571f-04ad-5c83-a88c-f13c34d6b07a",
       "type": "n8n-nodes-base.errorTrigger",
       "typeVersion": 1,
+      "parameters": {},
       "position": [
-        240,
+        0,
         300
       ]
     },
     {
-      "parameters": {
-        "jsCode": "const j = $json || {};\nconst execution = j.execution || {};\nconst workflow = j.workflow || {};\n// n8n Error Trigger nests the real error under execution.error (the old code read $json.error -> always {}).\nconst error = execution.error || j.error || {};\nconst workflowName = workflow.name || workflow.id || 'unknown';\nconst executionId = execution.id || 'unknown';\nconst lastNode = execution.lastNodeExecuted || (error.node && error.node.name) || 'unknown';\nconst httpCode = error.httpCode || error.statusCode || (error.context && error.context.httpCode) || '';\nlet message = error.message || error.description || '';\nif (!message && error.cause) { message = error.cause.message || ''; }\nif (!message) { message = (error && Object.keys(error).length) ? JSON.stringify(error) : '(无错误详情)'; }\nconst ts = new Date(Date.now() + 8*3600*1000).toISOString().replace('T',' ').slice(0,16);\nconst stack = (error.stack || '').split('\\n').slice(0, 4).join('\\n');\nlet md = `### 🔴 工作流失败 · ${workflowName}\\n\\n`;\nmd += `- 时间: ${ts}\\n`;\nmd += `- 执行: ${executionId}\\n`;\nmd += `- 失败节点: ${lastNode}\\n`;\nmd += `- 错误: ${httpCode ? '[HTTP ' + httpCode + '] ' : ''}${message}\\n`;\nif (stack) { md += `\\n\\`\\`\\`\\n${stack}\\n\\`\\`\\`\\n`; }\nreturn [{ json: { markdown: md, severity: 'error', source: workflowName } }];"
-      },
-      "id": "format-error-alert",
       "name": "格式化错误告警",
+      "id": "3b375a77-468a-578a-859d-28abf871ac90",
       "type": "n8n-nodes-base.code",
       "typeVersion": 2,
+      "parameters": {
+        "jsCode": "const j = $json;\nconst e = j.execution || j.trigger || {};\nconst error = e.error || j.error || {};\nconst source = j.workflow?.name || j.workflow?.id || 'unknown';\nlet message = error.message || error.description || '(无错误详情)';\nmessage = String(message).replace(/(Bearer\\s+)[A-Za-z0-9._-]+/gi, '$1[redacted]').replace(/((?:api[_-]?key|access[_-]?token|password)\\s*[=:]\\s*)[^\\s,;]+/gi, '$1[redacted]');\nconst text = `🔴 工作流失败 · ${source}\n执行: ${e.id || '启动阶段'}\n节点: ${e.lastNodeExecuted || error.node?.name || 'unknown'}\n错误: ${message.slice(0, 1500)}`;\nreturn [{json:{message:text, txn:'n8n-error-'+$execution.id}}];"
+      },
       "position": [
-        500,
+        200,
         300
       ]
     },
     {
+      "name": "发送错误告警",
+      "id": "592ce7dc-5b72-58e7-8940-5100aa3fde15",
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4.2,
       "parameters": {
-        "method": "POST",
-        "url": "={{ $env.BELLKEEPER_URL }}/api/matrix/notify",
+        "method": "PUT",
+        "url": "={{ $env.MATRIX_HOMESERVER_URL + '/_matrix/client/v3/rooms/' + encodeURIComponent($env.MATRIX_ROOM_ALERTS) + '/send/m.room.message/' + $json.txn }}",
         "sendHeaders": true,
         "headerParameters": {
           "parameters": [
             {
-              "name": "Content-Type",
-              "value": "application/json"
+              "name": "Authorization",
+              "value": "={{ 'Bearer ' + $env.MATRIX_BOT_ACCESS_TOKEN }}"
             }
           ]
         },
         "sendBody": true,
         "specifyBody": "json",
-        "jsonBody": "={{ JSON.stringify({ channel: \"alerts\", message: $json.markdown, message_type: \"markdown\" }) }}",
+        "jsonBody": "={{ JSON.stringify({ msgtype:'m.notice', body:$json.message }) }}",
         "options": {
           "timeout": 30000
         }
       },
-      "id": "send-error-alert",
-      "name": "发送错误告警",
-      "type": "n8n-nodes-base.httpRequest",
-      "typeVersion": 4.2,
       "position": [
-        760,
+        600,
         300
-      ]
+      ],
+      "retryOnFail": true,
+      "maxTries": 3,
+      "waitBetweenTries": 5000
     }
   ],
   "connections": {
@@ -81,8 +84,11 @@
   },
   "settings": {
     "executionOrder": "v1",
+    "timezone": "Asia/Shanghai",
+    "saveDataErrorExecution": "all",
+    "saveDataSuccessExecution": "all",
+    "callerPolicy": "workflowsFromSameOwner",
     "saveManualExecutions": true,
-    "callerPolicy": "any",
-    "errorWorkflow": "DDPUVypFAgyDOXgn"
+    "errorWorkflow": ""
   }
 }

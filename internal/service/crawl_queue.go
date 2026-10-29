@@ -3,6 +3,7 @@ package service
 import (
 	"context"
 	"encoding/json"
+	"errors"
 	"fmt"
 	"log"
 	"math"
@@ -271,6 +272,9 @@ func (s *CrawlQueueService) Enqueue(sourceID uint, rawURL, title, channelType st
 	}
 
 	if err := s.repo.Enqueue(job); err != nil {
+		if errors.Is(err, repository.ErrCrawlJobDuplicate) {
+			return 0, nil // Same idempotent outcome as the recrawl cooldown.
+		}
 		return 0, err
 	}
 

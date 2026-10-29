@@ -15,6 +15,8 @@ type CrawlJobRepository struct {
 	db *gorm.DB
 }
 
+var ErrCrawlJobDuplicate = errors.New("non-terminal crawl job already exists")
+
 // NewCrawlJobRepository creates a new crawl job repository
 func NewCrawlJobRepository(db *gorm.DB) *CrawlJobRepository {
 	return &CrawlJobRepository{db: db}
@@ -28,15 +30,17 @@ func (r *CrawlJobRepository) Enqueue(job *model.CrawlJob) error {
 
 	// Dedup: skip if a non-terminal job already exists for this URL
 	var count int64
-	r.db.Model(&model.CrawlJob{}).
+	if err := r.db.Model(&model.CrawlJob{}).
 		Where("url = ? AND status NOT IN ?", job.URL, []string{
 			string(model.CrawlJobSuccess),
 			string(model.CrawlJobSkipped),
 			string(model.CrawlJobBlocked),
 			string(model.CrawlJobDead),
-		}).Count(&count)
+		}).Count(&count).Error; err != nil {
+		return fmt.Errorf("check crawl job duplicate: %w", err)
+	}
 	if count > 0 {
-		return fmt.Errorf("duplicate: non-terminal job already exists for URL %s", job.URL)
+		return fmt.Errorf("%w: %s", ErrCrawlJobDuplicate, job.URL)
 	}
 
 	if job.Status == "" {

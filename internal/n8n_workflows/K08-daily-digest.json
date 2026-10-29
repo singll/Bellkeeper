@@ -42,7 +42,10 @@
         },
         "sendBody": true,
         "specifyBody": "json",
-        "jsonBody": "{}"
+        "jsonBody": "{}",
+        "options": {
+          "timeout": 900000
+        }
       },
       "id": "k08-0002",
       "name": "调用资讯摘要生成",
@@ -73,7 +76,10 @@
         },
         "sendBody": true,
         "specifyBody": "json",
-        "jsonBody": "={{ JSON.stringify({ channel: 'daily', message: $json.data.markdown, message_type: 'markdown', metadata: { source: 'brief_report', date: $json.data.date } }) }}"
+        "jsonBody": "={{ JSON.stringify({channel:'news',message:$json.data.markdown,message_type:'markdown',id:'news-brief-'+$json.data.date,metadata:{source:'brief_report',date:$json.data.date}}) }}",
+        "options": {
+          "timeout": 900000
+        }
       },
       "id": "k08-0003",
       "name": "推送Matrix通知",
@@ -103,7 +109,10 @@
         },
         "sendBody": true,
         "specifyBody": "json",
-        "jsonBody": "={{ JSON.stringify({ channel: 'alerts', message: '### ❌ 资讯摘要生成失败\\n\\n- 时间: ' + $now.setZone($env.BELLKEEPER_TIMEZONE || 'Asia/Shanghai').toFormat('yyyy-MM-dd HH:mm') + '\\n- 错误: ' + (typeof $json.error === 'string' ? $json.error : JSON.stringify($json.error)) + '\\n\\n请检查 Bellkeeper 日志和日报服务状态。', message_type: 'markdown' }) }}"
+        "jsonBody": "={{ JSON.stringify({ channel: 'alerts', message: '### ❌ 资讯摘要生成失败\\n\\n- 时间: ' + $now.setZone($env.BELLKEEPER_TIMEZONE || 'Asia/Shanghai').toFormat('yyyy-MM-dd HH:mm') + '\\n- 错误: ' + (typeof $json.error === 'string' ? $json.error : JSON.stringify($json.error)) + '\\n\\n请检查 Bellkeeper 日志和日报服务状态。', message_type: 'markdown' }) }}",
+        "options": {
+          "timeout": 900000
+        }
       },
       "id": "k08-0004",
       "name": "发送失败告警",
@@ -149,6 +158,9 @@
   "active": true,
   "settings": {
     "executionOrder": "v1",
-    "errorWorkflow": "DDPUVypFAgyDOXgn"
+    "errorWorkflow": "u0W5aC5Q6Y0cZGK6",
+    "timezone": "Asia/Shanghai",
+    "callerPolicy": "workflowsFromSameOwner",
+    "saveManualExecutions": true
   }
 }

@@ -131,8 +131,8 @@
 | GET | `/api/matrix/notify/:id`、`/notify/channels` | 通知状态 / 频道列表 |
 | POST | `/api/matrix/notify/channels/reload` | 频道重载 |
 | GET | `/api/matrix/admin/rooms` | 房间列表 |
-| POST | `/api/matrix/admin/rooms` | 创建房间 |
-| PUT | `/api/matrix/admin/rooms/:id` | 更新房间(enabled/is_admin/auto_discover 等) |
+| POST | `/api/matrix/admin/rooms` | 登记已存在的 Matrix 房间（传 room_id/name/room_type）；不会调用 homeserver createRoom |
+| PUT | `/api/matrix/admin/rooms/:id` | 更新房间(name/room_type/is_active) |
 | DELETE | `/api/matrix/admin/rooms/:id` | 删除房间 |
 | GET | `/api/matrix/admin/channels` | 频道列表 |
 | POST | `/api/matrix/admin/channels` | 创建频道 |
@@ -178,4 +178,4 @@
 | POST | `/api/system/restart`、`/backup`、`/containers/:name/restart` | 系统操作 |
 | GET | `/api/system/disk`、`/containers` | 系统信息 |
 | GET/PUT | `/api/logging/level` | 日志级别 |
-| POST | `/api/config/reload[/llm-proxy]` | 配置重载 |
+| POST | `/api/config/reload[/llm-proxy]` | LLM 配置重载；Matrix 启动配置修改后需重启 |

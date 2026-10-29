@@ -1,16 +1,14 @@
 # Bellkeeper MEMORY
 
-> 最后更新: 2026-07-26 · **1.0 已 GA，稳定运行**
->
-> 本文件是简要进度快照。**当前状态权威见 [doc/STATUS.md](../doc/STATUS.md)**，架构见 [doc/ARCHITECTURE.md](../doc/ARCHITECTURE.md)，历史演进见 [doc/TIMELINE.md](../doc/TIMELINE.md)。
+> 更新：2026-10-29。当前权威状态见 [STATUS](../doc/STATUS.md)，操作见 [DEPLOYMENT](../doc/DEPLOYMENT.md)。
 
-## 当前状态
+- 当前主机 `prod` (.128)，应用 `prod-stack`，数据 `proddata`，存储 TrueNAS NFS；旧 keeper/silkdata/knowledge 不再是生产目标。
+- Matrix 在 txhk 的 tuwunel 1.8.0；Spool 已修正服务名、同步路径和安装源，禁止恢复 Conduit 配置。
+- Bellkeeper 已接入 6 个 Matrix 房间，9 个 n8n 工作流、77 个技术资讯源；Matrix 命令/两类聊天/通知已实测。
+- Matrix 凭证和 Agent 配置需重启；只有通知频道、LLM 配置支持对应热重载。
+- 修复 Trafilatura 2.0 `headers` 参数不兼容；当前无 Firecrawl 地址，已关闭无效回退。
+- 自动重试使用持久 CrawlQueue；旧 n8n staticData 重试队列及 M01–M03 不再使用。
+- secret 在 `/opt/SilkSpool/hosts/prod/.env` 和受限 YAML；不提交 Git。
 
-- **1.0 里程碑 M1–M6 全部完成**（M1 事件总线 / M2 LLM 独立化 / M3 KB 链路事件化 / M4 日志补齐 / M5 前端收敛 / M6 可观测性）。tag `v1.0.0` 已推送。
-- **部署形态**：keeper(.230) 应用层 ↔ silkdata(.231) 数据层分离（2026-07-25）；观测栈 Prometheus+Loki+Grafana@silkdata（2026-07-26）。
-- **PKB**：原子知识网 + 知识骨架/双库 + 自动闭环调度全部落地；存量 raw 分批跑为持续数据运营。
-- **爬取**：DequeueFair 公平调度 + 域名冷却/健康度 + recrawl 去重；firecrawl fetch 引擎优先降流量。
-
-## 剩余待办
-
-见 [doc/ROADMAP.md](../doc/ROADMAP.md)：silkdata 割接收尾、PKB 运营、爬虫新源验收、LLM cache 监控等（无 P0 阻塞）。待决：openclash 省流量 VPS（观察）。txhk 已由 Conduit 迁 **tuwunel**（2026-07-02 完成）、**new-api 容器已退役**。
+- 生产补丁二进制在 `/app/data/bellkeeper-matrix`，现有 `/app/bellkeeper` 为软链，bundle entrypoint 已持久化；下次镜像升级含修复后移除覆盖，详见 DEPLOYMENT。
+- RSSHub 独立 bundle 已上线，四个相对路由抓取成功（含已替换旧 URL 的 36氪）；酷壳上游 403/超时待自动恢复。初次恢复会收录历史文章，资讯预览为当前入库内容。
