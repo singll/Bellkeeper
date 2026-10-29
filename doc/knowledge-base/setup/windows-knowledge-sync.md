@@ -1,6 +1,8 @@
-# Windows 知识同步脚本说明
+# Windows 知识补导脚本（历史主流程）
 
-> 目标：提供一个运行在 Windows 上的统一 PowerShell 入口，使用 Rclone 从 TrueNAS 拉取 `raw / working` 文件资产，并把适合进入 PKB 的内容导入单 Vault；同时显式避免在 Windows 上长期保留多份重复实体文件。
+> 2026-10-30：日常 Knowledge 整理稿由 prod 的官方 LiveSync 客户端自动发布到 `20-PKB/Bellkeeper/`，不再依赖 Windows 开机或拉取任务。下面保留 SilkFiles 对 raw/working 等其他资产的**人工补导**说明；不要把 `knowledge/vault` 再映射到其他目录造成重复。当前工作区没有 Win10 脚本/任务计划配置，未远程停用用户电脑上的旧任务。
+>
+> 原流程目标：提供一个运行在 Windows 上的统一 PowerShell 入口，使用 Rclone 从 TrueNAS 拉取 `raw / working` 文件资产，并把适合进入 PKB 的内容导入单 Vault；同时显式避免在 Windows 上长期保留多份重复实体文件。
 
 ---
 

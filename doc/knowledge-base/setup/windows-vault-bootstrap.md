@@ -1,6 +1,8 @@
 # Windows 从零落地单 Vault 指南
 
-> 目标：在 Windows 上直接创建一个可用于 Obsidian + LiveSync 的真实 Vault，并让它成为可独立运转的 PKB / Working 前端。
+> 2026-10-30：现有两台电脑已经加入同一个 Notes 库，不执行本篇从零建库流程。现有目录有 `10-RAW`、`20-PKB` 等，本文的 `RAW/WORKING/KNOWLEDGE` 是旧新建库示例，不要求迁移现有目录。Knowledge 自动入口为 `20-PKB/Bellkeeper/`，见 [LiveSync 清单](livesync-checklist.md)。
+>
+> 新建空库时的目标：在 Windows 上直接创建一个可用于 Obsidian + LiveSync 的真实 Vault，并让它成为可独立运转的 PKB / Working 前端。
 
 ---
 
@@ -107,51 +109,11 @@ D:\Scripts\SilkFiles\
 
 ---
 
-## Step 6：准备“一键同步并导入”脚本
+## Step 6：接收服务器整理稿
 
-推荐给自己只暴露一个动作：打开 Obsidian 后，在独立 `SilkFiles` 项目根目录运行统一 PowerShell 入口 / 快捷方式。`doc/knowledge-base/setup/` 这里只保留说明文档，不再承载当前脚本副本。
+现有 Vault 的 `20-PKB/Bellkeeper/` 由 prod 常驻服务经 LiveSync 自动接收。新电脑只需加入已有同步，不需要部署 Windows 导入脚本。
 
-当前口径：
-
-- 当前执行入口：`SilkFiles/files.ps1`
-- 规则说明：[`setup/windows-knowledge-sync.md`](windows-knowledge-sync.md)
-
-知识导入命令通过 `knowledge` 子命令进入，内部应依次完成：
-
-1. 把 TrueNAS `POOL/data/knowledge/raw|working` 同步到 `D:\SilkSpoolImport\raw|working`
-2. 把适合进入知识系统的内容更新到 Vault `RAW/` / `WORKING/`
-3. 触发 Obsidian 重扫，或依赖文件监听自动刷新
-
-建议把它理解为**统一入口**，而不是“先同步一个脚本，再手动执行第二个导入脚本”。
-
-推荐目录关系：
-
-```text
-TrueNAS:
-POOL/data/knowledge/raw
-POOL/data/knowledge/working
-
-Windows 导入缓冲区:
-D:\SilkSpoolImport\raw
-D:\SilkSpoolImport\working
-
-Obsidian Vault:
-D:\Notes\obsidian-note\RAW
-D:\Notes\obsidian-note\WORKING
-```
-
-最常用示例：
-
-```powershell
-Set-ExecutionPolicy -Scope Process -ExecutionPolicy Bypass
-.\files.ps1 knowledge run
-```
-
-如果你只想先看预演结果：
-
-```powershell
-.\files.ps1 knowledge plan
-```
+需要人工补导 NAS raw/working 中的其他资产时，再使用 [SilkFiles 补导说明](windows-knowledge-sync.md)，先 plan/dry-run。不要把补导任务配置成整理稿的第二条自动写入链路。
 
 ---
 

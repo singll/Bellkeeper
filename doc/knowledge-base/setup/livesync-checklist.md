@@ -1,6 +1,6 @@
 # 已有 Obsidian 库接入 LiveSync
 
-2026-10-29 服务端已配置，复用 istoreos 上的 `https://couchdb.singll.net`，反代到 prod `192.168.7.128:5984`。用户确认接入已有 Obsidian 库，因此首次方向为 **已有本地 Vault → 新远端数据库**。
+2026-10-30：用户已完成两台电脑的接入与内容同步。当前使用 `https://couchdb.singll.net` → prod `192.168.7.128:5984`，数据库 `obsidian-notes` 已有笔记且开启内容加密。**不要再次执行首次上传/覆盖远端流程。** 新终端按下文“加入已有同步”接入。
 
 ## 已完成的服务端配置
 
@@ -20,20 +20,11 @@ LiveSync 的首次初始化/完整重建会删除并重建目标数据库，因�
 
 已配置 Obsidian 的三个 CORS origin：`app://obsidian.md`、`capacitor://localhost`、`http://localhost`，允许带认证跨域。普通 API 要求登录；`/_up` 保留无凭证探活，保证 Docker/Bellkeeper 监控正常。请求/文档大小遵循官方 LiveSync 配置。Caddy 保留长轮询转发，不经过 Authelia 登录跳转。
 
-服务端已通过 HTTPS、TLS 证书、登录、CORS 预检、匿名拒绝、数据库创建、批量写入、读回、`_changes`、更新、删除测试，且测试库已删除。`obsidian-notes` 当前为 0 篇文档，客户端的协议元数据和加密信息由第一台 Obsidian 初始化。
+服务端认证、CORS、TLS、批量写入和变更流已验证。初始化时客户端为 Self-hosted LiveSync 0.25.57，内容加密 v2、路径未混淆；新增服务器客户端沿用导出的参数，不更改现有库的分块/加密方案。
 
-## 第一台设备：保留已有笔记，上传到新远端
+## 已完成的首次初始化
 
-1. 将现有 Vault 完整复制一份到同步目录以外，包含 `.obsidian`。打开原来的已有 Vault，不必新建空库，也不必改目录结构。若同一个 Vault 已被另一种同步工具管理，先暂停它，避免两个工具同时处理文件。
-2. 安装并启用社区插件 **Self-hosted LiveSync**。如果此前用过它，先保存原连接信息，再把这次连接作为新的同步目标配置。
-3. 在欢迎向导选择“首次设置”，再选择手动配置远端。这里“首次”是指新的服务端同步关系，不是要求 Vault 为空。
-4. 启用端到端加密，设置并妥善保存独立的 Vault 加密口令，可启用属性混淆。该口令由你在客户端设置，与 CouchDB 密码、之后 Setup URI 的保护口令不同。
-5. 选择 CouchDB，填写上表 URL、用户名、密码、数据库名，执行连接检查，然后继续。服务端参数已配置，无需再自动修复服务端。
-6. 首次初始化选择以当前本地内容为准重建/上传服务端。当前界面会要求重启并初始化，以及确认覆盖服务端：只有确认 URL 为 `couchdb.singll.net`、数据库为本次新建的 `obsidian-notes`，且已备份本地库时才继续。**不要选择从空远端覆盖本地。**
-7. 若提示远端没有同步设置，对本次已确认的新库选择使用当前设备设置。等待初始化完成；保持 Obsidian 打开，先不启用配置文件/插件等可选同步功能。
-8. 新建普通测试笔记，修改两次，确认插件队列清空，再在第二台设备验证内容。
-
-如果连接时发现远端已经有笔记或预期之外的设置，先停止覆盖操作。本文的“空库”是部署验收时的状态，不是永久允许清空数据库。
+第一台已有 Vault 已上传、第二台已取回并同步。此前“空数据库”的描述只适用于初始部署验收，现已失效。以后恢复/重建必须先独立备份并明确数据方向；本次服务器加入仅重建自己的空本地缓存，不删除远端数据库。
 
 ## 第二台及后续设备
 
@@ -42,18 +33,23 @@ LiveSync 的首次初始化/完整重建会删除并重建目标数据库，因�
 3. 对新建空 Vault 选择从远端取回；额外本地文件选择保留。已有本地工作的设备先备份并合并，不能直接按空库处理。
 4. URI 含加密后的账号和同步配置，和其保护口令分开保存；同一 Vault 的后续设备使用第一台导出的设置，不要分别生成不同的加密配置。
 
-## knowledge 文件如何进入已有 Vault
+## Knowledge 自动进入固定目录
 
 ```text
-已有本地 Obsidian Vault ←→ Self-hosted LiveSync ←→ CouchDB obsidian-notes
-           ↑ 选取 Markdown 导入
-TrueNAS knowledge ←→ prod NFS ←→ Bellkeeper
-TrueNAS recordings ←→ prod NFS（录像，不进入 LiveSync）
+Bellkeeper → TrueNAS knowledge/vault（整理后的 Markdown）
+  → prod 的 knowledge-sync 发布器
+  → TrueNAS knowledge/obsidian/20-PKB/Bellkeeper
+  ↔ 官方 LiveSync CLI ↔ CouchDB obsidian-notes
+  ↔ 各终端现有 Vault 的 20-PKB/Bellkeeper/
 ```
 
-CouchDB 是插件的同步数据库，不会自动将 NFS 上的 `knowledge/vault` 镜像进已有 Obsidian 库。本次已完成两条服务端接入，不会自动混合已有笔记与抓取历史文件。导入选用 [SilkFiles knowledge 流程](windows-knowledge-sync.md)，先 plan/dry-run，再选择需要的 Markdown；大附件保留在 NAS，只在笔记中存引用。
+服务器已作为新增客户端加入，只落盘这个固定目录。按原领域保留子目录；新增和更新自动发布，内容相同不重复导入。终端编辑/删除受保护，源更新冲突进入清单；NAS 原件保留。同步落后/冲突通过 Bellkeeper 健康探针进入现有 n8n O02/Matrix 告警。raw、archive、录像、工作流日志不在自动发布范围内。
 
-旧说明中的 K07 只是历史可选构想，当前 9 个 n8n 工作流没有 K07。LiveSync 数据有分块、协议元数据和可选加密，不能直接把 `_changes` 当普通 Markdown 文本消费。
+现有两台 Obsidian **无需重新初始化，也无需运行 Win10/Win11 拉取脚本**。打开已同步的 Vault 后查看 `20-PKB/Bellkeeper/`。旧 [Windows 脚本](windows-knowledge-sync.md) 仅用于人工补导其他资产，避免再次导入同一批整理稿。
+
+服务部署、状态检查和恢复见 [SilkSpool knowledge-sync](../../../../SilkSpool/bundles/knowledge-sync/README.md)。私有 Setup URI 文件为控制机 `/opt/SilkSpool/hosts/prod/couchdb/knowledge-livesync-setup.env`；服务器设置在 `/opt/silkspool/knowledge-sync/state/.livesync/settings.json`，均不进版本库或 Vault。
+
+当前没有 K07 工作流；分块和加解密交给 [官方 CLI](https://github.com/vrtmrz/obsidian-livesync/tree/main/src/apps/cli)，不能用 n8n 将普通 JSON 直接写入 LiveSync 数据库。
 
 ## 故障定位与备份
 

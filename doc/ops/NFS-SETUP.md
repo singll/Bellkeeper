@@ -64,9 +64,9 @@ volumes:
 
 ## knowledge 与 Obsidian
 
-NAS knowledge 提供 Bellkeeper 的 raw/archive/vault 文件资产。用户已有本地 Obsidian Vault 是首次 LiveSync 上传源；CouchDB 不会自动扫描 NFS 目录。
+NAS `knowledge/vault` 中的整理稿通过 prod 独立 `knowledge-sync` 服务自动发布到 `knowledge/obsidian/20-PKB/Bellkeeper/`，再由官方 LiveSync CLI 加密同步至各终端。源目录只读挂入发布服务，目标使用直接 NFS volume；CLI 的 PouchDB 与账本保存在 prod 本地磁盘。
 
-不要把原始 Markdown 当作任意 JSON 写入 LiveSync 数据库，也不要把整个 raw 或录像目录接入笔记同步。通过已有 [Windows 导入流程](../knowledge-base/setup/windows-knowledge-sync.md) 选择内容写入本地 Vault，再由 LiveSync 同步。客户端初始化见 [LiveSync 配置清单](../knowledge-base/setup/livesync-checklist.md)。
+用户的两台 Obsidian 已连接并同步，现有库不重新初始化。raw、archive、工作流日志和录像不进入这条链路；Windows 脚本只保留手动补导用途。见 [LiveSync 接入和固定目录](../knowledge-base/setup/livesync-checklist.md)。
 
 ## 备份与恢复
 

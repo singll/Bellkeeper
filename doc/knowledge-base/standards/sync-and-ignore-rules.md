@@ -6,17 +6,13 @@
 
 ## LiveSync 同步边界
 
-LiveSync 同步**整个 Vault**，即 `D:\Notes\obsidian-note` 下所有内容。
+各个人终端同步同一个已有 Vault，沿用现有客户端的忽略规则，不按旧文档重新创建目录。服务器的官方 CLI 是例外：只将 `20-PKB/Bellkeeper/` 落盘到 NAS，防止混入个人其他目录。
 
-不需要也不建议按目录配置选择性同步。目录分层在 Vault 内部完成，不是靠多个数据库分割。
+- 整理稿：`TrueNAS knowledge/vault → knowledge-sync → Vault 20-PKB/Bellkeeper/`，自动发布。
+- 原始资产：raw、archive、working、附件和录像保留在 NAS，不全量送入 LiveSync。
+- Windows 导入缓冲区不属于 Vault；[SilkFiles](../setup/windows-knowledge-sync.md) 只做其他资产的手动补导。
+- CouchDB 是 LiveSync 私有后端；官方兼容客户端负责分块/加解密，外部脚本不得自造同步文档。
 
-这里要固定三条边界：
-
-1. LiveSync 同步的是 **Vault 文件本体**，不是 TrueNAS 文件资产区。
-2. `D:\SilkSpoolImport\raw|working` 这类本地导入缓冲区**不属于 Vault**，也不应纳入 LiveSync。
-3. CouchDB 是 LiveSync 的私有同步后端；外部系统不能直接写它。
-
-`TrueNAS raw|working -> Windows 导入缓冲区 -> Vault RAW/WORKING` 的文件流转，应通过独立 `SilkFiles` 项目的 `SilkFiles/files.ps1` 执行，例如在项目根目录运行 `.\files.ps1 knowledge run`，而不是把 Vault 本身当成 NAS 文件同步根目录。
 
 ---
 
@@ -84,13 +80,13 @@ LiveSync 默认已排除 `.obsidian/workspace` 状态文件，其余 `.obsidian/
 | `internal` | 谨慎，建议不回流 |
 | `restricted` | 不应回流 |
 
-如果一篇笔记包含敏感内容，建议在 frontmatter 中标记 `sensitivity: restricted`，并在 K07 或其他消费链路的过滤逻辑中排除该值。
+如果一篇笔记包含敏感内容，建议在 frontmatter 中标记 `sensitivity: restricted`，并在实际检索消费链路中过滤该值；当前没有 K07 工作流。
 
 ---
 
 ## 一句话原则
 
-- LiveSync 同步全 Vault
+- 个人终端同步现有 Vault；服务器只接固定发布目录
 - 检索增强只消费 `KNOWLEDGE/` 下高质量目录
 - 敏感内容不进 Vault，极敏感内容标记 `restricted` 并在消费链路过滤
 - Windows 导入缓冲区只做短期事务中转；成功导入后默认应被清理，避免形成重复实体文件

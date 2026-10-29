@@ -2,7 +2,7 @@
 
 > 这里定义 SilkSpool 的**知识真相源**与个人整理工作界面。
 > 当前口径不再把笔记系统理解为“RAGFlow 的上游”，而是理解为：**Markdown 文件为王，Obsidian 是主要前端之一，PKB 优先，自动化回流是可选增强。**
-> Windows 侧文件编排入口已独立迁入 `SilkFiles` 项目；本目录只负责知识结构、规则与操作边界，不再承载当前脚本真相源。
+> Windows 手工补导入口在 `SilkFiles` 项目，整理稿自动发布由 prod 承担；本目录只负责知识结构、规则与操作边界，不再承载当前脚本真相源。
 
 ---
 
@@ -61,145 +61,39 @@ Obsidian / Markdown 在这里最核心的职责是：
 
 ---
 
-## 当前服务端接入
+## 当前生产链路（2026-10-30）
 
-2026-10-29 已在 prod 完成 knowledge/录像 NFS 读写验证，CouchDB 使用 `https://couchdb.singll.net` 和 `obsidian-notes`。用户已有本地 Vault 为首次上传源；参数和操作步骤见 [LiveSync 配置清单](setup/livesync-checklist.md)。NAS 的 `knowledge/vault` 不会自动进入同步数据库。
-
-## MVP-first 的具体落地
-
-如果你要先实现一个**可独立运转**的知识系统，推荐采用下面的分工：
-
-### 1. PKB 主库：本地单 Vault
-
-本地维护一个真实 Vault：
+两台电脑的现有 Obsidian 库已经通过加密 LiveSync 同步，CouchDB 使用 `https://couchdb.singll.net/obsidian-notes`。保留用户现有 `10-RAW`、`20-PKB`、`20-WORKING` 等目录，不按旧文档重新建库。
 
 ```text
-D:\Notes\obsidian-note
+资讯源 → Bellkeeper 抓取/去重/分类 → TrueNAS knowledge/raw
+       → PKB 筛选和重构 → TrueNAS knowledge/vault
+       → prod knowledge-sync → 20-PKB/Bellkeeper/
+       → 官方 LiveSync CLI ↔ CouchDB ↔ 各终端 Obsidian
 ```
 
-它负责：
+整理后的 Markdown 自动进入 `20-PKB/Bellkeeper/`，按原领域保留子目录。TrueNAS 的 `knowledge/obsidian` 保存服务器这一固定目录的局部 Vault；常驻 CLI 沿用现有内容加密设置，处理分块与同步协议。
 
-- 最终知识沉淀（`KNOWLEDGE/`）
-- 导入后的原料笔记（`RAW/`）
-- AI 整理稿、阶段总结、待沉淀内容（`WORKING/`）
-- 日常输入与周整理（`00-Inbox/`、`Daily/`）
+新增和源更新自动发布，相同哈希不重写。终端已编辑或删除的笔记不会被发布器强制恢复/覆盖；遇到源更新冲突记录清单，原件继续保留。删除 Knowledge 原件也不会删除个人 Vault 中的笔记。
 
-同步方式：
+当前自动范围是 `knowledge/vault/**/*.md`。约 5.1 万篇 raw、archive、working 渠道日志、大附件、录像均留在 NAS。个人其他目录不会被这个服务器客户端落盘，也不会自动回流到 Bellkeeper 检索。
 
-- **LiveSync → CouchDB**
+## 使用方式
 
-### 2. Raw / Working 文件资产：TrueNAS `data/knowledge`
+日常只需打开现有 Obsidian，等待 LiveSync 同步，查看 `20-PKB/Bellkeeper/`。两台电脑无需重新初始化，也不需要 Win10/Win11 运行拉取脚本。新增终端使用已同步设备导出的 Setup URI 加入同一个库。
 
-这些内容更适合放到 TrueNAS：
+- [LiveSync 配置与现有库接入](setup/livesync-checklist.md)
+- [服务器发布服务运维](../../../SilkSpool/bundles/knowledge-sync/README.md)
+- [NFS 存储和录像挂载](../ops/NFS-SETUP.md)
+- [Windows 手工补导其他资产](setup/windows-knowledge-sync.md)：旧 SilkFiles 路径仅作补导，不再是整理稿的日常自动入口。
 
-- PDF、网页保存、截图、导出 Markdown、导入包
-- AI 摘要导出物、日报素材、阶段性汇总
-- 不适合直接进 Vault 的大附件与配套资料
+CouchDB 是 LiveSync 私有同步后端。官方兼容客户端可以写入，普通文件脚本不能自造 LiveSync JSON。当前没有 K07 工作流，不按旧 `_changes` 直接读 Markdown 的设想接线。
 
-推荐路径：
+## 文件与编辑边界
 
-```text
-POOL/data/knowledge/raw
-POOL/data/knowledge/working
-POOL/data/knowledge/pkb-assets
-```
+Markdown 和附件仍是可独立备份、可迁移的知识内容。个人 Vault 负责编辑和沉淀；TrueNAS `data/knowledge` 承载抓取原件、整理产出和文件资产；发布器把机器产出送进固定区域，不改变个人整理习惯。
 
-访问方式：
-
-- SMB / SFTP / Rclone / FileBrowser
-
-### 3. 最小人工流转
-
-MVP 阶段先不要依赖“外部系统直接写 CouchDB”，而是先保证这条受控路径成立：
-
-1. 原始资料进入 TrueNAS `raw`
-2. AI 输出、阶段性整理结果进入 TrueNAS `working`
-3. 在 Win11 打开 Obsidian 后，运行统一 PowerShell 脚本 / 快捷方式
-4. 脚本先把 `raw / working` 同步到本地导入缓冲区 `D:\SilkSpoolImport\raw|working`
-5. 脚本再把适合进入知识系统的内容更新到 Vault `RAW/` / `WORKING/`
-6. 用户在同一个 Vault 中继续提炼到 `KNOWLEDGE/`
-7. 大附件与导出物放回 `pkb-assets`
-
-### 4. 打开 Obsidian 后一键导入
-
-为降低 `Raw → Working → PKB` 的整理摩擦，推荐在 Windows 上增加一层本地导入缓冲区：
-
-```text
-D:\SilkSpoolImport\
-├── raw\
-└── working\
-```
-
-推荐主流程：
-
-1. 打开 Obsidian，Vault 先通过 LiveSync 完成常规笔记同步
-2. 运行一个统一 PowerShell 脚本 / 快捷方式
-3. 脚本先把 TrueNAS `POOL/data/knowledge/raw|working` 同步到 `D:\SilkSpoolImport\raw|working`
-4. 脚本再把适合进入知识系统的内容更新到 Vault `RAW/` / `WORKING/`
-5. Obsidian 通过文件监听或重扫显示新内容
-6. 用户继续在同一个 Vault 中整理、移动、改写或派生到 `KNOWLEDGE/`
-
-脚本内部职责应固定为：
-
-- **同步步骤**：TrueNAS → Windows 本地导入缓冲区
-- **导入步骤**：本地导入缓冲区 → Vault `RAW/WORKING`
-- **刷新步骤**：让 Obsidian 看见最新导入结果
-
-当前 Windows 侧统一入口已经独立迁入 `SilkFiles` 项目：
-
-- 执行入口：`SilkFiles/files.ps1`
-- 规则说明：[`setup/windows-knowledge-sync.md`](setup/windows-knowledge-sync.md)
-
-脚本默认遵循三条关键策略：
-
-- **Markdown 优先**：优先把 `.md`、`.txt`、OCR/转写后的文本导入 Vault
-- **成功即清理**：成功导入后删除 `D:\SilkSpoolImport\raw|working` 中的缓存副本
-- **外置资产生成索引页**：PDF、大附件等默认不复制进 Vault，而是在 Vault 中生成相对资产路径索引页
-
-这样做的原因是：
-
-- 用户只执行一次动作，不需要“先同步、再单独导入”
-- 不必把整个 Vault 放在 SMB / Rclone 下承担冲突
-- TrueNAS 继续负责文件资产，Vault 继续负责整理后的 Markdown 笔记
-- LiveSync 只同步 Vault，不要求外部工具直接写 CouchDB
-
-### 5. 为什么不把整个知识库都做成 NAS 文件同步
-
-因为：
-
-- PKB 笔记更适合 LiveSync 这种面向笔记的同步链路
-- 原始资料与大附件更适合 TrueNAS 文件同步
-- 导入缓冲区适合作为当前设备的受控中转层，而不是长期知识主库
-- Windows 工具与环境应继续放在 `data/sync`，不要混入 Vault
-
-所以更合理的实现是：
-
-- **PKB / 笔记**：本地 Vault + LiveSync
-- **Raw / Working / Assets**：TrueNAS `data/knowledge`
-- **Raw / Working 进入 Vault**：统一 PowerShell 脚本
-- **工具与环境**：TrueNAS `data/sync`
-
-知识附件与 raw/working 文件资产落在 TrueNAS `data/knowledge`，NFS 挂载配置见 [../ops/NFS-SETUP.md](../ops/NFS-SETUP.md)。
-
----
-
-## 当前推荐理解
-
-### 推荐主链路
-
-- **Raw / Working 文件资产**：长期放在 TrueNAS `POOL/data/knowledge/raw|working`
-- **本地导入缓冲区**：在当前设备上承接同步后的 `raw|working` 文件资产
-- **PKB / 同步笔记区**：在 Obsidian 单 Vault 中承接 `RAW/`、`WORKING/`、`KNOWLEDGE/`
-- **高价值内容**：可选再提供给检索 / 问答系统消费
-
-### 推荐默认语义
-
-- Obsidian 主要是 **同步笔记区 / PKB 前端**
-- 同一个 Vault 内同时承接 `RAW/`、`WORKING/`、`KNOWLEDGE/`
-- TrueNAS `raw/working` 是**文件资产区**，不是 Vault 目录本身
-- Windows 本地导入缓冲区是**受控导入层**，不是长期主库
-- K07 这类“笔记回流知识引擎”的流程应理解为**只读消费器**，不是反向导入入口
-- CouchDB 是 LiveSync 的私有同步后端，不是公共写入口
+`vaults/single-vault.md` 和从零 bootstrap 文档的 `D:\Notes\obsidian-note`、`RAW/WORKING/KNOWLEDGE` 为旧目录示例，不要求迁移当前 Notes 库。Windows 工具和环境仍放 `data/sync`，不要混入笔记库。
 
 ---
 
@@ -252,7 +146,7 @@ doc/knowledge-base/
 
 ## 当前原则
 
-- 只维护一个真实 Vault：`D:\Notes\obsidian-note`
+- 各终端加入同一个现有 Notes Vault；本地盘符/路径可以不同
 - Vault 首先服务于**个人整理与长期沉淀**，而不是承接所有机器采集原文
 - `00-Inbox` 可以继续作为人工写入入口，但不再把它等同于整个知识系统唯一入口
 - LiveSync 只同步这一个 Vault，对应一个 CouchDB 数据库

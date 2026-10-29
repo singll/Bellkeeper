@@ -1,5 +1,7 @@
 # 单 Vault 目录设计
 
+> 2026-10-30：本文为旧目录设计参考。生产已有 Notes 库含 `10-RAW`、`20-PKB`、`20-WORKING` 等，保留现状，不按本示例重命名。自动生成稿固定进入 `20-PKB/Bellkeeper/`，见 [接入说明](../setup/livesync-checklist.md)。
+
 > 定位：一个真实 Vault，内部用 `00-Inbox`、`RAW/`、`WORKING/`、`KNOWLEDGE/`、`Daily/` 五个顶层分区承接输入、工作层整理与最终沉淀。
 
 ---
