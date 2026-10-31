@@ -1,6 +1,6 @@
 # Bellkeeper 演进规划
 
-> 更新日期: 2026-10-29
+> 更新日期: 2026-10-31
 >
 > 反馈环：[STATUS.md](STATUS.md)（现状）→ ROADMAP（待办）→ git commit（实施）→ STATUS（回写）。
 > 历史里程碑见 [TIMELINE.md](TIMELINE.md)；已完成的一次性计划原文已删除（可查 git 历史）。
@@ -38,6 +38,7 @@
 
 ## 3. LLM Proxy（P2）
 
+- [ ] 本地小模型按场景显式启用与校验回退：Gemma 独立渠道已接入，业务场景均未启用；仅完成[需求与现状检查](LOCAL-LLM-SCENE-ROUTING.md)，后续再实施路由代码。
 - [ ] prompt cache 命中率统计/监控（当前仅提取 cache token 用于计费，未暴露命中率）
 - [x] 停 new-api 容器 → **已完成**：new-api 已退役下线（调用方 base_url 迁移随 M2 完成）
 - [x] 新增模型向导 + 渠道/模型组/定价表单联动 → **已完成**：三步向导（选择渠道→测试/发现→保存），模型下拉来自模型目录 API
